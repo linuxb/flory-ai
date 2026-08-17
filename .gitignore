@@ -1,0 +1,46 @@
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Editors and IDEs
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment and secret files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Go build and test artifacts
+bin/
+*.test
+*.out
+coverage.out
+coverage.txt
+*.coverprofile
+
+# Node.js and TypeScript dependencies, output, and caches
+node_modules/
+dist/
+build/
+lib/
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
+.turbo/
+.eslintcache
+*.tsbuildinfo
+
+# Node.js logs and runtime state
+logs/
+*.log
+*.pid
+*.pid.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

@@ -1,0 +1,132 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flory — AI Harness Orchestration Engine</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-tc-webfont@1.2.0/style.min.css">
+<style>
+  :root{
+    --font:"LXGW WenKai TC","LXGW WenKai",ui-serif,Georgia,serif;
+    --blue-fill:#A5D8FF; --blue-stroke:#1971C2;
+    --green-fill:#B2F2BB; --green-stroke:#2F9E44;
+    --violet-fill:#D0BFFF; --violet-stroke:#6741D9;
+    --orange-fill:#FFC078; --orange-stroke:#E8590C;
+    --red-fill:#FFC9C9; --red-stroke:#E03131;
+    --teal-fill:#99E9F2; --teal-stroke:#0C8599;
+    --pink-fill:#FCC2D7; --pink-stroke:#C2255C;
+    --yellow-fill:#FFEC99; --yellow-stroke:#F08C00;
+    --bg:#FFFFFF; --ink:#1E1E1E; --muted:#868E96;
+    --node-bg-alpha:1; --zone-alpha:.18; --shadow:0 2px 6px rgba(0,0,0,.08);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#16181C; --ink:#E9ECEF; --muted:#ADB5BD;
+      --node-bg-alpha:.22; --zone-alpha:.10; --shadow:0 2px 8px rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#16181C; --ink:#E9ECEF; --muted:#ADB5BD;
+    --node-bg-alpha:.22; --zone-alpha:.10; --shadow:0 2px 8px rgba(0,0,0,.5);
+  }
+  body{font-family:var(--font);background:var(--bg);color:var(--ink);margin:32px auto;max-width:1080px;padding:0 16px;}
+  .title{text-align:center;font-size:28px;font-weight:700;margin-bottom:4px;}
+  .subtitle{text-align:center;font-size:15px;color:var(--muted);margin-bottom:26px;}
+  .zone{border-radius:16px;padding:16px 18px 18px;margin:0 0 4px;border:1.5px dashed;}
+  .zone h2{font-size:15px;font-weight:700;margin:0 0 12px;letter-spacing:.4px;}
+  .zone .hint{font-weight:400;color:var(--muted);font-size:13px;}
+  .layer{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;}
+  .node{border-radius:12px;padding:10px 16px;font-size:15px;border:2px solid;
+        box-shadow:var(--shadow);min-width:130px;text-align:center;color:var(--ink);}
+  .node small{display:block;font-size:12px;color:var(--muted);margin-top:2px;}
+  .z-blue{border-color:var(--blue-stroke);background:color-mix(in srgb,var(--blue-fill) calc(var(--zone-alpha)*100%),transparent);}
+  .z-violet{border-color:var(--violet-stroke);background:color-mix(in srgb,var(--violet-fill) calc(var(--zone-alpha)*100%),transparent);}
+  .z-teal{border-color:var(--teal-stroke);background:color-mix(in srgb,var(--teal-fill) calc(var(--zone-alpha)*100%),transparent);}
+  .z-orange{border-color:var(--orange-stroke);background:color-mix(in srgb,var(--orange-fill) calc(var(--zone-alpha)*100%),transparent);}
+  .n-blue{background:color-mix(in srgb,var(--blue-fill) calc(var(--node-bg-alpha)*100%),transparent);border-color:var(--blue-stroke);}
+  .n-violet{background:color-mix(in srgb,var(--violet-fill) calc(var(--node-bg-alpha)*100%),transparent);border-color:var(--violet-stroke);}
+  .n-teal{background:color-mix(in srgb,var(--teal-fill) calc(var(--node-bg-alpha)*100%),transparent);border-color:var(--teal-stroke);}
+  .n-orange{background:color-mix(in srgb,var(--orange-fill) calc(var(--node-bg-alpha)*100%),transparent);border-color:var(--orange-stroke);}
+  .n-green{background:color-mix(in srgb,var(--green-fill) calc(var(--node-bg-alpha)*100%),transparent);border-color:var(--green-stroke);}
+  .n-red{background:color-mix(in srgb,var(--red-fill) calc(var(--node-bg-alpha)*100%),transparent);border-color:var(--red-stroke);}
+  .n-yellow{background:color-mix(in srgb,var(--yellow-fill) calc(var(--node-bg-alpha)*100%),transparent);border-color:var(--yellow-stroke);}
+  .flow{display:flex;align-items:center;justify-content:center;gap:10px;margin:6px 0;color:var(--muted);font-size:13px;}
+  .flow .a{font-size:20px;line-height:1;}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;margin-top:26px;font-size:13px;color:var(--muted);}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .dot{width:12px;height:12px;border-radius:4px;border:2px solid;display:inline-block;}
+  .theme-toggle{position:fixed;top:12px;right:12px;z-index:99;cursor:pointer;
+    border:1px solid var(--muted);background:transparent;color:var(--ink);
+    border-radius:8px;padding:6px 12px;font:inherit;}
+</style></head>
+<body>
+<button id="themeBtn" class="theme-toggle" onclick="cycleTheme()">🌗 Auto</button>
+<div class="title">Flory — AI Harness Orchestration Engine</div>
+<div class="subtitle">JIT-DAG orchestration with transactional guarantees, for end-to-end AI e-commerce (supplier &rarr; sales channels)</div>
+
+<div class="zone z-blue">
+  <h2>Entry <span class="hint">— how work and feedback arrive</span></h2>
+  <div class="layer">
+    <div class="node n-blue">Task API<small>end-to-end e-commerce tasks</small></div>
+    <div class="node n-blue">Refine API<small>human-triggered refine</small></div>
+    <div class="node n-blue">Auto triggers<small>N-turns gate · rollback events</small></div>
+  </div>
+</div>
+<div class="flow"><span class="a">&#8595;</span> tasks &amp; refine triggers</div>
+
+<div class="zone z-violet">
+  <h2>Agent loop <span class="hint">— ReAct, progressive disclosure</span></h2>
+  <div class="layer">
+    <div class="node n-violet">Planner nodes<small>JIT sub-DAG generation · replan anchor</small></div>
+    <div class="node n-violet">Tool-caller executor<small>deterministic, no model calls</small></div>
+    <div class="node n-red">Replan &amp; recovery<small>greedy backtrack · L0–L4 ladder</small></div>
+    <div class="node n-green">Refine loop<small>gate &rarr; propose &rarr; validate &rarr; evaluate</small></div>
+  </div>
+</div>
+<div class="flow"><span class="a">&#8645;</span> append events / project context &nbsp;·&nbsp; fork(boundary) + replay</div>
+
+<div class="zone z-teal">
+  <h2>Control plane <span class="hint">— engine metadata, ACID by transactional DB</span></h2>
+  <div class="layer">
+    <div class="node n-teal">Vertex log<small>append-only · global seq · single source of truth</small></div>
+    <div class="node n-teal">Surface projection<small>pure fold &rarr; current DAG</small></div>
+    <div class="node n-teal">Linearizer<small>deterministic planner context</small></div>
+    <div class="node n-yellow">Check-rules engine<small>R1–R9 · freeze or reject</small></div>
+  </div>
+  <div style="height:12px"></div>
+  <div class="layer">
+    <div class="node n-green">Harness-state<small>meta-only · versioned · mem-hints</small></div>
+    <div class="node n-green">Prompt assembly<small>pure function · A/B-able</small></div>
+    <div class="node n-teal">Budget ledger<small>token accounting per run</small></div>
+  </div>
+</div>
+<div class="flow"><span class="a">&#8595;</span> tool calls under TCC try/confirm/cancel &amp; pivot-saga</div>
+
+<div class="zone z-orange">
+  <h2>Data plane <span class="hint">— business side effects, TCC + pivot-saga</span></h2>
+  <div class="layer">
+    <div class="node n-orange">Inventory service<small>reserve = real isolation</small></div>
+    <div class="node n-orange">Logistics<small>irreversible &rarr; pivot</small></div>
+    <div class="node n-orange">Channel marketplaces<small>listing · pricing · orders</small></div>
+    <div class="node n-orange">Supplier APIs<small>sourcing · procurement</small></div>
+    <div class="node n-green">Memory store<small>queried via mem-hints, read-only recipes</small></div>
+  </div>
+</div>
+
+<div class="legend">
+  <span><i class="dot" style="border-color:var(--blue-stroke);background:var(--blue-fill)"></i>entry</span>
+  <span><i class="dot" style="border-color:var(--violet-stroke);background:var(--violet-fill)"></i>agent loop</span>
+  <span><i class="dot" style="border-color:var(--teal-stroke);background:var(--teal-fill)"></i>control plane</span>
+  <span><i class="dot" style="border-color:var(--yellow-stroke);background:var(--yellow-fill)"></i>static gate</span>
+  <span><i class="dot" style="border-color:var(--orange-stroke);background:var(--orange-fill)"></i>data plane</span>
+  <span><i class="dot" style="border-color:var(--green-stroke);background:var(--green-fill)"></i>self-optimization</span>
+  <span><i class="dot" style="border-color:var(--red-stroke);background:var(--red-fill)"></i>failure &amp; recovery</span>
+</div>
+<script>
+  const M=['auto','light','dark'], L={auto:'🌗 Auto',light:'☀️ Light',dark:'🌙 Dark'};
+  let i=0;
+  function apply(){const m=M[i];
+    if(m==='auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme',m);
+    document.getElementById('themeBtn').textContent=L[m];}
+  function cycleTheme(){i=(i+1)%M.length;apply();}
+  apply();
+</script>
+</body></html>

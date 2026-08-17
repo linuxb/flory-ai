@@ -1,0 +1,166 @@
+<mxfile host="app.diagrams.net" agent="arch-diagram" version="24.0.0">
+  <diagram id="proj-1" name="Projection and experimentation">
+    <mxGraphModel dx="1356" dy="844" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1200" background="none" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t-a" value="A. Projection pipeline — from facts to prompt (each layer pure, independently cacheable and replaceable)" style="text;html=1;align=left;verticalAlign=middle;fontColor=#6741D9;fontSize=15;fontStyle=1;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1100" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="a-log" value="vertex_log&#10;append-only facts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC078;strokeColor=#E8590C;fontColor=#E8590C;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a-surface" value="surface&#10;drop shadowed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="230" y="90" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a-slice" value="slice&#10;ancestors + digests" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="420" y="90" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a-fold" value="fold&#10;entity views" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=13;fontStyle=1;strokeWidth=3;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="610" y="90" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a-lin" value="linearize&#10;order + budget" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="800" y="90" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="a-assemble" value="assemble&#10;rules + mem-hints" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="990" y="90" width="160" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="ea1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="a-log" target="a-surface">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ea2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0C8599;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="a-surface" target="a-slice">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ea3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0C8599;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="a-slice" target="a-fold">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ea4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="a-fold" target="a-lin">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ea5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0C8599;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="a-lin" target="a-assemble">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-1" value="48 events: 12 inventory&#10;queries, 1 failure, 1 shadow" style="text;html=1;align=left;verticalAlign=top;fontColor=#E8590C;fontSize=11;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="170" width="170" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-2" value="36 active vertices;&#10;failed branch invisible" style="text;html=1;align=left;verticalAlign=top;fontColor=#0C8599;fontSize=11;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="230" y="170" width="170" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-3" value="P5 takes 8 ancestors&#10;+ 2 sibling digests" style="text;html=1;align=left;verticalAlign=top;fontColor=#0C8599;fontSize=11;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="420" y="170" width="170" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-4" value="inventory_view: avail 20&#10;price_table: 3 confirmed" style="text;html=1;align=left;verticalAlign=top;fontColor=#2F9E44;fontSize=11;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="610" y="170" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-5" value="sort by vertex_id,&#10;never by seq → 1.2k tok" style="text;html=1;align=left;verticalAlign=top;fontColor=#0C8599;fontSize=11;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="800" y="170" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-6" value="stable prefix →&#10;prompt cache hits" style="text;html=1;align=left;verticalAlign=top;fontColor=#6741D9;fontSize=11;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="990" y="170" width="170" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-key" value="Cache key = hash(log_prefix) + projector_version + harness_state_version. Every layer must be able to dump its intermediate output — a wrong prompt has to be localizable to one layer." style="text;html=1;align=left;verticalAlign=middle;fontColor=#F08C00;fontSize=12;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="245" width="1120" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-b" value="B. Fold-context walkthrough — raw tool events become one business view; shadowed events take two paths" style="text;html=1;align=left;verticalAlign=middle;fontColor=#6741D9;fontSize=15;fontStyle=1;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="320" width="1100" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-e1" value="seq 12  inventory.check SKU-123 → on_hand 100" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC078;strokeColor=#E8590C;fontColor=#E8590C;fontSize=11;strokeWidth=1;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="380" width="300" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-e2" value="seq 19  inventory.reserve 80 → hold(A)=80" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC078;strokeColor=#E8590C;fontColor=#E8590C;fontSize=11;strokeWidth=1;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="418" width="300" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-e3" value="seq 27  inventory.check SKU-123 → on_hand 100" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC078;strokeColor=#E8590C;fontColor=#E8590C;fontSize=11;strokeWidth=1;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="456" width="300" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-e4" value="seq 31  inventory.release 0 · plus 9 more events" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC078;strokeColor=#E8590C;fontColor=#E8590C;fontSize=11;strokeWidth=1;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="494" width="300" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-reducer" value="fold://inventory@v3&#10;pure reducer&#10;no I/O, no clock, unit-tested" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=12;fontStyle=1;strokeWidth=3;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="400" y="410" width="220" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-view" value="inventory_view (≈40 tokens)&#10;SKU-123: on_hand 100, holds 80, avail 20&#10;as of seq 31" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="680" y="400" width="320" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="eb1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=1.5;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="b-e1" target="b-reducer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="eb2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=1.5;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="b-e2" target="b-reducer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="eb3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=1.5;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="b-e3" target="b-reducer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="eb4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=1.5;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="b-e4" target="b-reducer">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="eb5" value="reduce" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=2;fontColor=#2F9E44;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="b-reducer" target="b-view">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-fold" value="Why not feed the raw events to the planner?&#10;1. Correctness — &quot;which of the 12 results is current&quot; is arithmetic; models get it wrong, reducers do not.&#10;2. Cost — thousands of tokens of tool output collapse into tens of tokens of state.&#10;3. Testability — a reducer is a pure function over a typed event stream, exhaustively unit-testable.&#10;Registry: a view declares source event types + a versioned reducer_ref; the ref is part of projector_version." style="text;html=1;align=left;verticalAlign=top;fontColor=#1971C2;fontSize=12;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="380" width="520" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-shadow" value="seq 34  subgraph/shadowed&#10;competitor-price API branch disproven" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC9C9;strokeColor=#E03131;fontColor=#E03131;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="580" width="300" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-surfacex" value="surface: DROPPED&#10;planner must not think it is live" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="440" y="555" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="b-evidence" value="assemble: RETAINED&#10;as structured failure evidence" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="440" y="645" width="240" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="eb6" value="visibility path" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0C8599;strokeWidth=2;fontColor=#0C8599;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="b-shadow" target="b-surfacex">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="eb7" value="evidence path" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;fontColor=#6741D9;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="b-shadow" target="b-evidence">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-shadow" value="Same events, two projection paths. Conflating them is a bug in both directions: keep them in surface and the planner believes a disproven path is still open; drop them entirely and the planner repeats the mistake it just made." style="text;html=1;align=left;verticalAlign=top;fontColor=#E03131;fontSize=12;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="720" y="580" width="500" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="t-c" value="C. Three-tier A/B on the same log — cost rises left to right, so does what it can prove" style="text;html=1;align=left;verticalAlign=middle;fontColor=#6741D9;fontSize=15;fontStyle=1;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="750" width="1100" height="30" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-z1" value="L1 Replay A/B — offline, zero cost" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=13;fontStyle=1;strokeWidth=2;dashed=1;opacity=50;verticalAlign=top;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="800" width="480" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-z2" value="L2 Counterfactual fork — one model call, no side effects" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=13;fontStyle=1;strokeWidth=2;dashed=1;opacity=50;verticalAlign=top;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="560" y="800" width="480" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-z3" value="L3 Live A/B — real traffic, real effects" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=13;fontStyle=1;strokeWidth=2;dashed=1;opacity=50;verticalAlign=top;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="800" width="480" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-l1a" value="Pin log prefix, swap assemble version only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="70" y="860" width="420" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-l1b" value="Diff the two prompts&#10;Proves: size, key facts present, rules fired&#10;Cannot prove: any model behaviour&#10;Use: CI gate on every refine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=11;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="70" y="950" width="420" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-l2a" value="fork(planner boundary) → replan with arm B, DRY-RUN (tools never execute)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="590" y="860" width="420" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-l2b" value="Compare the two plans&#10;Proves: check-rule pass rate, plan size, mis-declared pivots, judge score&#10;Unique to a log: ask &quot;what would B have planned&quot; at any past decision point&#10;Also compares recovery strategies: fork twice from one failure seq" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=11;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="590" y="950" width="420" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-l3a" value="Split by RUN (never by turn) · run/start records the attribution triple" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="860" width="420" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="c-l3b" value="Metrics folded from the log, not telemetry&#10;replan rate · tokens/task · post-pivot suspension · business success&#10;Guardrails veto: cheaper tokens + more suspensions = catastrophe&#10;Stratify by task type × SKU bucket × contains-pivot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=11;strokeWidth=2;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="950" width="420" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="ec1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="c-l1a" target="c-l1b">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ec2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1971C2;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="c-l2a" target="c-l2b">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ec3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F08C00;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" edge="1" parent="1" source="c-l3a" target="c-l3b">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="an-triple" value="Attribution triple recorded in run/start: harness_state_version + projector_version + arm_id. Omitting projector_version is the subtlest failure available: improving a fold reducer silently changes recomputed historical metrics, so last month's A/B conclusion quietly stops holding. A projector being pure does not make it stable across versions." style="text;html=1;align=left;verticalAlign=middle;fontColor=#E8590C;fontSize=12;fontFamily=LXGW WenKai TC;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1100" width="1520" height="50" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

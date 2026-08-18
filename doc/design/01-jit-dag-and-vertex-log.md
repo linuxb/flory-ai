@@ -59,8 +59,9 @@ If `shadowed_by` exists as a materialization optimization, only the projector ma
 | `vertex/started`, `vertex/succeeded`, `vertex/failed` | Execution state transitions | executor |
 | `vertex/retried` | Idempotent retry number and backoff | executor |
 | `subgraph/shadowed` | Replan shadowed a failed subtree; payload names affected seqs | engine |
-| `fork/created` | Fork point with `boundary_seq`, parent run, and seed length | engine |
-| `run/end-seed` | Marks inherited fork events, following dsh `session/end-seed` | engine |
+| `replan/boundary` | In-place replan: selected `boundary_seq`, planner vertex, reason, cancelled scopes. No new run is created (§5.1) | engine |
+| `fork/created` | **Dry-run children only** (§5.2): `boundary_seq`, parent run, seed length, `mode: "dry-run"` | engine |
+| `run/end-seed` | First own event of a dry-run child; everything before it is inherited and read-only (§5.2) | engine |
 | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | engine/executor |
 | `budget/charged` | Token and cost accounting | engine |
 
@@ -93,13 +94,30 @@ linearize(surface, planner_vertex) → [ctx_item...]
 
 The function is pure. The same log prefix and harness-state version produce the same prompt, allowing regression assertions without a model.
 
-## 5. Fork Semantics
+## 5. Replanning In Place, and Forking Only for Dry Runs
 
-`fork(run, boundary_seq) → child_run`:
+Flory deliberately **splits** what dsh unifies. dsh makes resume, fork, and replay one primitive because a session is a cheap local object whose identity carries no external meaning. A Flory run is a **business process** — one order, one replenishment — so run identity has business meaning, and the two mechanisms must be kept apart. The decision and rejected alternatives are recorded in [ADR-002](./adr/adr-002-in-place-replan-and-dry-run-forks.md).
 
-- The boundary must be a stable, succeeded planner vertex that lies outside every open transaction bracket **and at or after the most recent `txn/pivot-passed` in the run** (the backtrack floor, [03 §2.1](./03-replan-and-recovery.md)). Otherwise, reject the fork; never silently trim it. Unlike dsh's subagent exception that trims to a completed prefix, Flory has one semantics.
-- The child run deep-copies the prefix as a seed. Its first owned event is `run/end-seed`, which distinguishes inherited half-open brackets from current-run work and enables orphan `txn/try` detection in [02](./02-transaction-model.md).
-- A fork does not replay the external world. Files, inventory, and logistics bookings are not undone by it; the transaction layer handles business effects through cancel-before-fork (see [03](./03-replan-and-recovery.md)).
+### 5.1 Online replanning does not fork
+
+Replanning appends to the **same run**: `subgraph/shadowed` hides the disproven subtree from `surface`, then the chosen planner is called again and appends a fresh proposal. A `replan/boundary` event records which boundary was selected and why. No prefix is copied and no new `run_id` is created.
+
+Creating a child run online would buy nothing and cost two real things:
+
+1. **A fragmented audit trail.** "What happened to order 12345" would become a chase across a chain of run ids instead of one readable run. For a business process this is the more serious of the two.
+2. **Pure storage waste.** Deep-copying the prefix duplicates events that the shadow mechanism already handles correctly.
+
+Crash recovery is likewise **not** a fork: it is a resume, achieved by re-projecting the same log.
+
+### 5.2 Forking is for dry runs only
+
+`fork(run, boundary_seq) → dry_run_child` exists for the offline, non-executing family: L2 counterfactual A/B, replay testing, recovery-strategy comparison, and operator "what-if" previews ([05 §3](./05-context-aggregation-and-experimentation.md)).
+
+- The boundary must be a succeeded planner vertex that lies outside every open transaction bracket **and at or after the most recent `txn/pivot-passed`** (the backtrack floor, [03 §2.1](./03-replan-and-recovery.md)). Otherwise reject the fork; never silently trim it. Unlike dsh's subagent exception that trims to a completed prefix, Flory has one semantics.
+- The child deep-copies the prefix as a seed and is marked `mode: "dry-run"`. Its first owned event is `run/end-seed`.
+- **A dry-run child may never act on inherited events.** Everything before `run/end-seed` is read-only: it belongs to a live parent run. In particular the child must never cancel or confirm an inherited `txn/try` — that hold belongs to a real order still in flight. This is the actual job of the end-seed marker; orphan-try detection in a live run needs no such marker and works from timeouts and unmatched brackets ([02 §4.4](./02-transaction-model.md)).
+- **A dry-run child executes only `effect_class: none` tools.** Read-only calls are permitted because they have no side effects by definition; every `bufferable`, `reversible`, or `irreversible` node is skipped and recorded as an unverified estimate. Consequently a dry run answers "what would the plan be, and what does it really cost" but never "would the write actually succeed" ([05 §3.2](./05-context-aggregation-and-experimentation.md)).
+- Forking never replays the external world. Inventory holds and logistics bookings are untouched by it, in either direction.
 
 ## 6. Replay Testing
 

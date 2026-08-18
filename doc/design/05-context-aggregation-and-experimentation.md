@@ -79,9 +79,24 @@ This is the second, monetary reason for the rule in [01](./01-jit-dag-and-vertex
 | **L2 Counterfactual fork** | Fork at a real planner boundary, replan with arm B, **dry-run without executing tools** | One model call, still no side effects | Check-rule pass rate, plan size, mis-declared pivots, LLM-judge score | Real execution failure rates | Primary method for low-frequency task types |
 | **L3 Live A/B** | Split traffic **by run**; `run/start` records the arm | Real traffic, real side effects | Replan rate, tokens per task, post-pivot suspension rate, business success rate | — | High-frequency task types only |
 
-L2 is a capability unique to a log-structured engine: at any historical decision point one can ask "what plan would arm B have produced," with zero side effects. The same mechanism compares **recovery strategies** — fork twice from one failure `seq`, once greedy and once wider — which is an unplanned dividend of "replan is fork" from [03](./03-replan-and-recovery.md).
+L2 is a capability unique to a log-structured engine: at any historical decision point one can ask "what plan would arm B have produced," with zero side effects. The same mechanism compares **recovery strategies** — fork twice from one failure `seq`, once greedy and once wider — an unplanned dividend of boundary selection being separable from execution ([03 §2.1](./03-replan-and-recovery.md)). Note that forking is reserved for exactly this offline family; online replanning appends in place and never forks ([01 §5](./01-jit-dag-and-vertex-log.md)).
 
-### 3.1 Discipline
+### 3.1 What "dry run" means
+
+Dry run means **zero side effects**, not zero tool calls. The distinction matters, because a plan whose tool calls were all stubbed would be worthless for the question operators actually ask. The line is drawn by `effect_class` from [02 §1](./02-transaction-model.md):
+
+| `effect_class` | Dry run may execute | Carrier example |
+|---|---|---|
+| `none` (read-only) | **Yes** | Quote and transit-time queries: what would this cost, how fast |
+| `bufferable`, `reversible`, `irreversible` | **No** | Booking a shipment, reserving inventory, changing a price |
+
+A planner's output is a **structure** — a sub-DAG proposal of nodes, tools, bound parameters, and declared transaction scopes — and producing it costs one model call, not a single write. So an operator asking "what if we shipped from warehouse B instead" gets back: which carrier and warehouse, how many steps, the real quoted cost, whether check-rules pass, and where the pivot sits (that is, after which step the plan can no longer be abandoned). All of that without creating one shipment.
+
+What a dry run **cannot** tell you is whether the writes would succeed — whether the booking API rejects the address format, whether the reservation loses a concurrency race. Dry runs measure plan quality, never execution success rate, which is why the L2 row above lists real failure rates as unmeasurable.
+
+Two implementation constraints follow. A dry run needs its **own budget**, because read calls still cost money and consume rate limits; and its reads should preferentially hit a cache of the live run's recent reads. The executor enforces this through a **dry-run policy gate**: on encountering a non-`none` node it skips execution and records an unverified estimate, rather than calling the tool.
+
+### 3.2 Discipline
 
 **Split by run, never by turn.** Mixing harness-state versions inside one run lets earlier turns contaminate later ones, and attribution collapses.
 

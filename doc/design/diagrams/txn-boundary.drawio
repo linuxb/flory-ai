@@ -1,157 +1,150 @@
-<mxfile host="app.diagrams.net" agent="arch-diagram" pages="2">
-  <diagram id="txn-1" name="Boundary partitioning">
-    <mxGraphModel dx="1356" dy="844" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" background="none" math="0" shadow="0">
+<mxfile host="app.diagrams.net" agent="arch-diagram">
+  <diagram id="txn-1" name="Transaction boundaries">
+    <mxGraphModel dx="1356" dy="844" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="1700" background="none" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="planner" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=14;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Planner&lt;br&gt;declares txn scope + node attrs" vertex="1">
+        <mxCell id="planner" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=14;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Planner&lt;br&gt;declares txn scope + node attrs" vertex="1">
           <mxGeometry height="70" width="260" x="60" y="40" as="geometry" />
         </mxCell>
-        <mxCell id="rules" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=14;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Check-rules gate (R1–R9)&lt;br&gt;deterministic, pre-freeze" vertex="1">
+        <mxCell id="rules" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=14;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Check-rules gate (R1–R9)&lt;br&gt;deterministic, pre-freeze" vertex="1">
           <mxGeometry height="70" width="280" x="800" y="40" as="geometry" />
         </mxCell>
-        <mxCell id="e-prop" edge="1" parent="1" source="planner" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;fontColor=#6741D9;endArrow=block;fontFamily=LXGW WenKai TC;" target="rules" value="sub-DAG proposal">
+        <mxCell id="e-prop" edge="1" parent="1" source="planner" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="rules" value="sub-DAG proposal">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="zone" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=14;fontStyle=1;strokeWidth=2;dashed=1;opacity=60;verticalAlign=top;fontFamily=LXGW WenKai TC;" value="Txn scope T1" vertex="1">
+        <mxCell id="zone" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=14;fontStyle=1;strokeWidth=2;dashed=1;opacity=60;verticalAlign=top;fontFamily=LXGW WenKai TC;" value="A. Transaction scope T1" vertex="1">
           <mxGeometry height="420" width="740" x="180" y="200" as="geometry" />
         </mxCell>
-        <mxCell id="e-freeze" edge="1" parent="1" source="rules" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F08C00;strokeWidth=2;fontColor=#F08C00;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="zone" value="freeze / reject with violations">
+        <mxCell id="e-freeze" edge="1" parent="1" source="rules" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="zone" value="freeze / reject with violations">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="savepoint" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Savepoint&lt;br&gt;S0" vertex="1">
+        <mxCell id="savepoint" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Savepoint&lt;br&gt;S0" vertex="1">
           <mxGeometry height="70" width="100" x="40" y="370" as="geometry" />
         </mxCell>
-        <mxCell id="n1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Reserve stock&lt;br&gt;TCC try · reversible" vertex="1">
+        <mxCell id="n1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Reserve stock&lt;br&gt;TCC try · reversible" vertex="1">
           <mxGeometry height="70" width="200" x="220" y="270" as="geometry" />
         </mxCell>
-        <mxCell id="n2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Set promo price&lt;br&gt;saga · compensable" vertex="1">
+        <mxCell id="n2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Set promo price&lt;br&gt;saga · compensable" vertex="1">
           <mxGeometry height="70" width="200" x="220" y="480" as="geometry" />
         </mxCell>
-        <mxCell id="n3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC9C9;strokeColor=#E03131;fontColor=#E03131;fontSize=13;fontStyle=1;strokeWidth=3;fontFamily=LXGW WenKai TC;" value="Create shipment&lt;br&gt;PIVOT · irreversible" vertex="1">
+        <mxCell id="n3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=3;fontFamily=LXGW WenKai TC;" value="Create shipment&lt;br&gt;PIVOT · irreversible" vertex="1">
           <mxGeometry height="80" width="190" x="500" y="370" as="geometry" />
         </mxCell>
-        <mxCell id="n4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Update listing&lt;br&gt;idempotent retry" vertex="1">
+        <mxCell id="n4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Update listing&lt;br&gt;idempotent retry" vertex="1">
           <mxGeometry height="70" width="160" x="740" y="290" as="geometry" />
         </mxCell>
-        <mxCell id="n5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Notify channel&lt;br&gt;bufferable" vertex="1">
+        <mxCell id="n5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Notify channel&lt;br&gt;bufferable" vertex="1">
           <mxGeometry height="70" width="160" x="740" y="470" as="geometry" />
         </mxCell>
-        <mxCell id="e1" edge="1" parent="1" source="n1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1971C2;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="n3">
+        <mxCell id="e1" edge="1" parent="1" source="n1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="n3">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e2" edge="1" parent="1" source="n2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1971C2;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="n3">
+        <mxCell id="e2" edge="1" parent="1" source="n2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="n3">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e3" edge="1" parent="1" source="n3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=2;fontColor=#E03131;endArrow=block;fontFamily=LXGW WenKai TC;" target="n4" value="forward only">
+        <mxCell id="e3" edge="1" parent="1" source="n3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="n4" value="forward only">
           <mxGeometry relative="1" x="-0.3333" y="-10" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="e4" edge="1" parent="1" source="n3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=2;fontColor=#E03131;endArrow=block;fontFamily=LXGW WenKai TC;" target="n5" value="forward only">
+        <mxCell id="e4" edge="1" parent="1" source="n3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="n5" value="forward only">
           <mxGeometry relative="1" x="-0.3684" y="10" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="ec1" edge="1" parent="1" source="n1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=1.5;fontColor=#E03131;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="savepoint" value="cancel">
+        <mxCell id="ec1" edge="1" parent="1" source="n1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=1.5;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="savepoint" value="cancel">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ec2" edge="1" parent="1" source="n2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=1.5;fontColor=#E03131;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="savepoint" value="compensate">
+        <mxCell id="ec2" edge="1" parent="1" source="n2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=1.5;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="savepoint" value="compensate">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="t-r2" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#1971C2;fontSize=12;fontFamily=LXGW WenKai TC;" value="R2 — every pre-pivot node must be&lt;br&gt;compensable or have a TCC cancel exit" vertex="1">
+        <mxCell id="t-r2" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="R2 — every pre-pivot node must be&lt;br&gt;compensable or have a TCC cancel exit" vertex="1">
           <mxGeometry height="50" width="240" x="220" y="368" as="geometry" />
         </mxCell>
-        <mxCell id="t-r1" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#2F9E44;fontSize=12;fontFamily=LXGW WenKai TC;" value="R1 — every post-pivot node must be&lt;br&gt;idempotent-retryable (forward recovery)" vertex="1">
+        <mxCell id="t-r1" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="R1 — every post-pivot node must be&lt;br&gt;idempotent-retryable (forward recovery)" vertex="1">
           <mxGeometry height="60" width="210" x="850" y="400" as="geometry" />
         </mxCell>
-        <mxCell id="t-r3" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#E03131;fontSize=12;fontFamily=LXGW WenKai TC;" value="R3 — at most ONE pivot per scope.&lt;br&gt;txn/pivot-passed = one-way gate:&lt;br&gt;no backtrack across this point" vertex="1">
+        <mxCell id="t-r3" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="R3 — at most ONE pivot per scope.&lt;br&gt;txn/pivot-passed = one-way gate:&lt;br&gt;no backtrack across this point" vertex="1">
           <mxGeometry height="70" width="230" x="480" y="510" as="geometry" />
         </mxCell>
-        <mxCell id="t-sp" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#2F9E44;fontSize=12;fontFamily=LXGW WenKai TC;" value="rollback target of the whole scope&lt;br&gt;(only reachable BEFORE pivot)" vertex="1">
+        <mxCell id="t-sp" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="rollback target of the whole scope&lt;br&gt;(only reachable BEFORE pivot)" vertex="1">
           <mxGeometry height="50" width="220" x="20" y="450" as="geometry" />
         </mxCell>
-        <mxCell id="t-why" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#E03131;fontSize=12;fontFamily=LXGW WenKai TC;" value="Why single pivot?&amp;nbsp;&lt;div&gt;With two pivots P1, P2 in one scope, a permanent failure between them is a dead state: cannot roll back (P1 irreversible), cannot move forward (P2 permanently failing).&amp;nbsp;&lt;/div&gt;&lt;div&gt;Splitting into two scopes inserts a savepoint between them — a consistent business state where the planner regains options.&lt;/div&gt;" vertex="1">
+        <mxCell id="t-why" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="Why single pivot?&amp;nbsp;&lt;div&gt;With two pivots P1, P2 in one scope, a permanent failure between them is a dead state: cannot roll back (P1 irreversible), cannot move forward (P2 permanently failing).&amp;nbsp;&lt;/div&gt;&lt;div&gt;Splitting into two scopes inserts a savepoint between them — a consistent business state where the planner regains options.&lt;/div&gt;" vertex="1">
           <mxGeometry height="70" width="740" x="180" y="650" as="geometry" />
         </mxCell>
         <mxCell id="BMbWPWh67vq6AqHHMs52-1" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;" value=" " vertex="1">
           <mxGeometry height="80" width="60" x="1630" y="420" as="geometry" />
         </mxCell>
-      </root>
+              <mxCell id="t-setup" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=13;fontStyle=1;fontFamily=LXGW WenKai TC;" value="B. Worked example — inventory:SKU-123, on_hand = 100. Branch A (flash-sale order) needs 80 then ships (PIVOT);&amp;nbsp;&lt;div&gt;branch B (wholesale hold) needs 50. A and B share one txn scope T2 and run in parallel.&lt;/div&gt;" vertex="1">
+          <mxGeometry height="50" width="1080" x="40" y="920" as="geometry" />
+        </mxCell>
+        <mxCell id="t-d3" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="D3 — static check (R9) at freeze time: write-sets of A1 and B1 both contain inventory:SKU-123 and branch A holds a pivot, so this barrier is mandatory;&amp;nbsp;&lt;div&gt;without it the proposal is subgraph/rejected. Disjoint branches (e.g. SKU-999) skip all of this.&lt;/div&gt;" vertex="1">
+          <mxGeometry height="160" width="230" x="500" y="730" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Planner P&lt;br&gt;declares scope T2 (A ∥ B)" vertex="1">
+          <mxGeometry height="80" width="190" x="40" y="1200" as="geometry" />
+        </mxCell>
+        <mxCell id="a1w" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="A1 Reserve 80 — TCC try&lt;br&gt;D1: hold(A)=80 → avail 100−80=20" vertex="1">
+          <mxGeometry height="90" width="260" x="310" y="1010" as="geometry" />
+        </mxCell>
+        <mxCell id="invw" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Inventory SKU-123&lt;br&gt;D1 isolation: avail = on_hand − Σ holds" vertex="1">
+          <mxGeometry height="90" width="260" x="310" y="1200" as="geometry" />
+        </mxCell>
+        <mxCell id="b1w" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="B1 Reserve 50 — TCC try&lt;br&gt;D1: needs 50 &gt; avail 20 → fails PRE-pivot" vertex="1">
+          <mxGeometry height="90" width="260" x="310" y="1400" as="geometry" />
+        </mxCell>
+        <mxCell id="barrierw" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="D4 barrier&lt;br&gt;sibling tries sealed?" vertex="1">
+          <mxGeometry height="110" width="210" x="650" y="1000" as="geometry" />
+        </mxCell>
+        <mxCell id="a2w" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=3;fontFamily=LXGW WenKai TC;" value="A2 Ship 80 — PIVOT&lt;br&gt;irreversible" vertex="1">
+          <mxGeometry height="70" width="200" x="1020" y="1020" as="geometry" />
+        </mxCell>
+        <mxCell id="t-o1" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="Outcome 1 — B seals: barrier opens, A2 fires, whole scope confirms." vertex="1">
+          <mxGeometry height="70" width="200" x="930" y="1110" as="geometry" />
+        </mxCell>
+        <mxCell id="cancelw" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Outcome 2 — scope cancel:&lt;br&gt;release hold(A)=80, back to savepoint S1; A2 never fired" vertex="1">
+          <mxGeometry height="90" width="260" x="650" y="1400" as="geometry" />
+        </mxCell>
+        <mxCell id="spw" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Savepoint&lt;br&gt;S1" vertex="1">
+          <mxGeometry height="70" width="110" x="40" y="1410" as="geometry" />
+        </mxCell>
+        <mxCell id="t-d2" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="D2 — delta compensation: cancel releases only its own increment. Trivial for hold-type resources (a release cannot touch A&#39;s units).&amp;nbsp;&lt;div&gt;The real contract is for VALUE-type resources: if B&#39;s price compensation is &#39;restore the 19.9 I saw&#39;, it tramples A&#39;s committed 24.9.&amp;nbsp;&lt;/div&gt;&lt;div&gt;Registration validates compensation tools are delta-based, never state-restoring. (D2&#39;s own scenario assumes A and B in independent scopes.)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="90" width="820" x="310" y="1530" as="geometry" />
+        </mxCell>
+        <mxCell id="ew1" edge="1" parent="1" source="p3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="a1w">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ew2" edge="1" parent="1" source="p3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="b1w">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ew3" edge="1" parent="1" source="a1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="barrierw" value="sealed">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ew4" edge="1" parent="1" source="b1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;dashed=1;exitX=1;exitY=0.25;fontFamily=LXGW WenKai TC;" target="barrierw" value="sealed signal (outcome 1)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ew5" edge="1" parent="1" source="barrierw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="a2w" value="pass — all sealed">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ew6" edge="1" parent="1" source="b1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;dashed=1;exitX=1;exitY=0.75;fontFamily=LXGW WenKai TC;" target="cancelw" value="retries exhausted (outcome 2)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ew7" edge="1" parent="1" source="cancelw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=1.5;endArrow=block;dashed=1;exitX=0.5;exitY=1;entryX=0.5;entryY=1;fontFamily=LXGW WenKai TC;" target="spw">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ew8" edge="1" parent="1" source="a1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=1.5;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="invw" value="hold 80">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ew9" edge="1" parent="1" source="b1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=1.5;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="invw" value="hold 50?">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="8RYRfTPlIJWVcXxUmlNr-1" parent="1" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;fillColor=none;shadow=0;" value="" vertex="1">
+          <mxGeometry height="40" width="120" x="310" y="700" as="geometry" />
+        </mxCell>
+            </root>
     </mxGraphModel>
   </diagram>
-  <diagram id="txn-3" name="Parallel pivot walkthrough">
-    <mxGraphModel dx="1591" dy="1819" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="826" background="none" math="0" shadow="0">
-      <root>
-        <mxCell id="0" />
-        <mxCell id="1" parent="0" />
-        <mxCell id="t-setup" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#6741D9;fontSize=13;fontStyle=1;fontFamily=LXGW WenKai TC;" value="Worked example — inventory:SKU-123, on_hand = 100. Branch A (flash-sale order) needs 80 then ships (PIVOT);&amp;nbsp;&lt;div&gt;branch B (wholesale hold) needs 50. A and B share one txn scope T2 and run in parallel.&lt;/div&gt;" vertex="1">
-          <mxGeometry height="50" width="1080" x="40" y="20" as="geometry" />
-        </mxCell>
-        <mxCell id="t-d3" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#E8590C;fontSize=12;fontFamily=LXGW WenKai TC;" value="D3 — static check (R9) at freeze time: write-sets of A1 and B1 both contain inventory:SKU-123 and branch A holds a pivot, so this barrier is mandatory;&amp;nbsp;&lt;div&gt;without it the proposal is subgraph/rejected. Disjoint branches (e.g. SKU-999) skip all of this.&lt;/div&gt;" vertex="1">
-          <mxGeometry height="160" width="230" x="500" y="-170" as="geometry" />
-        </mxCell>
-        <mxCell id="p3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Planner P&lt;br&gt;declares scope T2 (A ∥ B)" vertex="1">
-          <mxGeometry height="80" width="190" x="40" y="300" as="geometry" />
-        </mxCell>
-        <mxCell id="a1w" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="A1 Reserve 80 — TCC try&lt;br&gt;D1: hold(A)=80 → avail 100−80=20" vertex="1">
-          <mxGeometry height="90" width="260" x="310" y="110" as="geometry" />
-        </mxCell>
-        <mxCell id="invw" parent="1" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#FFC078;strokeColor=#E8590C;fontColor=#E8590C;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Inventory SKU-123&lt;br&gt;D1 isolation: avail = on_hand − Σ holds" vertex="1">
-          <mxGeometry height="90" width="260" x="310" y="300" as="geometry" />
-        </mxCell>
-        <mxCell id="b1w" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="B1 Reserve 50 — TCC try&lt;br&gt;D1: needs 50 &gt; avail 20 → fails PRE-pivot" vertex="1">
-          <mxGeometry height="90" width="260" x="310" y="500" as="geometry" />
-        </mxCell>
-        <mxCell id="barrierw" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="D4 barrier&lt;br&gt;sibling tries sealed?" vertex="1">
-          <mxGeometry height="110" width="210" x="650" y="100" as="geometry" />
-        </mxCell>
-        <mxCell id="a2w" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC9C9;strokeColor=#E03131;fontColor=#E03131;fontSize=13;fontStyle=1;strokeWidth=3;fontFamily=LXGW WenKai TC;" value="A2 Ship 80 — PIVOT&lt;br&gt;irreversible" vertex="1">
-          <mxGeometry height="70" width="200" x="1020" y="120" as="geometry" />
-        </mxCell>
-        <mxCell id="t-o1" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#2F9E44;fontSize=12;fontFamily=LXGW WenKai TC;" value="Outcome 1 — B seals: barrier opens, A2 fires, whole scope confirms." vertex="1">
-          <mxGeometry height="70" width="200" x="930" y="210" as="geometry" />
-        </mxCell>
-        <mxCell id="cancelw" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Outcome 2 — scope cancel:&lt;br&gt;release hold(A)=80, back to savepoint S1; A2 never fired" vertex="1">
-          <mxGeometry height="90" width="260" x="650" y="500" as="geometry" />
-        </mxCell>
-        <mxCell id="spw" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Savepoint&lt;br&gt;S1" vertex="1">
-          <mxGeometry height="70" width="110" x="40" y="510" as="geometry" />
-        </mxCell>
-        <mxCell id="t-d2" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#1971C2;fontSize=12;fontFamily=LXGW WenKai TC;" value="D2 — delta compensation: cancel releases only its own increment. Trivial for hold-type resources (a release cannot touch A&#39;s units).&amp;nbsp;&lt;div&gt;The real contract is for VALUE-type resources: if B&#39;s price compensation is &#39;restore the 19.9 I saw&#39;, it tramples A&#39;s committed 24.9.&amp;nbsp;&lt;/div&gt;&lt;div&gt;Registration validates compensation tools are delta-based, never state-restoring. (D2&#39;s own scenario assumes A and B in independent scopes.)&lt;/div&gt;" vertex="1">
-          <mxGeometry height="90" width="820" x="310" y="630" as="geometry" />
-        </mxCell>
-        <mxCell id="ew1" edge="1" parent="1" source="p3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="a1w">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ew2" edge="1" parent="1" source="p3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="b1w">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ew3" edge="1" parent="1" source="a1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1971C2;strokeWidth=2;fontColor=#1971C2;endArrow=block;fontFamily=LXGW WenKai TC;" target="barrierw" value="sealed">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ew4" edge="1" parent="1" source="b1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1971C2;strokeWidth=2;fontColor=#1971C2;endArrow=block;dashed=1;exitX=1;exitY=0.25;fontFamily=LXGW WenKai TC;" target="barrierw" value="sealed signal (outcome 1)">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ew5" edge="1" parent="1" source="barrierw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F08C00;strokeWidth=2;fontColor=#F08C00;endArrow=block;fontFamily=LXGW WenKai TC;" target="a2w" value="pass — all sealed">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ew6" edge="1" parent="1" source="b1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=2;fontColor=#E03131;endArrow=block;dashed=1;exitX=1;exitY=0.75;fontFamily=LXGW WenKai TC;" target="cancelw" value="retries exhausted (outcome 2)">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ew7" edge="1" parent="1" source="cancelw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=1.5;fontColor=#2F9E44;endArrow=block;dashed=1;exitX=0.5;exitY=1;entryX=0.5;entryY=1;fontFamily=LXGW WenKai TC;" target="spw">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ew8" edge="1" parent="1" source="a1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=1.5;fontColor=#E8590C;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="invw" value="hold 80">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ew9" edge="1" parent="1" source="b1w" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=1.5;fontColor=#E8590C;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="invw" value="hold 50?">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="8RYRfTPlIJWVcXxUmlNr-1" parent="1" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;fillColor=#ffff88;strokeColor=#36393d;shadow=0;" value="" vertex="1">
-          <mxGeometry height="40" width="120" x="310" y="-200" as="geometry" />
-        </mxCell>
-      </root>
-    </mxGraphModel>
-  </diagram>
+
 </mxfile>

@@ -13,7 +13,7 @@ The hard problem is not running the engine. It is defining "correct". A run that
 Four questions must be answerable by the end of Phase 1 (§9):
 
 1. Are distributed-transaction properties preserved under agent orchestration?
-2. Does replanning select the correct backtrack point and cancel before forking?
+2. Does replanning select the correct backtrack point and cancel before replanning?
 3. Is the recovery escalation ladder climbed correctly and monotonically?
 4. Is planning genuinely just-in-time rather than a single up-front graph?
 
@@ -24,7 +24,7 @@ Model calls are non-deterministic, so any assertion that depends on a live model
 | Tier | Planner | Assertion strength | Covers | Needs API key |
 |---|---|---|---|---|
 | **T-A pure function** | none | exact equality | check-rules R1–R9, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff (discipline 28) | no |
-| **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, fork semantics, orphan-try sweep, crash recovery | no |
+| **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, in-place replan and dry-run fork semantics, orphan-try sweep, crash recovery | no |
 | **T-C live planner** | real model | statistical thresholds + guardrails | JIT planning quality, plan admissibility rate, token economics | yes |
 
 ### 2.1 T-B is the primary tier
@@ -150,9 +150,10 @@ Each row exists to kill one specific accident. A scenario that cannot fail if a 
 
 | ID | Setup and injection | Expected behaviour | Primary oracle | Tier |
 |---|---|---|---|---|
-| S1 | carrier returns 429 twice, then succeeds | L0 idempotent retry; **no** `fork/created`, **no** `subgraph/shadowed` | O3 | T-B |
-| S2 | carrier permanently refuses, pre-pivot | L1 replan at nearest planner; every open `txn/try` cancelled **before** `fork/created` | O2, O3 | T-B |
-| S2b | replan is triggered while a `txn/try` is still open; the engine is offered a fork at a planner inside the bracket | **negative test**: `fork/created` must not be appended with a `boundary_seq` inside an open bracket. Cancel precedes fork (03 §2.4 rule 1); peak holds never exceed demand | O1.no_amplification, O2.fork_boundary | T-B |
+| S1 | carrier returns 429 twice, then succeeds | L0 idempotent retry; **no** `replan/boundary`, **no** `subgraph/shadowed` | O3 | T-B |
+| S2 | carrier permanently refuses, pre-pivot | L1 replan at nearest planner; every open `txn/try` cancelled **before** `replan/boundary` | O2, O3 | T-B |
+| S2b | replan is triggered while a `txn/try` is still open; the engine is offered a boundary at a planner inside the bracket | **negative test**: `replan/boundary` must not be appended with a `boundary_seq` inside an open bracket. Cancel precedes replan (03 §2.4 rule 1); peak holds never exceed demand | O1.no_amplification, O2.boundary | T-B |
+| S2c | any replan scenario above | **negative test**: no `fork/created` and no new `run_id` appears anywhere in an online replan; the business task keeps one run for its whole life (01 §5.1) | O2.no_online_fork | T-B |
 | S3 | carrier A refuses; the L1 replan picks carrier B, which also refuses. Backtracking targets the same planner P1 both times | P1 has now failed `N = 2` consecutive replans, so escalate **directly to L3** rollback (03 §3). L2 must **not** be entered: the boundary was legal throughout, and counting does not make it illegal | O3 | T-B |
 | S3b | no pivot has passed in the run, so the backtrack floor is the run start. The failure's nearest ancestor planner P2 sits **inside** an open `txn/scope` bracket whose savepoint precedes P2 | P2 fails the bracket condition (03 §2.1 (i)). Cancelling returns the world to a savepoint before P2, so P2's premises are undone: escalate to **L2** and select the **nearest** legal boundary at or after both the floor and the cancelled scope's savepoint, here P1 (03 §2.2 step 1) | O2, O3 | T-B |
 | S4 | budget preflight fails for the target planner | go straight to L3 rollback to savepoint; no unaffordable replan is attempted | O3 | T-B |
@@ -164,7 +165,8 @@ Each row exists to kill one specific accident. A scenario that cannot fail if a 
 | S9 | compensation registered as snapshot restore | rejected at tool registration, before any run starts | O1 | T-A |
 | S10 | `inventory.commit` returns `unknown_outcome`, no status query exists | L4 suspension plus a reconciliation task; no guess, no automatic compensation | O2, O3 | T-B |
 | S11 | crash between `vertex/created` and effect, then restart | orphan `txn/try` detected by the unmatched-try sweep after `try_timeout_s` (02 §4.4) and idempotently cancelled | O1, O2 | T-B (partial in Phase 1, full in Phase 2) |
-| S11b | fork at a boundary that inherits a half-open `txn/try` | the inherited try is identified relative to `run/end-seed` and cancelled before the child run proceeds | O2 | T-B |
+| S11b | **dry-run fork** at a boundary that inherits a half-open `txn/try` from a live parent | **negative test**: the child identifies the inherited try relative to `run/end-seed` and **must not** cancel or confirm it — that hold belongs to a real in-flight order. The child refuses the boundary instead. A cancel here is a data-plane incident, not a test failure only (01 §5.2, 02 §4.4) | O1, O2.no_inherited_mutation | T-B |
+| S11c | dry-run child whose plan contains `logistics.book` (`irreversible`) and `logistics.quote` (`none`) | the quote **is** executed and priced into the returned plan; the booking is skipped and recorded as an unverified estimate. Ledger unchanged; dry-run budget charged for the quote only (05 §3.1) | O1, O2 | T-B |
 | S12 | `duplicate_delivery` on `payment.charge` | exactly one charge in the ledger | O1 | T-B (Phase 2) |
 
 ## 7. Oracles
@@ -177,7 +179,7 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 |---|---|
 | `on_hand + Σ open_holds + Σ shipped == initial_total` for every SKU, at every quiescent point | oversell, phantom units |
 | `Σ open_holds == 0` at `run/end` | frozen resources, missing cancel |
-| **no hold amplification**: at every quiescent point, `Σ open_holds(sku) ≤ Σ demanded(sku)` over non-cancelled scopes | a fork taken across an open `txn/try`, which duplicates a hold. The end-of-run assertion above cannot catch this: the orphan sweep eventually cancels the inherited try, so the run ends clean while a parallel order was starved for `try_timeout_s` |
+| **no hold amplification**: at every quiescent point, `Σ open_holds(sku) ≤ Σ demanded(sku)` over non-cancelled scopes | a replan boundary taken across an open `txn/try`, which duplicates a hold. The end-of-run assertion above cannot catch this: the orphan sweep eventually cancels the inherited try, so the run ends clean while a parallel order was starved for `try_timeout_s` |
 | `count(charges by order_id) == 1` | double charging from retry or unknown outcome |
 | `count(bookings by order_id) <= 1` | duplicate shipment |
 | every ledger delta is attributable to exactly one `scope_id` | compensation that touched another scope's footprint |
@@ -188,8 +190,11 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 |---|---|
 | every `txn/try` has exactly one matching `txn/confirm` or `txn/cancel` | 02 §4.1 |
 | no `txn/cancel` appears after `txn/pivot-passed` in the same scope | 15 |
-| every `fork/created` boundary sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)) | 16 |
-| no `fork/created` boundary precedes the most recent `txn/pivot-passed` (**floor condition**, 03 §2.1 (ii)) | 15 |
+| every `replan/boundary` and every dry-run `fork/created` boundary sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)) | 16 |
+| no such boundary precedes the most recent `txn/pivot-passed` (**floor condition**, 03 §2.1 (ii)) | 15 |
+| **no online fork**: an online replan appends `replan/boundary` in the same run; `fork/created` appears only with `mode: "dry-run"` (01 §5) | 1, 2 |
+| **no inherited mutation**: a dry-run child appends no `txn/*` event referencing a scope opened before its `run/end-seed` | 02 §4.4 |
+| a dry-run child invokes only `effect_class: none` tools | 05 §3.1 |
 | no row is ever updated or deleted; shadowing is an event | 1, 2 |
 | an unknown `event_type` without `ignorable` makes the reader reject the whole log | 5 |
 | each event type was appended only by its owning service | 29 |
@@ -208,10 +213,10 @@ Project the recovery actions **of each episode separately** into a sequence over
 | Skip | Basis | Why no intermediate rung exists |
 |---|---|---|
 | any level → L4 | 03 §2.4 rule 2 | `txn/pivot-passed` has been appended for the failing scope and forward closure (L0) cannot succeed. Compensation cannot cross the committed pivot, so L3 is unavailable; the scope's bracket can therefore never close, so no boundary satisfies the bracket condition and L1 and L2 have no legal target. |
-| L1 → L3 | 03 §3 | The same planner has failed `N` consecutive replans (default 2). L2 is reached by structural infeasibility of the fork boundary, and a failure count does not make a legal boundary illegal, so L2 is not on this path. |
+| L1 → L3 | 03 §3 | The same planner has failed `N` consecutive replans (default 2). L2 is reached by structural infeasibility of the replan boundary, and a failure count does not make a legal boundary illegal, so L2 is not on this path. |
 | L1 or L2 → L3 / L4 | 03 §4 | Budget preflight estimates the replan above the remaining balance. Attempting a predictably unaffordable replan only burns budget and leaves less for rollback. |
 
-- every escalation and every skip is preceded by **evidence in the log** that the intermediate levels were infeasible — retries exhausted, no legal fork boundary, consecutive-failure counter at `N`, `txn/pivot-passed`, or a failed budget preflight. This bullet is the load-bearing one: it forbids the engine from skipping levels for reasons the harness has to infer.
+- every escalation and every skip is preceded by **evidence in the log** that the intermediate levels were infeasible — retries exhausted, no legal replan boundary, consecutive-failure counter at `N`, `txn/pivot-passed`, or a failed budget preflight. This bullet is the load-bearing one: it forbids the engine from skipping levels for reasons the harness has to infer.
 
 ### O4 — JIT and purity properties
 
@@ -274,8 +279,8 @@ Phases 0 and 1 require no API key and no model access, which is the point: regre
 ## 11. Open Questions
 
 - **Forward-closure bound (resolved contradiction, new question).** [03 §2.2](./03-replan-and-recovery.md) step 2 now requires driving a post-pivot scope forward to closure rather than searching upward past the floor. Unresolved: how long forward closure may be attempted before the run is declared L4. Too short and a recoverable run is suspended for a human; too long and an unrecoverable run holds resources indefinitely. The harness currently asserts only that L4 is eventually reached, not when, so S10 cannot yet distinguish a correct bound from an arbitrary one.
-- **L2 reachability.** As specified, L2 is reachable only through structural infeasibility of the fork boundary; consecutive replan failures route L1 directly to L3 (03 §3). Whether an intermediate count-based L1 → L2 step was intended is unresolved. The harness asserts the literal specification, so if the intent was different, S3 will fail and expose it — the desired outcome, but it should be a deliberate decision rather than a surprise.
-- **Ladder ground truth.** O3 asserts that escalation was justified, but "L1 was infeasible" is currently inferred from logged evidence. A stronger form would have the harness independently compute the set of legal fork boundaries and compare it against the engine's choice — this requires a second implementation of boundary selection, which risks the two-implementations-disagree failure mode that discipline 30 exists to prevent.
+- **L2 reachability.** As specified, L2 is reachable only through structural infeasibility of the replan boundary; consecutive replan failures route L1 directly to L3 (03 §3). Whether an intermediate count-based L1 → L2 step was intended is unresolved. The harness asserts the literal specification, so if the intent was different, S3 will fail and expose it — the desired outcome, but it should be a deliberate decision rather than a surprise.
+- **Ladder ground truth.** O3 asserts that escalation was justified, but "L1 was infeasible" is currently inferred from logged evidence. A stronger form would have the harness independently compute the set of legal replan boundaries and compare it against the engine's choice — this requires a second implementation of boundary selection, which risks the two-implementations-disagree failure mode that discipline 30 exists to prevent.
 - **Scenario coverage measurement.** Rule and discipline coverage is currently tracked by hand in §6. A generated coverage report — which disciplines have no killing scenario — would be more honest.
 - **Property-based scenario generation.** S1–S12 are hand-written. Randomly generated DAG shapes with generated fault schedules, checked against O1 and O2 only, would likely find the multi-replan shadowing boundary cases flagged as an open question in [01 §7](./01-jit-dag-and-vertex-log.md).
 - **Sandbox fidelity ceiling.** A fake carrier that always answers `status` correctly is more cooperative than any real one. Deciding how much real-API pathology to simulate, and where simulating it stops teaching anything, is unresolved.

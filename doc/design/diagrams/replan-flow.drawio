@@ -4,108 +4,108 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="fail" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC9C9;strokeColor=#E03131;fontColor=#E03131;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Tool-caller failed&lt;br&gt;(retries exhausted)" vertex="1">
+        <mxCell id="fail" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Tool-caller failed&lt;br&gt;(retries exhausted)" vertex="1">
           <mxGeometry height="70" width="190" x="40" y="60" as="geometry" />
         </mxCell>
-        <mxCell id="budget" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Budget precheck:&lt;br&gt;replan affordable?" vertex="1">
+        <mxCell id="budget" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Budget precheck:&lt;br&gt;replan affordable?" vertex="1">
           <mxGeometry height="100" width="180" x="290" y="45" as="geometry" />
         </mxCell>
-        <mxCell id="boundary" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Nearest ancestor planner&lt;br&gt;a legal fork boundary?&lt;br&gt;(i) no open txn bracket&lt;br&gt;(ii) at/after last txn/pivot-passed" vertex="1">
+        <mxCell id="boundary" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Nearest ancestor planner&lt;br&gt;a legal replan boundary?&lt;br&gt;(i) no open txn bracket&lt;br&gt;(ii) at/after last txn/pivot-passed" vertex="1">
           <mxGeometry height="120" width="240" x="540" y="35" as="geometry" />
         </mxCell>
-        <mxCell id="cancel" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC9C9;strokeColor=#E03131;fontColor=#E03131;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Cancel open tries&lt;br&gt;(cancel-before-fork)" vertex="1">
+        <mxCell id="cancel" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Cancel open tries&lt;br&gt;(cancel-before-replan)" vertex="1">
           <mxGeometry height="70" width="190" x="565" y="220" as="geometry" />
         </mxCell>
-        <mxCell id="fork" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="fork(boundary_seq)&lt;br&gt;child run + run/end-seed" vertex="1">
+        <mxCell id="fork" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="replan/boundary {boundary_seq}&lt;br&gt;same run · no child run" vertex="1">
           <mxGeometry height="70" width="210" x="880" y="60" as="geometry" />
         </mxCell>
-        <mxCell id="shadow" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Shadow failed subtree&lt;br&gt;(subgraph/shadowed — kept in log)" vertex="1">
+        <mxCell id="shadow" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Shadow failed subtree&lt;br&gt;(subgraph/shadowed — kept in log)" vertex="1">
           <mxGeometry height="70" width="210" x="880" y="190" as="geometry" />
         </mxCell>
-        <mxCell id="evidence" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Inject structured failure evidence&lt;br&gt;into linearize()" vertex="1">
+        <mxCell id="evidence" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Inject structured failure evidence&lt;br&gt;into linearize()" vertex="1">
           <mxGeometry height="70" width="210" x="880" y="320" as="geometry" />
         </mxCell>
-        <mxCell id="regen" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Planner regenerates&lt;br&gt;sub-DAG" vertex="1">
+        <mxCell id="regen" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Planner regenerates&lt;br&gt;sub-DAG" vertex="1">
           <mxGeometry height="70" width="210" x="880" y="450" as="geometry" />
         </mxCell>
-        <mxCell id="gate" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Check-rules gate" vertex="1">
+        <mxCell id="gate" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Check-rules gate" vertex="1">
           <mxGeometry height="70" width="180" x="560" y="450" as="geometry" />
         </mxCell>
-        <mxCell id="exec" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Frozen — execute" vertex="1">
+        <mxCell id="exec" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="Frozen — execute" vertex="1">
           <mxGeometry height="70" width="180" x="290" y="450" as="geometry" />
         </mxCell>
-        <mxCell id="rollback" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC078;strokeColor=#E8590C;fontColor=#E8590C;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L3 rollback&lt;br&gt;compensate to savepoint" vertex="1">
+        <mxCell id="rollback" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=13;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L3 rollback&lt;br&gt;compensate to savepoint" vertex="1">
           <mxGeometry height="70" width="190" x="285" y="220" as="geometry" />
         </mxCell>
-        <mxCell id="ef1" edge="1" parent="1" source="fail" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="budget">
+        <mxCell id="ef1" edge="1" parent="1" source="fail" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="budget">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef2" edge="1" parent="1" source="budget" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F08C00;strokeWidth=2;fontColor=#F08C00;endArrow=block;fontFamily=LXGW WenKai TC;" target="boundary" value="yes">
+        <mxCell id="ef2" edge="1" parent="1" source="budget" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="boundary" value="yes">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef3" edge="1" parent="1" source="budget" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=2;fontColor=#E8590C;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="rollback" value="no — skip doomed attempts">
+        <mxCell id="ef3" edge="1" parent="1" source="budget" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="rollback" value="no — skip doomed attempts">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef4" edge="1" parent="1" source="boundary" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F08C00;strokeWidth=2;fontColor=#F08C00;endArrow=block;fontFamily=LXGW WenKai TC;" target="fork" value="yes">
+        <mxCell id="ef4" edge="1" parent="1" source="boundary" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="fork" value="yes">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef5" edge="1" parent="1" source="boundary" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=2;fontColor=#E03131;endArrow=block;fontFamily=LXGW WenKai TC;" target="cancel" value="no — open tries / below floor">
+        <mxCell id="ef5" edge="1" parent="1" source="boundary" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="cancel" value="no — open tries / below floor">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef6" edge="1" parent="1" source="cancel" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=2;fontColor=#E03131;endArrow=block;fontFamily=LXGW WenKai TC;" target="fork" value="boundary now legal">
+        <mxCell id="ef6" edge="1" parent="1" source="cancel" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="fork" value="boundary now legal">
           <mxGeometry relative="1" x="-0.0141" y="-15" as="geometry">
             <mxPoint as="offset" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="ef7" edge="1" parent="1" source="fork" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="shadow">
+        <mxCell id="ef7" edge="1" parent="1" source="fork" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="shadow">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef8" edge="1" parent="1" source="shadow" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0C8599;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="evidence">
+        <mxCell id="ef8" edge="1" parent="1" source="shadow" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="evidence">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef9" edge="1" parent="1" source="evidence" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0C8599;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="regen">
+        <mxCell id="ef9" edge="1" parent="1" source="evidence" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="regen">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef10" edge="1" parent="1" source="regen" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="gate">
+        <mxCell id="ef10" edge="1" parent="1" source="regen" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="gate">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef11" edge="1" parent="1" source="gate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=2;fontColor=#2F9E44;endArrow=block;fontFamily=LXGW WenKai TC;" target="exec" value="pass">
+        <mxCell id="ef11" edge="1" parent="1" source="gate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="exec" value="pass">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ef12" edge="1" parent="1" source="gate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#F08C00;strokeWidth=2;fontColor=#F08C00;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="regen" value="reject + violations">
+        <mxCell id="ef12" edge="1" parent="1" source="gate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;dashed=1;fontFamily=LXGW WenKai TC;" target="regen" value="reject + violations">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="t-pivot" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#E03131;fontSize=12;fontFamily=LXGW WenKai TC;" value="Past a pivot? Backtracking is forbidden — forward recovery only (retry idempotent successors). If forward recovery permanently fails: L4 suspend + human intervention. Never auto-compensate across txn/pivot-passed." vertex="1">
+        <mxCell id="t-pivot" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="Past a pivot? Backtracking is forbidden — forward recovery only (retry idempotent successors). If forward recovery permanently fails: L4 suspend + human intervention. Never auto-compensate across txn/pivot-passed." vertex="1">
           <mxGeometry height="80" width="480" x="20" y="340" as="geometry" />
         </mxCell>
-        <mxCell id="l0" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L0 idempotent retry" vertex="1">
+        <mxCell id="l0" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L0 idempotent retry" vertex="1">
           <mxGeometry height="50" width="180" x="40" y="620" as="geometry" />
         </mxCell>
-        <mxCell id="l1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L1 greedy replan&lt;br&gt;(nearest planner)" vertex="1">
+        <mxCell id="l1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L1 greedy replan&lt;br&gt;(nearest planner)" vertex="1">
           <mxGeometry height="50" width="180" x="260" y="620" as="geometry" />
         </mxCell>
-        <mxCell id="l2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;strokeColor=#1971C2;fontColor=#1971C2;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L2 wider replan&lt;br&gt;(earlier planner)" vertex="1">
+        <mxCell id="l2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L2 wider replan&lt;br&gt;(earlier planner)" vertex="1">
           <mxGeometry height="50" width="180" x="480" y="620" as="geometry" />
         </mxCell>
-        <mxCell id="l3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC078;strokeColor=#E8590C;fontColor=#E8590C;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L3 rollback&lt;br&gt;to savepoint" vertex="1">
+        <mxCell id="l3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L3 rollback&lt;br&gt;to savepoint" vertex="1">
           <mxGeometry height="50" width="180" x="700" y="620" as="geometry" />
         </mxCell>
-        <mxCell id="l4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFC9C9;strokeColor=#E03131;fontColor=#E03131;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L4 suspend&lt;br&gt;+ human" vertex="1">
+        <mxCell id="l4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=none;fontSize=12;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;" value="L4 suspend&lt;br&gt;+ human" vertex="1">
           <mxGeometry height="50" width="170" x="920" y="620" as="geometry" />
         </mxCell>
-        <mxCell id="el0" edge="1" parent="1" source="l0" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=2;fontColor=#2F9E44;endArrow=block;fontFamily=LXGW WenKai TC;" target="l1" value="exhausted">
+        <mxCell id="el0" edge="1" parent="1" source="l0" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="l1" value="exhausted">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="el1" edge="1" parent="1" source="l1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1971C2;strokeWidth=2;fontColor=#1971C2;endArrow=block;fontFamily=LXGW WenKai TC;" target="l2" value="still failing">
+        <mxCell id="el1" edge="1" parent="1" source="l1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="l2" value="still failing">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="el2" edge="1" parent="1" source="l2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1971C2;strokeWidth=2;fontColor=#1971C2;endArrow=block;fontFamily=LXGW WenKai TC;" target="l3" value="budget out / oscillation">
+        <mxCell id="el2" edge="1" parent="1" source="l2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="l3" value="budget out / oscillation">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="el3" edge="1" parent="1" source="l3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8590C;strokeWidth=2;fontColor=#E8590C;endArrow=block;fontFamily=LXGW WenKai TC;" target="l4" value="compensation impossible">
+        <mxCell id="el3" edge="1" parent="1" source="l3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;" target="l4" value="compensation impossible">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="t-ladder" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontColor=#1971C2;fontSize=12;fontFamily=LXGW WenKai TC;" value="Escalation ladder — each level strictly costlier; escalate only when the current level is infeasible" vertex="1">
+        <mxCell id="t-ladder" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;" value="Escalation ladder — each level strictly costlier; escalate only when the current level is infeasible" vertex="1">
           <mxGeometry height="40" width="620" x="40" y="570" as="geometry" />
         </mxCell>
       </root>

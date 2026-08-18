@@ -21,8 +21,9 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 | pivot-saga + TCC | The distributed-transaction model for business side effects: compensable before the pivot (Saga/TCC try), forward recovery only after it. | [02](./02-transaction-model.md) |
 | check-rules | Deterministic static validation of transaction properties before a DAG is frozen, such as requiring idempotent retry after a pivot. | [02](./02-transaction-model.md) |
 | savepoint | The committed world state at scope entry; by construction it lies after every preceding pivot, so returning to it never crosses one. | [02](./02-transaction-model.md) |
-| replan | After a tool-call failure, greedily backtrack to the nearest **legal fork boundary**, fork, and regenerate the subgraph. | [03](./03-replan-and-recovery.md) |
-| legal fork boundary | A succeeded planner outside every open transaction bracket and at or after the most recent `txn/pivot-passed`. | [03](./03-replan-and-recovery.md) |
+| replan | After a tool-call failure, greedily backtrack to the nearest **legal replan boundary** and regenerate the subgraph **in place**, in the same run. No fork. | [03](./03-replan-and-recovery.md) |
+| legal replan boundary | A succeeded planner outside every open transaction bracket and at or after the most recent `txn/pivot-passed`. | [03](./03-replan-and-recovery.md) |
+| dry-run fork | A non-executing child run seeded from a prefix, used only offline: counterfactual A/B, replay tests, operator what-ifs. Executes `effect_class: none` tools only. | [01 §5.2](./01-jit-dag-and-vertex-log.md), [05 §3.1](./05-context-aggregation-and-experimentation.md) |
 | backtrack floor | The planning-authority floor set by the most recent passed pivot; rollback lowers world state but never the floor. | [03](./03-replan-and-recovery.md) |
 | rollback | When replanning is exhausted or infeasible, compensate along the chain back to a savepoint. | [03](./03-replan-and-recovery.md) |
 | harness-state | Self-optimizing state that stores metadata only, never raw context or prompts. | [04](./04-refine-and-harness-state.md) |
@@ -51,7 +52,7 @@ flowchart TB
     subgraph AgentLoop["Agent loop"]
         P["planner node<br/>JIT sub-DAG generation"]
         T["tool-caller node<br/>deterministic execution"]
-        RP["replan / rollback<br/>fork + replay"]
+        RP["replan / rollback<br/>in-place shadow + append"]
         RF["refine<br/>gate + structured edit"]
     end
 
@@ -68,7 +69,7 @@ flowchart TB
     CR -- "reject and regenerate" --> P
     T -- "TCC / Saga compensation" --> INV & LOG & CH
     T -- "result events" --> VL
-    RP -- "fork(boundary)" --> VL
+    RP -- "replan/boundary" --> VL
     RF -- "edit + snapshot" --> HS
     HS --> PA
     PA -- "assemble prompt" --> P
@@ -84,7 +85,7 @@ flowchart TB
 
 ## 5. Research Baseline
 
-- **deepseek-harness (dsh):** append-only session logs, masking compression through `surfaceOp`, unified `fork(boundary)+replay` for resume/fork/replay, `session/end-seed` seed-boundary markers, and runtime assertions of model visibility. Flory generalizes its linear log to a partial-order vertex log and adds DAG parallelism, transaction compensation, and planner/tool-caller separation.
+- **deepseek-harness (dsh):** append-only session logs, masking compression through `surfaceOp`, unified `fork(boundary)+replay` for resume/fork/replay, `session/end-seed` seed-boundary markers, and runtime assertions of model visibility. Flory generalizes its linear log to a partial-order vertex log and adds DAG parallelism, transaction compensation, and planner/tool-caller separation. It deliberately **rejects** one dsh choice: because a Flory run is a business process rather than a cheap local session, resume, in-place replan, and dry-run fork are kept as three distinct mechanisms instead of one ([01 §5](./01-jit-dag-and-vertex-log.md)).
 - **prime-agent (PrimeIntellect):** Continual Harness's two-stage refine process (low-cost review gate followed by structured JSON edits), per-edit before/after snapshots, reverse-edit rollback, and local/global scopes. Flory adopts the mechanism but restricts state to metadata and replaces raw-memory injection with mem-hints.
 - **Atomix / SagaLLM (research):** transactional LLM tool use has precedent. Flory adopts Atomix's three effect classes (bufferable, reversible, irreversible) as the basis for node transaction attributes, while SagaLLM validates the value of combining Saga with independent validation.
 
@@ -92,7 +93,7 @@ flowchart TB
 
 | Document | Contents |
 |---|---|
-| [01-jit-dag-and-vertex-log](./01-jit-dag-and-vertex-log.md) | DAG model, node roles, vertex-log schema, surface projection, and fork semantics. |
+| [01-jit-dag-and-vertex-log](./01-jit-dag-and-vertex-log.md) | DAG model, node roles, vertex-log schema, surface projection, in-place replan, and dry-run fork semantics. |
 | [02-transaction-model](./02-transaction-model.md) | Node transaction attributes, TCC plus pivot-saga, transaction boundaries, and check-rules. |
 | [03-replan-and-recovery](./03-replan-and-recovery.md) | Greedy replanning, the recovery escalation ladder, replan/transaction interaction, and token budgets. |
 | [04-refine-and-harness-state](./04-refine-and-harness-state.md) | Refine triggers and flow, metadata-only state schema, pure-function assembly, and mem-hints. |

@@ -1,10 +1,9 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Flory — AI Harness Orchestration Engine</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-tc-webfont@1.2.0/style.min.css">
 <style>
   :root{
-    --font:"LXGW WenKai TC","LXGW WenKai",ui-serif,Georgia,serif;
+    --font:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     --blue-fill:#A5D8FF; --blue-stroke:#1971C2;
     --green-fill:#B2F2BB; --green-stroke:#2F9E44;
     --violet-fill:#D0BFFF; --violet-stroke:#6741D9;
@@ -13,17 +12,15 @@
     --teal-fill:#99E9F2; --teal-stroke:#0C8599;
     --pink-fill:#FCC2D7; --pink-stroke:#C2255C;
     --yellow-fill:#FFEC99; --yellow-stroke:#F08C00;
-    --bg:#FFFFFF; --ink:#1E1E1E; --muted:#868E96;
+    --bg:Canvas; --ink:CanvasText; --muted:GrayText;
     --node-bg-alpha:1; --zone-alpha:.18; --shadow:0 2px 6px rgba(0,0,0,.08);
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
-      --bg:#16181C; --ink:#E9ECEF; --muted:#ADB5BD;
       --node-bg-alpha:.22; --zone-alpha:.10; --shadow:0 2px 8px rgba(0,0,0,.5);
     }
   }
   :root[data-theme="dark"]{
-    --bg:#16181C; --ink:#E9ECEF; --muted:#ADB5BD;
     --node-bg-alpha:.22; --zone-alpha:.10; --shadow:0 2px 8px rgba(0,0,0,.5);
   }
   body{font-family:var(--font);background:var(--bg);color:var(--ink);margin:32px auto;max-width:1080px;padding:0 16px;}
@@ -80,7 +77,7 @@
     <div class="node n-green">Refine loop<small>gate &rarr; propose &rarr; validate &rarr; evaluate</small></div>
   </div>
 </div>
-<div class="flow"><span class="a">&#8645;</span> append events / project context &nbsp;·&nbsp; fork(boundary) + replay</div>
+<div class="flow"><span class="a">&#8645;</span> append events / project context &nbsp;·&nbsp; in-place replan · dry-run fork for what-ifs</div>
 
 <div class="zone z-teal">
   <h2>Control plane <span class="hint">— engine metadata, ACID by transactional DB</span></h2>

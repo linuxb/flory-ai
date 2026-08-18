@@ -39,7 +39,8 @@ These are invariants, not preferences. A change that violates one is wrong even 
 13. **Never mix control-plane and data-plane transactions.** Engine metadata uses database transactions; business side effects use TCC plus pivot-saga. They are separate layers with separate failure handling.
 14. **Check-rules are authoritative and deterministic.** A planner declares transaction boundaries; the rule engine admits them. Model self-checking is never a safety guarantee. A rejected proposal is regenerated with the violations attached — never patched through.
 15. **A pivot is a one-way gate.** After `txn/pivot-passed`, forward recovery only: retry idempotent successors, then suspend for human intervention. Never automatically compensate backward across a pivot.
-16. **Cancel before fork.** A replan may not fork across an open `txn/try`. Compensate first, then move the boundary.
+16. **Cancel before replan.** Planning may not resume across an open `txn/try`. Compensate first, then move the boundary.
+16b. **Replan in place; fork only for dry runs.** An online replan appends `replan/boundary` plus `subgraph/shadowed` to the **same run** — never a child run. `fork/created` is reserved for non-executing dry-run children (counterfactual A/B, replay tests, operator what-ifs), which execute `effect_class: none` tools only and must never cancel or confirm a `txn/try` inherited before their `run/end-seed`. Reason: a run is a business process, so its identity must stay whole for audit, and a dry run must never touch a live order's holds.
 17. **Compensation is delta-based and scoped to its own footprint.** Release what this try reserved; never restore an absolute snapshot value. Reason: only delta compensation commutes with another branch's committed change. This is validated at tool registration, and it matters most for value-type resources such as price, where snapshot-restore looks natural and is wrong.
 18. **Every retryable tool declares an idempotency key**, and every compensation tool is itself idempotent.
 
@@ -71,7 +72,8 @@ Reject a change that does any of the following:
 - Sorts planner context by `seq`, timestamp, or completion order.
 - Silently skips an unknown event type.
 - Lets a planner's own assertion substitute for a check-rule.
-- Compensates backward across `txn/pivot-passed`, or forks across an open `txn/try`.
+- Compensates backward across `txn/pivot-passed`, or resumes planning across an open `txn/try`.
+- Creates a child run for an online replan, or lets a dry-run child execute a non-`none` tool or mutate an inherited `txn/try`.
 - Writes a compensation that restores an absolute value instead of releasing a delta.
 - Puts prompt prose or raw memory text into harness-state.
 - Adds a metric as new telemetry rather than as a log projection.
@@ -92,7 +94,7 @@ The two services never call each other's internals. They communicate only by app
 
 | Owner | Exclusive write access |
 |---|---|
-| TS engine | `run/start`, `run/end`, `run/end-seed`, `subgraph/proposed`, `subgraph/frozen`, `subgraph/rejected`, `subgraph/shadowed`, `fork/created`, `vertex/created`, `budget/charged` |
+| TS engine | `run/start`, `run/end`, `run/end-seed`, `subgraph/proposed`, `subgraph/frozen`, `subgraph/rejected`, `subgraph/shadowed`, `replan/boundary`, `fork/created`, `vertex/created`, `budget/charged` |
 | Go coordinator | `vertex/started`, `vertex/succeeded`, `vertex/failed`, `vertex/retried`, `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` |
 
 29. **Enforce event ownership at the append boundary** in both services. A service appending an event type it does not own is a bug, not a shortcut.

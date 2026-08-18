@@ -28,15 +28,14 @@ This repository currently contains the architecture and design baseline. Impleme
 
 Start with the [design overview](doc/design/00-overview.md). The design series then covers:
 
-| Document | Focus |
-| --- | --- |
-| [JIT DAG and vertex log](doc/design/01-jit-dag-and-vertex-log.md) | DAG model, event schema, projections, and fork semantics. |
-| [Transaction model](doc/design/02-transaction-model.md) | TCC, pivot-saga, transaction boundaries, and check rules. |
-| [Replanning and recovery](doc/design/03-replan-and-recovery.md) | Failure handling, backtracking, rollback, and budget control. |
-| [Refine and harness state](doc/design/04-refine-and-harness-state.md) | Structured refinement, metadata-only state, and memory hints. |
-| [Context aggregation and experimentation](doc/design/05-context-aggregation-and-experimentation.md) | Canonical projections, semantic folds, replay, and A/B attribution. |
-| [Validation harness](doc/design/06-validation-harness.md) | Sandbox contract, fault injection, scenario matrix, and correctness oracles. |
-| [ADR-001: engine language split](doc/design/adr/adr-001-engine-language-split.md) | Why the engine is TypeScript and the coordinator is Go. |
+| Document                                                                                            | Focus                                                                        |
+| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [JIT DAG and vertex log](doc/design/01-jit-dag-and-vertex-log.md)                                   | DAG model, event schema, projections, in-place replanning, and dry-run forks. |
+| [Transaction model](doc/design/02-transaction-model.md)                                             | TCC, pivot-saga, transaction boundaries, and check rules.                    |
+| [Replanning and recovery](doc/design/03-replan-and-recovery.md)                                     | Failure handling, backtracking, rollback, and budget control.                |
+| [Refine and harness state](doc/design/04-refine-and-harness-state.md)                               | Structured refinement, metadata-only state, and memory hints.                |
+| [Context aggregation and experimentation](doc/design/05-context-aggregation-and-experimentation.md) | Canonical projections, semantic folds, replay, and A/B attribution.          |
+| [Validation harness](doc/design/06-validation-harness.md)                                           | Sandbox contract, fault injection, scenario matrix, and correctness oracles. |
 
 Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/): an interactive [architecture overview](doc/design/diagrams/architecture.html) and editable Draw.io diagrams for transaction boundaries, replanning, and projections.
 

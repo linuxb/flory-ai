@@ -107,7 +107,7 @@ The pivot admission condition is that every preceding try has closed successfull
 **Savepoint definition.** A scope's `savepoint` is the committed world state at **scope entry**. By construction it therefore lies *after* every preceding scope's pivot: a scope is entered only once its predecessors have committed. Two consequences follow, and both are load-bearing elsewhere:
 
 1. "Compensate back to the savepoint" undoes only the current scope's pre-pivot work. It never crosses any pivot, including this scope's own.
-2. A savepoint is never a point before an irreversible action. Any procedure phrased as "return to a state before the savepoint" is therefore ill-formed, because such a state may contain committed pivots that no compensation can reach. See [03 §2.1](./03-replan-and-recovery.md) for how this constrains fork-boundary selection.
+2. A savepoint is never a point before an irreversible action. Any procedure phrased as "return to a state before the savepoint" is therefore ill-formed, because such a state may contain committed pivots that no compensation can reach. See [03 §2.1](./03-replan-and-recovery.md) for how this constrains replan-boundary selection.
 
 ### 4.2 Failure matrix
 
@@ -137,7 +137,9 @@ See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Para
 
 ### 4.4 Orphan try detection
 
-During crash recovery or after a fork, scan the log for `txn/try` events inherited before `run/end-seed`, or events with no matching confirm/cancel after `try_timeout_s`. Treat them as orphans and append an idempotent `cancel`. This is why [01](./01-jit-dag-and-vertex-log.md) requires the end-seed marker.
+**In a live run**, scan for `txn/try` events with no matching confirm or cancel after `try_timeout_s` and append an idempotent `cancel`. Crash recovery uses the same sweep — it needs no marker of its own, because a resumed run re-projects its own log and every bracket in it belongs to that run ([01 §5.1](./01-jit-dag-and-vertex-log.md)).
+
+**In a dry-run child**, the sweep is inverted into a prohibition. Every `txn/try` inherited before `run/end-seed` belongs to a live parent run, so the child must **never** cancel or confirm it: doing so would release a real hold out from under a real order. This is the actual purpose of the end-seed marker — it separates "inherited, read-only" from "mine" ([01 §5.2](./01-jit-dag-and-vertex-log.md)). A dry-run child that finds an inherited open bracket at its boundary must refuse the boundary rather than clear it.
 
 ## 5. Relation to Existing Work
 

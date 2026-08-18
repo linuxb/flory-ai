@@ -59,7 +59,7 @@ These are invariants, not preferences. A change that violates one is wrong even 
 
 ### Versioning
 
-27. Bump the relevant version on any behavior change: log schema version (in `run/start`), `projector_version` (any change to a projection layer or fold reducer), `harness_state_version`, and template refs. Version identifiers are wire format; treat them as such from the first commit.
+27. **Bump the relevant version on any behavior change:** log schema version (in `run/start`), `projector_version` (any change to a projection layer or fold reducer), `harness_state_version`, and template refs. Version identifiers are wire format; treat them as such from the first commit.
 28. **Any change to the planner loop, a projection layer, or a fold reducer requires a replay test.** Record a real run once; replay asserts an event-by-event log match ignoring timestamps. Regression testing needs no API key.
 
 ## Review Checklist

@@ -20,13 +20,19 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 | pivot | An irreversible and uncompensable node in a transaction scope, such as a committed inventory decrement or logistics booking; at most one is allowed per scope. | [02](./02-transaction-model.md) |
 | pivot-saga + TCC | The distributed-transaction model for business side effects: compensable before the pivot (Saga/TCC try), forward recovery only after it. | [02](./02-transaction-model.md) |
 | check-rules | Deterministic static validation of transaction properties before a DAG is frozen, such as requiring idempotent retry after a pivot. | [02](./02-transaction-model.md) |
-| replan | After a tool-call failure, greedily backtrack to the nearest planner, fork, and regenerate the subgraph. | [03](./03-replan-and-recovery.md) |
+| savepoint | The committed world state at scope entry; by construction it lies after every preceding pivot, so returning to it never crosses one. | [02](./02-transaction-model.md) |
+| replan | After a tool-call failure, greedily backtrack to the nearest **legal fork boundary**, fork, and regenerate the subgraph. | [03](./03-replan-and-recovery.md) |
+| legal fork boundary | A succeeded planner outside every open transaction bracket and at or after the most recent `txn/pivot-passed`. | [03](./03-replan-and-recovery.md) |
+| backtrack floor | The planning-authority floor set by the most recent passed pivot; rollback lowers world state but never the floor. | [03](./03-replan-and-recovery.md) |
 | rollback | When replanning is exhausted or infeasible, compensate along the chain back to a savepoint. | [03](./03-replan-and-recovery.md) |
 | harness-state | Self-optimizing state that stores metadata only, never raw context or prompts. | [04](./04-refine-and-harness-state.md) |
 | refine | A structured harness-state update triggered through a human API or automatically after N turns. | [04](./04-refine-and-harness-state.md) |
 | mem-hint | A memory-query recipe in harness-state; it stores how to query memory, not the memory itself. | [04](./04-refine-and-harness-state.md) |
 | semantic fold | A versioned pure reducer that folds raw tool events into a business entity view, such as `inventory_view`. | [05](./05-context-aggregation-and-experimentation.md) |
 | attribution triple | `harness_state_version` + `projector_version` + `arm_id`, recorded in `run/start`; the anchor for every experiment. | [05](./05-context-aggregation-and-experimentation.md) |
+| sandbox | A simulated e-commerce world with two strictly separated views: an actor view of tool APIs for the engine, and a ledger view for oracles only. | [06](./06-validation-harness.md) |
+| oracle | A judgement function over the ledger and the log that decides whether a run was correct, independently of whether any tool call returned success. | [06](./06-validation-harness.md) |
+| scenario | A declarative record of goal prompt, world initialisation, seeded fault schedule, and expected oracles; scenarios are data, the runner is generic. | [06](./06-validation-harness.md) |
 
 ## 3. Overall Architecture
 
@@ -91,6 +97,7 @@ flowchart TB
 | [03-replan-and-recovery](./03-replan-and-recovery.md) | Greedy replanning, the recovery escalation ladder, replan/transaction interaction, and token budgets. |
 | [04-refine-and-harness-state](./04-refine-and-harness-state.md) | Refine triggers and flow, metadata-only state schema, pure-function assembly, and mem-hints. |
 | [05-context-aggregation-and-experimentation](./05-context-aggregation-and-experimentation.md) | Why the log exists, the projection pipeline and layer contracts, semantic fold, and three-tier A/B testing. |
+| [06-validation-harness](./06-validation-harness.md) | Three-tier validation strategy, the e-commerce sandbox contract, the deterministic fault injector, the scenario matrix, and the four oracle classes. |
 | [adr/](./adr/) | Architecture decision records, including [ADR-001](./adr/adr-001-engine-language-split.md) on the TypeScript/Go language split. |
 
 ## 7. References

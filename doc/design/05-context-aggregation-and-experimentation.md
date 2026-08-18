@@ -63,7 +63,7 @@ The same events take two projection paths, and conflating them is a bug in both 
 - **Toward the DAG:** shadowed subtrees are removed. Otherwise a planner believes a disproven path is still live.
 - **Toward evidence:** their conclusions are retained as a structured failure-evidence section. Otherwise the planner repeats the mistake it just made.
 
-So `surface` drops them while `assemble` reintroduces their distilled conclusion. See [03](./03-replan-and-recovery.md) §2.2 for the evidence schema.
+So `surface` drops them while `assemble` reintroduces their distilled conclusion. See [03](./03-replan-and-recovery.md) §2.3 for the evidence schema.
 
 ### 2.4 Prompt-cache dividend
 

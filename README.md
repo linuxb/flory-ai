@@ -35,6 +35,7 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Replanning and recovery](doc/design/03-replan-and-recovery.md) | Failure handling, backtracking, rollback, and budget control. |
 | [Refine and harness state](doc/design/04-refine-and-harness-state.md) | Structured refinement, metadata-only state, and memory hints. |
 | [Context aggregation and experimentation](doc/design/05-context-aggregation-and-experimentation.md) | Canonical projections, semantic folds, replay, and A/B attribution. |
+| [Validation harness](doc/design/06-validation-harness.md) | Sandbox contract, fault injection, scenario matrix, and correctness oracles. |
 | [ADR-001: engine language split](doc/design/adr/adr-001-engine-language-split.md) | Why the engine is TypeScript and the coordinator is Go. |
 
 Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/): an interactive [architecture overview](doc/design/diagrams/architecture.html) and editable Draw.io diagrams for transaction boundaries, replanning, and projections.

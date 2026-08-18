@@ -97,7 +97,7 @@ The function is pure. The same log prefix and harness-state version produce the 
 
 `fork(run, boundary_seq) → child_run`:
 
-- The boundary must be a stable, succeeded planner vertex outside every open transaction bracket. Otherwise, reject the fork; never silently trim it. Unlike dsh's subagent exception that trims to a completed prefix, Flory has one semantics.
+- The boundary must be a stable, succeeded planner vertex that lies outside every open transaction bracket **and at or after the most recent `txn/pivot-passed` in the run** (the backtrack floor, [03 §2.1](./03-replan-and-recovery.md)). Otherwise, reject the fork; never silently trim it. Unlike dsh's subagent exception that trims to a completed prefix, Flory has one semantics.
 - The child run deep-copies the prefix as a seed. Its first owned event is `run/end-seed`, which distinguishes inherited half-open brackets from current-run work and enables orphan `txn/try` detection in [02](./02-transaction-model.md).
 - A fork does not replay the external world. Files, inventory, and logistics bookings are not undone by it; the transaction layer handles business effects through cancel-before-fork (see [03](./03-replan-and-recovery.md)).
 

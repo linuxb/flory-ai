@@ -79,8 +79,8 @@ Split it into two scopes instead:
 
 ```
 Scope A: inventory reserve (try) → P1 payment
-         savepoint S1 = "paid, inventory confirmed"
-Scope B: create picking order (compensable) → P2 logistics booking
+Scope B: savepoint S1 (scope entry) = "paid, inventory confirmed"
+         → create picking order (compensable) → P2 logistics booking
 ```
 
 On P2 failure, compensate Scope B back to S1. The planner then has authority at a coherent savepoint: it can choose another carrier, another warehouse, or a refund workflow. A refund is a new forward business action, not transaction rollback. The single-pivot rule guarantees a planner-usable savepoint between irreversible actions.
@@ -103,6 +103,11 @@ txn/(committed | cancelled) {scope_id}
 ```
 
 The pivot admission condition is that every preceding try has closed successfully and has not timed out. This is a practical simplification of Atomix's frontier-confirmation idea: the pivot is Flory's commit point.
+
+**Savepoint definition.** A scope's `savepoint` is the committed world state at **scope entry**. By construction it therefore lies *after* every preceding scope's pivot: a scope is entered only once its predecessors have committed. Two consequences follow, and both are load-bearing elsewhere:
+
+1. "Compensate back to the savepoint" undoes only the current scope's pre-pivot work. It never crosses any pivot, including this scope's own.
+2. A savepoint is never a point before an irreversible action. Any procedure phrased as "return to a state before the savepoint" is therefore ill-formed, because such a state may contain committed pivots that no compensation can reach. See [03 §2.1](./03-replan-and-recovery.md) for how this constrains fork-boundary selection.
 
 ### 4.2 Failure matrix
 

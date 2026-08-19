@@ -197,7 +197,7 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 | no `txn/cancel` appears after `txn/pivot-passed` in the same scope | 15 |
 | every `replan/boundary` and every dry-run `fork/created` boundary sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)) | 16 |
 | no such boundary precedes the most recent `txn/pivot-passed` (**floor condition**, 03 §2.1 (ii)) | 15 |
-| **witness completeness**: every ancestor planner of the failed vertex, enumerated by `parent_refs` traversal, appears in the `replan/boundary` candidate list with a published cost and, when rejected, a closed-vocabulary reason | 03 §4.2 |
+| **witness completeness**: every ancestor planner of the failed vertex, enumerated by `parent_refs` traversal, appears in the `replan/boundary` candidate list with either a published cost or a closed-vocabulary rejection reason | 03 §4.2 |
 | **witness minimality**: the selected boundary has the lowest **published** cost among candidates not marked rejected; the oracle never recalculates the cost | 03 §4.2 |
 | **witness honesty**: each rejection reason is factually true of the log — `open_bracket` requires an unmatched `txn/try` before that vertex, `below_floor` requires a later `txn/pivot-passed`, `savepoint_precedes` requires the cancelled scope's savepoint to precede the candidate | 03 §4.2 |
 | **no online fork**: an online replan appends `replan/boundary` in the same run; `fork/created` appears only with `mode: "dry-run"` (01 §5) | 1, 2 |

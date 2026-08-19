@@ -110,7 +110,7 @@ The model prices *attempts*, not correctness. If a failure's true cause invalida
 {
   "boundary_seq": 418,
   "candidates": [
-    { "planner": "v-p3", "cost": 0.95, "currency": "CNY", "rejected": "open_bracket" },
+    { "planner": "v-p3", "rejected": "open_bracket" },
     { "planner": "v-p2", "cost": 1.70, "currency": "CNY" },
     { "planner": "v-p1", "cost": 4.42, "currency": "CNY" }
   ],
@@ -121,7 +121,7 @@ The model prices *attempts*, not correctness. If a failure's true cause invalida
 
 Rejection reasons come from a closed vocabulary: `open_bracket`, `below_floor`, `savepoint_precedes`, `budget_exceeded`, `failure_counter_exhausted`.
 
-Every considered candidate carries its computed cost, whether it is selectable or rejected. This exists for verifiability. A harness cannot check "did the engine pick the right boundary" by recomputing the answer, because legality and cost *are* the policy, so a second implementation would both duplicate the policy and — worse — is likely to repeat the original author's misunderstanding, producing a green test over a wrong engine. Publishing the candidate set converts the problem from *generating* an answer into *checking* one: the harness enumerates ancestor planners by pure `parent_refs` traversal (topology, not policy), then asserts completeness, minimality among non-rejected candidates using the published costs, and that each cited rejection reason is factually true of the log. See [06 §7](./06-validation-harness.md) oracle O2 for the three assertions, and O5 for comparing `estimated_cost` against what the replan actually cost.
+A candidate record contains either a selectable candidate's computed cost or a closed-vocabulary rejection reason. Rejected candidates do not receive a cost: they are ineligible for selection, so giving them one would falsely suggest participation in the cost comparison. This exists for verifiability. A harness cannot check "did the engine pick the right boundary" by recomputing the answer, because legality and cost *are* the policy, so a second implementation would both duplicate the policy and — worse — is likely to repeat the original author's misunderstanding, producing a green test over a wrong engine. Publishing the candidate set converts the problem from *generating* an answer into *checking* one: the harness enumerates ancestor planners by pure `parent_refs` traversal (topology, not policy), then asserts completeness, minimality among non-rejected candidates using the published costs, and that each cited rejection reason is factually true of the log. See [06 §7](./06-validation-harness.md) oracle O2 for the three assertions, and O5 for comparing `estimated_cost` against what the replan actually cost.
 
 ## 5. Mapping to dsh Replay
 

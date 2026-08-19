@@ -62,6 +62,7 @@ These are invariants, not preferences. A change that violates one is wrong even 
 
 27. **Bump the relevant version on any behavior change:** log schema version (in `run/start`), `projector_version` (any change to a projection layer or fold reducer), `harness_state_version`, and template refs. Version identifiers are wire format; treat them as such from the first commit.
 28. **Any change to the planner loop, a projection layer, or a fold reducer requires a replay test.** Record a real run once; replay asserts an event-by-event log match ignoring timestamps. Regression testing needs no API key.
+28b. **Decisions publish their work; harnesses check rather than recompute.** `replan/boundary` carries the candidate set, per-candidate cost, and closed-vocabulary rejection reasons, and `estimated_cost` for later comparison against actual. Reason: verifying a choice by recomputing it duplicates the policy and tends to reproduce the author's own misunderstanding, yielding a green test over a wrong engine. A harness may traverse topology (`parent_refs`) freely — that is a fact, not a policy — but must never reimplement legality or cost.
 
 ## Review Checklist
 

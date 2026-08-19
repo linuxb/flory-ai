@@ -65,7 +65,7 @@ This controls replan input cost and clearly identifies paths already disproven.
 ### 2.4 Three hard rules for replanning and transactions
 
 1. **Cancel before replan.** Planning never resumes across an active `try`; compensation precedes backtracking. The rule applies identically to a dry-run fork boundary, with one inversion: a dry-run child must never cancel an inherited try, because that hold belongs to the live parent ([01 §5.2](./01-jit-dag-and-vertex-log.md)). Live runs cancel to make a boundary legal; dry runs must instead refuse the boundary.
-2. **The pivot is a one-way gate.** Once `txn/pivot-passed` is appended, that seq becomes the backtrack floor (§2.1): no fork boundary may be selected below it, for the remainder of the run. Within the pivot's own scope, a subsequent failure may only retry the suffix idempotently (L0) or reach human intervention (L4). The prohibition is on *planner position*, not on business action — a refund issued from a boundary above the floor is a new forward action and is permitted ([02 §3.3](./02-transaction-model.md)). R1 guarantees that every forward-path node is safely idempotent.
+2. **The pivot is a one-way gate.** Once `txn/pivot-passed` is appended, that seq becomes the backtrack floor (§2.1): no replan boundary may be selected below it, for the remainder of the run. Within the pivot's own scope, a subsequent failure may only retry the suffix idempotently (L0) or reach human intervention (L4). The prohibition is on *planner position*, not on business action — a refund issued from a boundary above the floor is a new forward action and is permitted ([02 §3.3](./02-transaction-model.md)). R1 guarantees that every forward-path node is safely idempotent.
 3. **Shadowing does not delete.** A replan-rejected subtree remains in the log for auditability and as evidence that prevents repeating the same failed approach.
 
 ## 3. Rollback (L3)
@@ -78,6 +78,7 @@ This controls replan input cost and clearly identifies paths already disproven.
 
 - Each run carries `{plan_tokens, replan_tokens, total_cost}`. Every model call appends a `budget/charged` event, and the projection yields the remaining balance.
 - Perform a budget preflight before replanning. Estimate the target planner's linearized context plus expected output; if the estimate exceeds remaining budget, go directly to L3 or L4 rather than attempting a predictably unaffordable replan.
+
 ### 4.1 Boundary selection cost model
 
 Candidate boundaries are priced directly in currency, and greedy replanning selects the legal boundary with the lowest cost:
@@ -101,6 +102,27 @@ Two properties matter more than the exact numbers.
 
 The model prices *attempts*, not correctness. If a failure's true cause invalidates the nearest planner's premise, that planner stays the cheapest candidate and keeps failing; the consecutive-failure counter in §3 is what removes it from the candidate set. Cost decides efficiency, the ladder decides correctness — the same division of labour as check-rules versus refine in [02](./02-transaction-model.md).
 
+### 4.2 The engine must publish its candidate set
+
+`replan/boundary` records the whole decision, not just its outcome:
+
+```jsonc
+{
+  "boundary_seq": 418,
+  "candidates": [
+    { "planner": "v-p3", "cost": 0.95, "currency": "CNY", "rejected": "open_bracket" },
+    { "planner": "v-p2", "cost": 1.70, "currency": "CNY" },
+    { "planner": "v-p1", "cost": 4.42, "currency": "CNY" }
+  ],
+  "selected": "v-p2",
+  "estimated_cost": 1.70
+}
+```
+
+Rejection reasons come from a closed vocabulary: `open_bracket`, `below_floor`, `savepoint_precedes`, `budget_exceeded`, `failure_counter_exhausted`.
+
+Every considered candidate carries its computed cost, whether it is selectable or rejected. This exists for verifiability. A harness cannot check "did the engine pick the right boundary" by recomputing the answer, because legality and cost *are* the policy, so a second implementation would both duplicate the policy and — worse — is likely to repeat the original author's misunderstanding, producing a green test over a wrong engine. Publishing the candidate set converts the problem from *generating* an answer into *checking* one: the harness enumerates ancestor planners by pure `parent_refs` traversal (topology, not policy), then asserts completeness, minimality among non-rejected candidates using the published costs, and that each cited rejection reason is factually true of the log. See [06 §7](./06-validation-harness.md) oracle O2 for the three assertions, and O5 for comparing `estimated_cost` against what the replan actually cost.
+
 ## 5. Mapping to dsh Replay
 
 dsh unifies resume, fork, and replay into one primitive because a session is a cheap local object. Flory **splits** them, because a run is a business process whose identity must stay intact ([01 §5](./01-jit-dag-and-vertex-log.md)).
@@ -117,8 +139,8 @@ dsh unifies resume, fork, and replay into one primitive because a session is a c
 
 ## 6. Open Questions
 
-- Detecting replan oscillation across different planners; the current counter tracks only one planner.
+- **Oscillation across planners.** The consecutive-failure counter in §3 is per planner, so two planners that alternate failing never trip it and the run loops until the budget dies. The fix is an **episode-level** replan cap independent of which planner was targeted, with the detour-cost metric as its detector. The cap's value is not to be guessed: [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) derives it from the shortest non-terminating cycle found while checking liveness property L2. Scenario S3c exists to fail until that bound lands ([06 §6](./06-validation-harness.md)).
 - Expressing negative failure evidence so planners do not recreate isomorphic subgraphs. A candidate is to inject disproven `(tool, parameter pattern)` pairs as check-rule constraints rather than mere prompts.
-- Merging concurrent failures in parallel branches when both compete to fork at the same ancestor planner: serialize by first arrival and make the later failure wait for the new surface.
-- How long forward closure (§2.2 step 2) may be attempted on a post-pivot scope before the run is declared L4. Too short suspends a recoverable run for a human; too long holds resources indefinitely. The validation harness currently asserts only that L4 is eventually reached, not when ([06 §11](./06-validation-harness.md)).
-- Whether L2 should also be reachable by a failure count rather than only by structural infeasibility of the fork boundary. As specified, consecutive replan failures route L1 directly to L3 (§3), because a count does not make a legal boundary illegal.
+- Merging concurrent failures in parallel branches when both compete for the same ancestor planner as a boundary: serialize by first arrival and make the later failure wait for the new surface.
+- How long forward closure (§2.2 step 2) may be attempted on a post-pivot scope before the run is declared L4. Too short suspends a recoverable run for a human; too long holds resources indefinitely. The validation harness currently asserts only that L4 is eventually reached, not when ([06 §12](./06-validation-harness.md)).
+- Whether L2 should also be reachable by a failure count rather than only by structural infeasibility of the replan boundary. As specified, consecutive replan failures route L1 directly to L3 (§3), because a count does not make a legal boundary illegal.

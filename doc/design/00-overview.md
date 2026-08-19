@@ -33,6 +33,8 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 | attribution triple | `harness_state_version` + `projector_version` + `arm_id`, recorded in `run/start`; the anchor for every experiment. | [05](./05-context-aggregation-and-experimentation.md) |
 | sandbox | A simulated e-commerce world with two strictly separated views: an actor view of tool APIs for the engine, and a ledger view for oracles only. | [06](./06-validation-harness.md) |
 | oracle | A judgement function over the ledger and the log that decides whether a run was correct, independently of whether any tool call returned success. | [06](./06-validation-harness.md) |
+| candidate witness | The candidate set, per-candidate cost, and rejection reasons that `replan/boundary` publishes, so a harness can check boundary selection without reimplementing the policy. | [03 §4.2](./03-replan-and-recovery.md) |
+| wider replan | Deliberately choosing an earlier legal boundary than the nearest one (the L2 strategy), traded against greedy per failure class. | [03 §1](./03-replan-and-recovery.md), [06 §8.1](./06-validation-harness.md) |
 | scenario | A declarative record of goal prompt, world initialisation, seeded fault schedule, and expected oracles; scenarios are data, the runner is generic. | [06](./06-validation-harness.md) |
 
 ## 3. Overall Architecture
@@ -98,8 +100,8 @@ flowchart TB
 | [03-replan-and-recovery](./03-replan-and-recovery.md) | Greedy replanning, the recovery escalation ladder, replan/transaction interaction, and token budgets. |
 | [04-refine-and-harness-state](./04-refine-and-harness-state.md) | Refine triggers and flow, metadata-only state schema, pure-function assembly, and mem-hints. |
 | [05-context-aggregation-and-experimentation](./05-context-aggregation-and-experimentation.md) | Why the log exists, the projection pipeline and layer contracts, semantic fold, and three-tier A/B testing. |
-| [06-validation-harness](./06-validation-harness.md) | Three-tier validation strategy, the e-commerce sandbox contract, the deterministic fault injector, the scenario matrix, and the four oracle classes. |
-| [adr/](./adr/) | Architecture decision records, including [ADR-001](./adr/adr-001-engine-language-split.md) on the TypeScript/Go language split. |
+| [06-validation-harness](./06-validation-harness.md) | Three-tier validation strategy, the e-commerce sandbox contract, the deterministic fault injector, the scenario matrix, five oracle classes, and policy validation of greedy-versus-wider and JIT-versus-up-front. |
+| [adr/](./adr/) | Architecture decision records: [ADR-001](./adr/adr-001-engine-language-split.md) TypeScript/Go language split, [ADR-002](./adr/adr-002-in-place-replan-and-dry-run-forks.md) in-place replan and dry-run forks, [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) formal verification of the transaction protocol. |
 
 ## 7. References
 

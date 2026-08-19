@@ -152,3 +152,5 @@ See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Para
 - Parent/child savepoint semantics and partial-commit visibility for nested transaction scopes.
 - A fallback for channel APIs that cannot reserve resources, such as locally recording a simulated try and delaying execution.
 - The reconciliation fallback protocol when a pivot status-query interface is unavailable.
+- **Check-rule completeness.** R1–R9 were derived by hand, so the rule set has no completeness argument: a plan admitted by all nine may still reach a dead state. [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) attacks this from two directions — modeling the planner as an adversary bounded only by check-rules, so any invariant violation names a missing rule, and a bounded Alloy search for admissible-but-dead DAG shapes.
+- **Unreachability of the parallel-pivot dead state (§4.3).** The argument is currently prose. [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) specifies it as invariant I1 with an unbounded guarantee over arbitrary branch counts, since scenario tests can only sample interleavings.

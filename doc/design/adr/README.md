@@ -10,3 +10,4 @@ Write ADRs in English. Design specifications belong in [`../`](../); plans belon
 |---|---|---|
 | [001](./adr-001-engine-language-split.md) | Engine language split — TypeScript engine, Go coordinator | Accepted |
 | [002](./adr-002-in-place-replan-and-dry-run-forks.md) | Replan in place; reserve forks for dry runs | Accepted |
+| [003](./adr-003-formal-verification-of-the-transaction-protocol.md) | Formal verification of the transaction protocol — TLA+ with TLC and Apalache | Accepted |

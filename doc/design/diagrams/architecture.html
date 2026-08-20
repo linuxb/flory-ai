@@ -4,6 +4,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-tc-webfont@1.2.0/style.min.css">
 <style>
   :root{
+    color-scheme:light;
     --font:"LXGW WenKai TC","LXGW WenKai",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
     --blue-fill:#A5D8FF; --blue-stroke:#1971C2;
     --green-fill:#B2F2BB; --green-stroke:#2F9E44;
@@ -18,10 +19,16 @@
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
+      color-scheme:dark;
       --node-bg-alpha:.22; --zone-alpha:.10; --shadow:0 2px 8px rgba(0,0,0,.5);
     }
   }
+  :root[data-theme="light"]{
+    color-scheme:light;
+    --node-bg-alpha:1; --zone-alpha:.18; --shadow:0 2px 6px rgba(0,0,0,.08);
+  }
   :root[data-theme="dark"]{
+    color-scheme:dark;
     --node-bg-alpha:.22; --zone-alpha:.10; --shadow:0 2px 8px rgba(0,0,0,.5);
   }
   body{font-family:var(--font);background:var(--bg);color:var(--ink);margin:32px auto;max-width:1080px;padding:0 16px;}

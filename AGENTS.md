@@ -9,6 +9,7 @@
 - Prefer self-contained HTML for architecture diagrams. Use Draw.io (`.drawio`) for focused mechanism diagrams that need to remain editable.
 - **Keep related charts on one Draw.io sheet.** Arrange them as labelled regions (`A. …`, `B. …`) on a single enlarged page instead of opening a new sheet per chart; readers should compare without switching tabs, and cross-region arrows can express how the charts relate. Open a new sheet only for genuinely unrelated subsystems.
 - Every diagram must adapt to light and dark themes: no hard-coded background or ink colors, `background="none"` on Draw.io canvases, and a Light/Dark/Auto toggle in standalone HTML.
+- **This is not a licence to remove colour.** "No hard-coded colors" means the *canvas background* and *neutral ink*, never the semantic palette. Every Draw.io shape keeps `fillColor` + `strokeColor` from the shared palette with `fontColor` equal to its stroke, which is what stays legible in both themes; in HTML the palette lives in CSS variables while only the surface tokens follow the theme. A monochrome diagram is a regression, not a theme fix.
 - Keep diagram labels, captions, and surrounding documentation in English.
 - Use relative links between documentation files so the documentation remains portable.
 

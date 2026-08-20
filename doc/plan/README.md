@@ -8,4 +8,4 @@ All planning documents are written in English.
 
 | Plan | Title | Implements | Status |
 |---|---|---|---|
-| [001](./plan-001-tla-plus-specification.md) | TLA+ specification of the transaction protocol | [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) | Proposed — awaiting an owner |
+| [001](./plan-001-tla-plus-specification.md) | TLA+ specification of the transaction protocol | [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) | Active — S1 complete; S2/S3 trigger-gated |

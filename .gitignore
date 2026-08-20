@@ -35,6 +35,11 @@ coverage/
 .eslintcache
 *.tsbuildinfo
 
+# TLA+ model-checking state and local tool cache
+spec/.tlc/
+spec/*_TTrace_*
+spec/output/
+
 # Node.js logs and runtime state
 logs/
 *.log

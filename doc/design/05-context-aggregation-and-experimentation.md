@@ -28,7 +28,7 @@ Building a prompt is not "query and concatenate." It is a layered pipeline of pu
 
 ### 2.1 Layer contracts
 
-- Every layer is **pure** and **independently cacheable**. Cache key = `hash(log_prefix) + projector_version + harness_state_version`.
+- Every layer is **pure** and **independently cacheable**. Cache key = `hash(run_seq_prefix) + projector_version + harness_state_version`. The prefix is hashed over one run's events ordered by `run_seq`; `global_seq` is never an input, because it is neither gap-free nor commit-ordered and would make the key non-reproducible ([01 §3.3](./01-jit-dag-and-vertex-log.md) inv. 3).
 - Every layer must be able to **dump its intermediate output**. Multi-layer pure pipelines are cheap to reason about and expensive to debug blind; when a prompt looks wrong, an operator must be able to ask which layer distorted it.
 - Layers may be replaced individually, but replacement bumps `projector_version` (see §4.2).
 
@@ -69,7 +69,7 @@ So `surface` drops them while `assemble` reintroduces their distilled conclusion
 
 Because the log is append-only and `linearize` is deterministic, prompt **prefixes are naturally stable**: a later turn's prompt shares a byte-identical prefix with the previous turn's. This maps directly onto provider prompt caching.
 
-This is the second, monetary reason for the rule in [01](./01-jit-dag-and-vertex-log.md) §4.2 that parallel branches sort by `vertex_id` and never by `seq` or completion time: scheduling jitter would change the prefix on every turn and destroy the cache-hit rate. Replayability and cost efficiency come from the same constraint.
+This is the second, monetary reason for the rule in [01](./01-jit-dag-and-vertex-log.md) §4.2 that parallel branches sort by `vertex_id` and never by a sequence number or completion time: scheduling jitter would change the prefix on every turn and destroy the cache-hit rate. Replayability and cost efficiency come from the same constraint.
 
 ## 3. Three-Tier A/B Testing
 
@@ -79,7 +79,7 @@ This is the second, monetary reason for the rule in [01](./01-jit-dag-and-vertex
 | **L2 Counterfactual fork** | Fork at a real planner boundary, replan with arm B, **dry-run without executing tools** | One model call, still no side effects | Check-rule pass rate, plan size, mis-declared pivots, LLM-judge score | Real execution failure rates | Primary method for low-frequency task types |
 | **L3 Live A/B** | Split traffic **by run**; `run/start` records the arm | Real traffic, real side effects | Replan rate, tokens per task, post-pivot suspension rate, business success rate | — | High-frequency task types only |
 
-L2 is a capability unique to a log-structured engine: at any historical decision point one can ask "what plan would arm B have produced," with zero side effects. The same mechanism compares **recovery strategies** — fork twice from one failure `seq`, once greedy and once wider — an unplanned dividend of boundary selection being separable from execution ([03 §2.1](./03-replan-and-recovery.md)). Note that forking is reserved for exactly this offline family; online replanning appends in place and never forks ([01 §5](./01-jit-dag-and-vertex-log.md)).
+L2 is a capability unique to a log-structured engine: at any historical decision point one can ask "what plan would arm B have produced," with zero side effects. The same mechanism compares **recovery strategies** — fork twice from one failure `run_seq`, once greedy and once wider — an unplanned dividend of boundary selection being separable from execution ([03 §2.1](./03-replan-and-recovery.md)). Note that forking is reserved for exactly this offline family; online replanning appends in place and never forks ([01 §5](./01-jit-dag-and-vertex-log.md)).
 
 ### 3.1 What "dry run" means
 
@@ -101,6 +101,8 @@ Two implementation constraints follow. A dry run needs its **own budget**, becau
 **Split by run, never by turn.** Mixing harness-state versions inside one run lets earlier turns contaminate later ones, and attribution collapses.
 
 **Metrics are projections, not telemetry.** Replan rate, tokens per task, and suspension rate are folded from the log. Payoff: when a metric definition changes, **history can be recomputed**. With separate telemetry, changing a definition throws away the comparison baseline.
+
+**Fold per run, then aggregate — never one fold over the global stream.** Projection purity is guaranteed within a run and explicitly not across runs ([01 §3.3](./01-jit-dag-and-vertex-log.md) inv. 3). A metric computed by folding `global_seq` order is not reproducible, so two recomputations of the same historical window can disagree; computing each run's value and then aggregating is deterministic and parallelises by `run_id` as a side benefit.
 
 **The attribution anchor is a triple.** `run/start` records `harness_state_version` + `projector_version` + `arm_id`. Omitting `projector_version` causes the subtlest failure available here: improving the `fold` implementation silently changes recomputed historical metrics, so last month's A/B conclusion quietly stops holding. A projector being pure does not make it stable across versions.
 

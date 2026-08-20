@@ -1,0 +1,39 @@
+name: Formal verification
+
+on:
+  pull_request:
+    paths:
+      - 'AGENTS.md'
+      - '.github/workflows/formal-verification.yml'
+      - 'spec/**'
+      - 'doc/design/01-jit-dag-and-vertex-log.md'
+      - 'doc/design/02-transaction-model.md'
+      - 'doc/design/03-replan-and-recovery.md'
+      - 'doc/design/06-validation-harness.md'
+  push:
+    paths:
+      - 'AGENTS.md'
+      - '.github/workflows/formal-verification.yml'
+      - 'spec/**'
+      - 'doc/design/01-jit-dag-and-vertex-log.md'
+      - 'doc/design/02-transaction-model.md'
+      - 'doc/design/03-replan-and-recovery.md'
+      - 'doc/design/06-validation-harness.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tlc:
+    name: TLC S1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+      - name: Check the transaction protocol
+        run: ./spec/run-tlc.sh

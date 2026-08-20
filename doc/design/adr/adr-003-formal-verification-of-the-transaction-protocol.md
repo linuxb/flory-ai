@@ -13,7 +13,7 @@ Flory's central claim is that JIT planning can be made transactionally safe ([06
 The validation harness tests this protocol by **sampling**: scenario S7 exercises one interleaving of two conflicting branches, S11 one crash point. But two of the design's key claims are statements of **unreachability** and **termination**:
 
 - "The state *A has passed its pivot while B still requires rollback* is unreachable by construction" ([02 §4.3](../02-transaction-model.md)).
-- "Every failure episode eventually terminates" — currently unproven, and the reason S3c fails by design ([06 §6](../06-validation-harness.md)).
+- "Every failure episode eventually terminates" — S1 now checks this for the bounded two- and three-branch protocol, deriving the `E = 2` cap used by S3c ([06 §6](../06-validation-harness.md)). Unbounded assurance remains S2 work.
 
 Tests can demonstrate presence, never absence. No number of passing scenarios establishes unreachability, and no scenario suite derives a termination bound. This is a structural gap in the evidence, not a coverage gap.
 
@@ -30,7 +30,7 @@ Three complements are mandatory, each closing a gap no prover closes:
 
 - **Trace validation.** Real vertex-log traces are checked as behaviours of the specification.
 - **Deterministic simulation.** The real implementation runs under a seeded, enumerable scheduler.
-- **Alloy**, for exactly one job: bounded structural search for a DAG shape that satisfies all of R1–R9 yet still reaches a dead state.
+- **Alloy**, for exactly one job: bounded structural search for a DAG shape that satisfies all of R1–R11 yet still reaches a dead state.
 
 **TLAPS** is optional and scoped to at most one theorem (I1). **P**, **Ivy**, and **Coq/Isabelle** are rejected.
 
@@ -69,7 +69,7 @@ L2 is the item that produces a design answer rather than confidence: [03 §6](..
 | Excluded | Verified instead by | Why formal methods is the wrong tool |
 |---|---|---|
 | Delta-compensation commutativity (D2) | property tests over real reducers, plus tool-registration validation | An algebraic property of concrete compensation functions. A specification would model an idealized `release` and prove nothing about the real one. |
-| Check-rules R1–R9 as functions | T-A exhaustive table-driven fixtures | Pure functions over a proposal graph. Testing the real code is *stronger* than modeling an idealized rule engine. |
+| Check-rules R1–R11 as functions | T-A exhaustive table-driven fixtures | Pure functions over a proposal graph. Testing the real code is *stronger* than modeling an idealized rule engine. |
 | World conservation as arithmetic (O1) | property tests over the sandbox ledger | Already exactly asserted against the real implementation. |
 | Projection purity, prompt determinism | T-A replay diff, permutation tests | Determinism of pure functions is directly testable. |
 | Plan quality, greedy-versus-wider, JIT payoff | [06 §8](../06-validation-harness.md) policy validation | Optimization questions with no invariant to state. |
@@ -93,7 +93,7 @@ The classic failure of formal methods is an elegant specification alongside an i
 
 ### Why Alloy for one job
 
-Alloy searches over **structures**, not executions. The question "does there exist a DAG shape satisfying all of R1–R9 that still reaches a dead state" is a bounded relational search — Alloy's core competence and awkward in TLA+. It attacks gap 4 directly, and it is the tool most likely to find a missing rule.
+Alloy searches over **structures**, not executions. The question "does there exist a DAG shape satisfying all of R1–R11 that still reaches a dead state" is a bounded relational search — Alloy's core competence and awkward in TLA+. It attacks gap 4 directly, and it is the tool most likely to find a missing rule.
 
 ### Why deterministic simulation is mandatory rather than optional
 
@@ -123,7 +123,7 @@ TLA+ verifies the protocol; the coordinator's implementation can still race. Sim
 
 ### Ongoing obligations
 
-- **Both engines run in CI.** Every change to the transaction module triggers TLC and Apalache. A specification not mechanically checked on every change is stale within a quarter.
+- **Both engines run in CI when introduced.** S1 runs TLC on every transaction-module change. Apalache joins the same workflow at its S2 trigger; a specification not mechanically checked on every change is stale within a quarter.
 - **Counterexamples become scenarios.** Any counterexample found is added to [06 §6](../06-validation-harness.md) as a numbered scenario, so the harness inherits the finding permanently.
 - **Invariant violations are read as rule-set gaps first.** Per the corollary above, the first hypothesis for a violated invariant is a missing check-rule, not an engine defect.
 

@@ -43,12 +43,14 @@ Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagram
 
 ```text
 .
+├── .github/               # Repository automation and CI workflows
 ├── AGENTS.md              # Design invariants and contributor review checklist
 ├── doc/
 │   ├── design/            # Architecture and mechanism specifications
 │   │   ├── adr/           # Architecture decision records
 │   │   └── diagrams/      # HTML and Draw.io diagrams
 │   └── plan/              # Implementation and rollout plans
+├── spec/                  # TLA+ transaction-protocol model and TLC configurations
 ├── .editorconfig          # Shared editor behavior
 └── .gitignore             # Go and TypeScript generated artifacts
 ```

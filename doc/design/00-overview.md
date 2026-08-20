@@ -15,7 +15,8 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 | JIT-DAG | An execution DAG generated incrementally by a planner in the ReAct style, using progressive disclosure. | [01](./01-jit-dag-and-vertex-log.md) |
 | planner node | A node that calls a model, produces the next sub-DAG, and owns replanning authority. | [01](./01-jit-dag-and-vertex-log.md) |
 | tool-caller node | A deterministic tool-calling node that neither calls a model nor owns planning authority. | [01](./01-jit-dag-and-vertex-log.md) |
-| vertex log | An append-only vertex-event table in a transactional database, with a globally monotonic `seq`; the sole DAG source of truth. | [01](./01-jit-dag-and-vertex-log.md) |
+| vertex log | An append-only vertex-event table in a transactional database; the sole source of truth for the DAG *and* for transaction brackets. Carries a contiguous per-run `run_seq` and a gappy `global_seq`. | [01 §3.1](./01-jit-dag-and-vertex-log.md) |
+| `run_seq` / `global_seq` | Per-run sequence — strict, contiguous, rollback-safe, commit-ordered, the only legal input to a fold — versus a coarse global `BIGSERIAL` that is none of those. | [01 §3.3](./01-jit-dag-and-vertex-log.md) |
 | surface | The pure-function projection of unshadowed vertex-log rows: the DAG currently visible to a planner. | [01](./01-jit-dag-and-vertex-log.md) |
 | pivot | An irreversible and uncompensable node in a transaction scope, such as a committed inventory decrement or logistics booking; at most one is allowed per scope. | [02](./02-transaction-model.md) |
 | pivot-saga + TCC | The distributed-transaction model for business side effects: compensable before the pivot (Saga/TCC try), forward recovery only after it. | [02](./02-transaction-model.md) |
@@ -44,7 +45,7 @@ The interactive architecture diagram is [diagrams/architecture.html](./diagrams/
 ```mermaid
 flowchart TB
     subgraph ControlPlane["Control plane (engine metadata; DB-backed ACID)"]
-        VL[("vertex log<br/>append-only, seq")]
+        VL[("vertex log<br/>append-only · run_seq")]
         SF["surface projection<br/>current-DAG view"]
         CR["check-rules engine<br/>static validation before DAG freeze"]
         HS[("harness-state<br/>metadata only")]
@@ -79,7 +80,7 @@ flowchart TB
 
 ## 4. Five Design Principles
 
-1. **The log is the source of truth (inspired by dsh).** The vertex log is the sole source of truth. Vertex rows are append-only and are never rewritten in place; all derived state (the current DAG, planner context, and token accounting) is a recomputable pure-function projection. Consequently, `visible to planner ⇔ reconstructible from log` is enforced by runtime assertions, not convention.
+1. **The log is the source of truth (inspired by dsh).** The vertex log is the sole source of truth for both the DAG and the transaction brackets — there is no separate transaction log. Vertex rows are append-only and are never rewritten in place; all derived state (the current DAG, planner context, and token accounting) is a recomputable pure-function projection, **pure within one run and deliberately not across runs** ([01 §3.3](./01-jit-dag-and-vertex-log.md)). Consequently, `visible to planner ⇔ reconstructible from log` is enforced by runtime assertions, not convention.
 2. **Separate control-plane and data-plane transactions.** Engine metadata (atomic subgraph append and state transitions) uses local database transactions. Business side effects (inventory and logistics) use TCC plus pivot-saga. The two layers must never be conflated.
 3. **Prefer deterministic validation to model self-review.** The planner declares transaction boundaries, but the check-rules engine decides admission. A rejected plan must be regenerated; model self-discipline is not a safety guarantee.
 4. **Bind recovery strategy to token economics.** Greedy replanning chooses the nearest viable backtrack point to minimize token use. Every recovery step is charged to a budget, and rollback is used only after that budget is exhausted.

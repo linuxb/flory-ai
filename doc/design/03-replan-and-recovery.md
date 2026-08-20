@@ -70,7 +70,7 @@ This controls replan input cost and clearly identifies paths already disproven.
 
 ## 3. Rollback (L3)
 
-- Trigger when any of the following occurs: token budget is exhausted (§4); the same planner fails N replans in succession (default `N = 2`, preventing oscillation); or repeated check-rule rejection produces no legal plan.
+- Trigger when any of the following occurs: token budget is exhausted (§4); the same planner fails `N = 2` replans in succession; an episode reaches `E = 2` replans regardless of planner identity; or repeated check-rule rejection produces no legal plan. The per-planner limit handles a repeated local premise; the episode cap closes alternating-planner oscillation.
 - Execute Saga compensation or TCC cancel in reverse dependency order and return to the nearest transaction savepoint. Work before the savepoint is retained — including every previously committed pivot, since a savepoint by construction lies after all of them ([02 §4.1](./02-transaction-model.md)). Rollback therefore never lowers the backtrack floor (§2.1); it lowers only the world state, and only as far as the current scope's entry.
 - At the savepoint, make one terminal replan with accumulated failure evidence if budget permits. Otherwise, end the run as failed and generate a human-readable postmortem from the log projection.
 
@@ -139,7 +139,7 @@ dsh unifies resume, fork, and replay into one primitive because a session is a c
 
 ## 6. Open Questions
 
-- **Oscillation across planners.** The consecutive-failure counter in §3 is per planner, so two planners that alternate failing never trip it and the run loops until the budget dies. The fix is an **episode-level** replan cap independent of which planner was targeted, with the detour-cost metric as its detector. The cap's value is not to be guessed: [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) derives it from the shortest non-terminating cycle found while checking liveness property L2. Scenario S3c exists to fail until that bound lands ([06 §6](./06-validation-harness.md)).
+- **Oscillation across planners — resolved.** The consecutive-failure counter in §3 is per planner, so two planners that alternate would never trip it. The S1 TLC discovery model required by [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) found the shortest lasso `P2 -> P1 -> P2`, containing two `replan/boundary` transitions. The engine therefore permits at most `E = 2` replans in one failure episode, independent of planner identity; the next cancellation escalates to L3. This is a protocol bound, not a budget heuristic. Scenario S3c verifies the same rule ([06 §6](./06-validation-harness.md)); the executable evidence is in [`spec/`](../../spec/README.md).
 - Expressing negative failure evidence so planners do not recreate isomorphic subgraphs. A candidate is to inject disproven `(tool, parameter pattern)` pairs as check-rule constraints rather than mere prompts.
 - Merging concurrent failures in parallel branches when both compete for the same ancestor planner as a boundary: serialize by first arrival and make the later failure wait for the new surface.
 - How long forward closure (§2.2 step 2) may be attempted on a post-pivot scope before the run is declared L4. Too short suspends a recoverable run for a human; too long holds resources indefinitely. The validation harness currently asserts only that L4 is eventually reached, not when ([06 §12](./06-validation-harness.md)).

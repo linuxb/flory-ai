@@ -25,7 +25,7 @@ Model calls are non-deterministic, so any assertion that depends on a live model
 
 | Tier | Planner | Assertion strength | Covers | Needs API key |
 |---|---|---|---|---|
-| **T-A pure function** | none | exact equality | check-rules R1–R9, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff (discipline 28) | no |
+| **T-A pure function** | none | exact equality | check-rules R1–R11, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff (discipline 28) | no |
 | **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, in-place replan and dry-run fork semantics, orphan-try sweep, crash recovery | no |
 | **T-C live planner** | real model | statistical thresholds + guardrails | JIT planning quality, plan admissibility rate, token economics | yes |
 
@@ -38,7 +38,9 @@ Almost every property this document cares about is an engine property, not a mod
 The scripted planner must be able to emit **deliberately illegal proposals**, not only good ones. Discipline 14 says a planner declares boundaries and the rule engine admits them; the only way to demonstrate that is to feed the rule engine plans that must be rejected:
 
 - two pivots in one scope (R3)
-- a non-compensable, non-TCC node before the pivot (R2)
+- a non-undoable node before the pivot (R2)
+- a side-effecting node belonging to no declared scope (R10)
+- a scope narrower than the engine-computed minimum (R11)
 - a non-idempotent successor after the pivot (R1)
 - a `txn/try` with no reachable cancel exit (R6)
 - parallel branches with intersecting write sets, one carrying a pivot (R9)
@@ -76,7 +78,7 @@ Value-type resources (price, listing state) follow the same rule and matter more
 
 ### 3.3 The tool registry is under test
 
-Check-rules read `tool_registry`, so the sandbox's registration metadata is part of the surface being validated, not scaffolding around it. Every sandbox tool declares its real `effect_class`, TCC triple, `compensate_tool`, `idempotency_key` convention, `try_timeout_s`, and resource footprint (`inventory:{sku}`, `carrier:{carrier_id}`, `payment:{order_id}`). Registration itself is validated: a tool declaring `compensable: true` without a registered idempotent `compensate_tool` fails registration (R4), which is a test in its own right.
+Check-rules read `tool_registry`, so the sandbox's registration metadata is part of the surface being validated, not scaffolding around it. Every sandbox tool declares its real `effect_class`, TCC triple, `compensate_tool`, `idempotency_key` convention, `try_timeout_s`, and resource footprint (`inventory:{sku}`, `carrier:{carrier_id}`, `payment:{order_id}`). Registration itself is validated: a tool declaring `mode: saga` without a registered idempotent `compensate_tool` fails registration (R4), and a tool with no undo path at all must be registered `irreversible` rather than `reversible` ([02 §2.1](./02-transaction-model.md)). Both are tests in their own right — a mislabelled effect class is the one defect no check-rule downstream can catch.
 
 ### 3.4 Designated pivots
 
@@ -157,7 +159,7 @@ Each row exists to kill one specific accident. A scenario that cannot fail if a 
 | S2b | replan is triggered while a `txn/try` is still open; the engine is offered a boundary at a planner inside the bracket | **negative test**: `replan/boundary` must not be appended with a `boundary_seq` inside an open bracket. Cancel precedes replan (03 §2.4 rule 1); peak holds never exceed demand | O1.no_amplification, O2.boundary | T-B |
 | S2c | any replan scenario above | **negative test**: no `fork/created` and no new `run_id` appears anywhere in an online replan; the business task keeps one run for its whole life (01 §5.1) | O2.no_online_fork | T-B |
 | S3 | carrier A refuses; the L1 replan picks carrier B, which also refuses. Backtracking targets the same planner P1 both times | P1 has now failed `N = 2` consecutive replans, so escalate **directly to L3** rollback (03 §3). L2 must **not** be entered: the boundary was legal throughout, and counting does not make it illegal | O3 | T-B |
-| S3c | two planners alternate: the replan at P2 produces a subgraph whose failure backtracks to P3, whose replan fails back to P2, and so on. No single planner reaches `N` consecutive failures | **oscillation**: the per-planner counter never trips, so the run loops until the budget dies. Assert the engine terminates by **episode-level** bound — a cap on replans within one episode regardless of which planner was targeted — and that the loop is visible in the log as a repeating boundary sequence. This scenario exists to fail while 03 §6 remains open | O3, O5.detour | T-B |
+| S3c | two planners alternate: the replan at P2 produces a subgraph whose failure backtracks to P3, whose replan would otherwise return to P2. No single planner reaches `N` consecutive failures | **oscillation**: the per-planner counter never trips. Permit at most `E = 2` `replan/boundary` events in one failure episode regardless of planner identity; on the next cancellation, escalate to L3 without appending a third boundary. The log records the `P2 -> P3` prefix, the failure that would recur at P2, and the L3 outcome. `E = 2` is derived from the S1 TLC lasso in 03 §6. | O3, O5.detour | T-B |
 | S3b | no pivot has passed in the run, so the backtrack floor is the run start. The failure's nearest ancestor planner P2 sits **inside** an open `txn/scope` bracket whose savepoint precedes P2 | P2 fails the bracket condition (03 §2.1 (i)). Cancelling returns the world to a savepoint before P2, so P2's premises are undone: escalate to **L2** and select the **nearest** legal boundary at or after both the floor and the cancelled scope's savepoint, here P1 (03 §2.2 step 1) | O2, O3 | T-B |
 | S4 | budget preflight fails for the target planner | go straight to L3 rollback to savepoint; no unaffordable replan is attempted | O3 | T-B |
 | S5 | pivot passes, then a suffix node fails permanently | L4 suspension; **zero** `txn/cancel` events after `txn/pivot-passed` | O2, O3 | T-B |
@@ -239,9 +241,11 @@ Structural assertions alone are **necessary but not sufficient**: an engine whos
 | every frozen subgraph passed check-rules; no freeze without a preceding admission | discipline 14 |
 | identical `hash(log_prefix)` + `projector_version` + `harness_state_version` ⇒ identical prompt hash; changing any one of the three must change it | disciplines 8, 11, 24 |
 | replaying a recorded run reproduces the log event-for-event, timestamps ignored | discipline 28 |
-| `linearize` output is unchanged when parallel branch completion order is permuted | discipline 10 |
+| `linearize` output **and every semantic-fold view** are unchanged when parallel branch completion order is permuted | discipline 10; [01 §3.3](./01-jit-dag-and-vertex-log.md) inv. 3 |
 
-The permutation assertion deserves emphasis: the harness runs selected scenarios twice with **deliberately permuted branch scheduling** and asserts an identical prompt hash. Scheduling jitter silently destroying replay determinism and prompt-cache hit rate is exactly the bug class that no ordinary test catches.
+The permutation assertion deserves emphasis: the harness runs selected scenarios twice with **deliberately permuted branch scheduling** and asserts an identical prompt hash *and* identical fold views. Scheduling jitter silently destroying replay determinism and prompt-cache hit rate is exactly the bug class that no ordinary test catches.
+
+It is also the only assertion that tests **reducer commutativity over concurrent events**. Serializing appends fixes storage order but not scheduling order, so two concurrent siblings may receive `run_seq` in either order across replays. A reducer that is order-sensitive over events with no `parent_refs` path between them breaks projection purity even with a perfect sequence ([01 §3.3](./01-jit-dag-and-vertex-log.md) inv. 3).
 
 ### O5 — Cost-model fidelity (reads the log plus the tool registry)
 
@@ -263,7 +267,7 @@ O1–O5 validate **mechanism**: given a policy, was it executed correctly. They 
 
 **wider** is the L2 strategy used deliberately: rather than the nearest legal boundary, select an earlier ancestor planner and replan a larger scope.
 
-Method. Collect historical failure episodes from the log, each identified by its failure `seq`. For each episode create two dry-run forks from that same `seq` (01 §5.2): arm **G** forced to the nearest legal boundary, arm **W** forced one level earlier. Each arm costs one model call; reads execute, writes are skipped.
+Method. Collect historical failure episodes from the log, each identified by its `(run_id, run_seq)`. For each episode create two dry-run forks from that same point (01 §5.2): arm **G** forced to the nearest legal boundary, arm **W** forced one level earlier. Each arm costs one model call; reads execute, writes are skipped.
 
 What a dry run can compare: model cost actually charged, plan size, real quoted tool prices from `effect_class: none` calls, the check-rules verdict, an LLM-judge score, and — the sharpest cheap signal — whether the new plan **reuses a `(tool, parameter pattern)` already recorded as disproven**. That last one is the best available proxy for "this would fail again", and it needs no writes.
 
@@ -313,8 +317,8 @@ Every T-C run records the attribution triple in `run/start`: `harness_state_vers
 
 | Phase | Scope | Exit criterion |
 |---|---|---|
-| **0** | T-A only: table-driven check-rule tests, projection purity tests, replay diff. No sandbox, no key. | every rule R1–R9 has ≥ 1 passing and ≥ 1 violating fixture; every projection layer dumps its intermediate output |
-| **1** | In-process TS sandbox, scripted planner, fault injector, oracles O1–O5, scenarios S1–S10 plus S2b, S2c, S3b, S3c, S5b, S11 (partial), S11b, S11c, S13, S14 | all green except S3c, which fails until the oscillation bound is decided; S11 partial; the four mechanism questions in §1 answered without an API key |
+| **0** | T-A only: table-driven check-rule tests, projection purity tests, replay diff. No sandbox, no key. | every rule R1–R11 has ≥ 1 passing and ≥ 1 violating fixture; every projection layer dumps its intermediate output |
+| **1** | In-process TS sandbox, scripted planner, fault injector, oracles O1–O5, scenarios S1–S10 plus S2b, S2c, S3b, S3c, S5b, S11 (partial), S11b, S11c, S13, S14 | all green with `E = 2` for S3c; S11 partial; the four mechanism questions in §1 answered without an API key |
 | **2** | Sandbox promoted to an out-of-process service; Go coordinator on real Postgres | S11 and S12 green; cross-language conformance fixtures pass (discipline 34) |
 | **3** | Policy validation (§8.1): dry-run corpus replay of greedy versus wider over recorded episodes, stratified by `error_class` | a published per-stratum cost comparison, and either a proposed `error_class` routing rule or evidence that greedy wins everywhere |
 | **4** | T-C live planner, stratified arms, guardrail gating, up-front baseline arm (§8.2) | a baseline arm with published metrics that a change must beat; the §8.1 routing rule either confirmed on live traffic or withdrawn |
@@ -331,7 +335,6 @@ Phases 0 through 2 require no API key and no model access, which is the point: r
 
 - **Forward-closure bound (resolved contradiction, new question).** [03 §2.2](./03-replan-and-recovery.md) step 2 now requires driving a post-pivot scope forward to closure rather than searching upward past the floor. Unresolved: how long forward closure may be attempted before the run is declared L4. Too short and a recoverable run is suspended for a human; too long and an unrecoverable run holds resources indefinitely. The harness currently asserts only that L4 is eventually reached, not when, so S10 cannot yet distinguish a correct bound from an arbitrary one.
 - **L2 reachability.** As specified, L2 is reachable only through structural infeasibility of the replan boundary; consecutive replan failures route L1 directly to L3 (03 §3). Whether an intermediate count-based L1 → L2 step was intended is unresolved. The harness asserts the literal specification, so if the intent was different, S3 will fail and expose it — the desired outcome, but it should be a deliberate decision rather than a surprise.
-- **Oscillation bound.** S3c asserts that alternating planners terminate, but the bound itself is unspecified: how many replans one episode may contain before the run is declared L3 regardless of which planner was targeted. The value will be derived from liveness checking rather than chosen ([ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md), property L2); S3c fails by design until then.
 - **Judge calibration.** §8.1 uses an LLM judge to score dry-run plans. The judge is itself a model, so its version belongs in the attribution triple; whether judge drift can masquerade as a policy improvement is unexamined.
 - **Scenario coverage measurement.** Rule and discipline coverage is currently tracked by hand in §6. A generated coverage report — which disciplines have no killing scenario — would be more honest.
 - **Property-based scenario generation.** S1–S14 are hand-written. Randomly generated DAG shapes with generated fault schedules, checked against O1 and O2 only, would likely find the multi-replan shadowing boundary cases flagged as an open question in [01 §7](./01-jit-dag-and-vertex-log.md).

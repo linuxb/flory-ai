@@ -14,7 +14,7 @@ E-commerce side effects fall into the three effect classes adopted from Atomix:
 
 - **TCC** (try-confirm-cancel) fits resource reservation: `try` reserves inventory, `confirm` commits it, and `cancel` releases it. The tool must provide all three operations.
 - **Saga compensation** fits operations with a forward action and a compensation action but no reservation semantics.
-- **Pivot-saga** is the skeleton: `compensable prefix (TCC try / Saga steps) → pivot (irreversible point) → idempotent-retry suffix (forward recovery only)`.
+- **Pivot-saga** is the skeleton: `undoable prefix (TCC try / Saga steps) → pivot (irreversible point) → idempotent-retry suffix (forward recovery only)`.
 
 ## 2. Node Transaction Attributes
 
@@ -24,48 +24,107 @@ Each tool-caller vertex includes the following `vertex/created` payload:
 {
   "txn": {
     "scope_id": "txn-7f3a",
-    "effect_class": "reversible",
-    "mode": "tcc",
-    "is_pivot": false,
-    "compensable": true,
-    "compensate_tool": "inventory.release",
+    "effect_class": "reversible",              // registry; the only side-effect label
+    "mode": "tcc",                             // tcc | saga | plain
+    "compensate_tool": "inventory.release",    // required when mode = saga
     "idempotent_retryable": true,
     "idempotency_key": "order:{order_id}:reserve",
     "retry_policy": { "max": 3, "backoff": "exp" },
-    "try_timeout_s": 300
+    "try_timeout_s": 300,
+    "footprint": ["inventory:SKU-123@{A,B}"]   // sound over-approximation, see §3.1
   }
 }
 ```
 
-These attributes come from tool-registration metadata. Each tool statically declares its effect class, TCC interfaces, compensation tool, and idempotency-key convention. A planner may reference those declarations, but may not invent attributes. This makes the two-layer design of planner declaration plus rule-engine validation credible.
+All of it comes from tool-registration metadata. Each tool statically declares its effect class, TCC interfaces, compensation tool, idempotency-key convention, and resource footprint. A planner may reference those declarations but may never invent them.
 
-## 3. Two-Layer Transaction Boundaries
+### 2.1 Derived attributes are never declared
 
-### 3.1 Planner declaration
+Two properties are **computed, not stated**:
 
-A sub-DAG proposal declares `txn/scope`: member vertices, pivot, and scope savepoint. The planner prompt contains a summary of tool metadata so it can make informed choices; for example, inventory lookup and comparison are read-only and outside the scope, while inventory reservation through logistics booking form a scope whose booking is the pivot.
+```
+is_pivot  ≡  effect_class = "irreversible"
+undoable  ≡  mode = "tcc"  ∨  compensate_tool ≠ null
+```
 
-### 3.2 Deterministic check-rules
+Earlier drafts carried `is_pivot` and `compensable` as independent payload fields alongside `effect_class`. That allowed three fields to disagree — a node could be declared `irreversible` and `is_pivot: false` at the same time — and it invited a whole class of confusion in which "non-compensable node" and "pivot" were discussed as if they were different things. **They are the same predicate**: an effect with no undo path is irreversible, and an irreversible effect may only be a pivot (§1).
+
+Making them derived removes the disagreement by construction, which is stronger than adding a rule to detect it. The registry-time obligation that remains is: **a tool with no undo path must be registered `irreversible`.** Mislabelling there is a registry defect that no check-rule can catch, which is why registration itself is under test ([06 §3.3](./06-validation-harness.md)).
+
+The three legal shapes of an undoable node are therefore:
+
+| Shape | Attributes | Undo path |
+|---|---|---|
+| Reversible via TCC | `effect_class: reversible`, `mode: tcc` | `cancel`, part of the tool's triple |
+| Reversible via Saga | `effect_class: reversible`, `mode: saga`, `compensate_tool` set | the registered compensation tool |
+| Bufferable | `effect_class: bufferable` | never released; discard the buffer |
+
+## 3. Three-Layer Transaction Boundaries
+
+Boundary determination is split by *who can know what*. The planner's required knowledge is deliberately minimised: everything mechanically derivable is derived by the engine, so the planner cannot get it wrong.
+
+### 3.1 Layer 1 — the engine computes the minimum scope
+
+From `effect_class` and `footprint` alone:
+
+> Every reversible node that precedes a pivot **and shares a footprint with it** must belong to that pivot's scope.
+
+This is computed, never asked of the planner. In the example `reserve 3 units → set promo price → book carrier (pivot)`, the booking's footprint includes `inventory:SKU-123`, so the reservation is forced into the scope; the price change touches `price:SKU-123` only, so the minimum does not require it.
+
+**Footprints need only be soundly over-approximated at freeze, not exactly resolved.** If the warehouse has not been chosen yet, `inventory:SKU-123@{A,B}` — the union of candidates — is a valid footprint. Over-approximation can only manufacture *false* conflicts, causing extra barriers or serialization; it can never miss a real one. For a safety rule that is the correct direction to err.
+
+This matters because it dissolves an apparent conflict with progressive disclosure. A node's parameters may be **references to upstream vertex outputs** rather than literals ([01 §2.2](./01-jit-dag-and-vertex-log.md)), so `warehouse = ref(T1.output.best_warehouse)` freezes cleanly. The "no clairvoyant parameters" assertion ([06 §6](./06-validation-harness.md) S14) forbids *inventing* a value the planner cannot know; it does not forbid *referencing* a value that will exist. A query-then-reserve-then-book flow can therefore be one scope in one frozen subgraph.
+
+The one case where splitting is genuinely forced is an **unenumerable resource identity** — "reserve whatever SKU the supplier recommends", where the candidate set cannot be listed at freeze. The over-approximation degenerates to the entire resource class, which serializes everything that touches it. Splitting is then a correctness-preserving throughput fix, not a rule requirement.
+
+### 3.2 Layer 2 — the planner may widen, never narrow
+
+The planner declares `txn/scope`: member vertices and the scope savepoint. The pivot is not declared, it is derived (§2.1).
+
+**Widening** means declaring a scope larger than the computed minimum, and it is the planner's real contribution. Continuing the example: the business may require that a promotional price only take effect if the goods actually ship, so a booking failure must also revert the price. The engine cannot derive this — the two footprints are disjoint and technically unrelated. This is a **business atomicity** requirement, and its source must be `task_input` or a workflow policy. A planner inferring atomicity from general world knowledge is producing exactly the kind of unverifiable judgement this architecture exists to avoid; if that starts happening, the missing piece is the policy channel, not a better prompt.
+
+Widening is not free: a wider scope has more to compensate on failure, and its R9 barrier suppresses more concurrency. It should be driven by an explicit requirement, never by "圈进来更保险".
+
+**Narrowing** — declaring a scope smaller than the minimum — is always illegal, because it is how a planner would escape the rules by simply not declaring. Omit the reservation from the booking's scope and R2 no longer applies to it: R2 constrains "in-scope nodes before a pivot", and the node is now out of scope. A booking failure then cancels nothing, and three units stay held until `try_timeout_s` expires while other orders see reduced availability.
+
+### 3.3 Layer 3 — the rules admit, and scopes may extend across freezes
+
+A scope **may** gain members in a later freeze. This is not merely tolerated, it is necessary: when a scope's `txn/try` is still open, the point after it is not a savepoint ([§4.1](#41-event-brackets)), so a pivot that must be atomic with that reservation cannot be placed in a fresh scope — it has to join the existing one.
+
+Extension is safe because of the shape the rules take:
+
+| Rule shape | Incrementally decidable | Examples |
+|---|---|---|
+| **Prohibition** — X must not exist | **Yes.** Monotone: a violation appears at the moment of addition and cannot be repaired by later additions | R1, R2, R3, R7, R10 |
+| **Obligation** — Y must exist | Not from graph structure alone | R6 (a try needs exits), R5/R9 (a barrier must be inserted) |
+
+The obligations are nonetheless decidable at each freeze, because they are satisfied by **registry attributes rather than future vertices**: a try's cancel exit is `mode: tcc` or `compensate_tool`, not a planned node, and a barrier only has to precede the pivot, so it is inserted in whichever freeze introduces the pivot.
+
+> **Meta-rule for rule authors.** New check-rules should be written in prohibition form. An obligation that can only be discharged by a vertex in some *later* subgraph would make incremental extension undecidable, and would force scopes to be planned in one shot — surrendering progressive disclosure for no invariant gain.
+
+When extension is impossible, the remedy is not a dead end: if the scope has no open try, that point **is** a savepoint by definition, and the next pivot simply opens a new scope. This is the same mechanism R3 already prescribes for multiple irreversible operations (§3.5).
+
+### 3.4 Deterministic check-rules
 
 The rules run before a DAG is frozen. **Any violation produces `subgraph/rejected` with details, and the planner must regenerate.**
 
-| #   | Rule                                                                                                                                                                                               | Reason                                                                                                                                                           |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| R1  | Every reachable in-scope successor after a pivot must be `idempotent_retryable = true`.                                                                                                            | Guards against **transient failure**: forward recovery advances by retrying, so retries must not duplicate side effects.                                         |
-| R2  | Every in-scope node before a pivot must be compensable or use TCC.                                                                                                                                 | Any pre-pivot failure must be able to return to the savepoint.                                                                                                   |
-| R3  | Each scope has at most one pivot — counted across sequential successors *and* parallel branches. Multiple irreversible operations require nested or sequential scopes with independent savepoints. | Guards against **permanent failure**: a savepoint must exist between any two irreversible points. Parallel twin pivots are invisible to R1's reachability check. |
-| R4  | Every compensation chain is complete: `compensate_tool` is registered and itself idempotent.                                                                                                       | Failed compensation can be retried.                                                                                                                              |
-| R5  | Parallel branches may not contain independent pivots before their join without a confirmation barrier.                                                                                             | Prevents one branch passing a pivot while the other must roll back.                                                                                              |
-| R6  | Each `txn/try` has reachable confirm and cancel exits and declares `try_timeout_s`.                                                                                                                | Prevents permanently frozen resources.                                                                                                                           |
-| R7  | Cross-scope dependencies may read only outputs of confirmed vertices.                                                                                                                              | Prevents dirty reads.                                                                                                                                            |
-| R8  | A read-only (`effect_class = none`) node must not be a retry dependency that blocks post-pivot forward recovery.                                                                                   | Keeps recovery path safely retryable.                                                                                                                            |
-| R9  | If parallel branches have intersecting resource write sets and either has a pivot, insert a pre-pivot barrier or serialize the branches.                                                           | Prevents a pivot in A from invalidating B's needed rollback.                                                                                                     |
+| # | Rule | Reason |
+|---|---|---|
+| R1 | Every reachable in-scope successor after a pivot must be `idempotent_retryable = true`. | Guards against **transient failure**: forward recovery advances by retrying, so retries must not duplicate side effects. |
+| R2 | Every in-scope node before a pivot must be `undoable` (§2.1). | Any pre-pivot failure must be able to return to the savepoint. |
+| R3 | Each scope has at most one pivot — counted across sequential successors *and* parallel branches. Multiple irreversible operations require nested or sequential scopes with independent savepoints. | Guards against **permanent failure**: a savepoint must exist between any two irreversible points. Parallel twin pivots are invisible to R1's reachability check. |
+| R4 | Every compensation chain is complete: `compensate_tool` is registered and itself idempotent. | Failed compensation can be retried. |
+| R5 | Parallel branches may not contain independent pivots before their join without a confirmation barrier. | Prevents one branch passing a pivot while the other must roll back. |
+| R6 | Each `txn/try` has reachable confirm and cancel exits and declares `try_timeout_s`. | Prevents permanently frozen resources. |
+| R7 | Cross-scope dependencies may read only outputs of confirmed vertices. | Prevents dirty reads. |
+| R8 | A read-only (`effect_class = none`) node must not be a retry dependency that blocks post-pivot forward recovery. | Keeps recovery path safely retryable. |
+| R9 | If parallel branches have intersecting resource write sets and either has a pivot, insert a pre-pivot barrier or serialize the branches. | Prevents a pivot in A from invalidating B's needed rollback. |
+| R10 | Every node with `effect_class ≠ none` must belong to a declared scope. | Without it, every scope-level rule is escapable by not declaring: a bare `logistics.book` with no scope passes R1–R9 because each of them constrains *in-scope* nodes. |
+| R11 | A declared scope must contain at least the engine-computed minimum for its pivot (§3.1). Wider is legal; narrower is rejected. | Closes the narrowing escape in §3.2. R10 forces membership to exist; R11 forces it to be sufficient. |
 
-`check(sub_dag_proposal, tool_registry) → pass | violations[]` is a pure function and can be exhaustively unit tested. R9 derives write sets from registered resource footprints, such as `inventory:{sku}`, after parameter binding.
+`check(sub_dag_proposal, tool_registry) → pass | violations[]` is a pure function and can be exhaustively unit tested.
 
-> **Revision v0.2 (R1/R3 orthogonalization).** R1 originally also required `effect_class ≠ irreversible`, which overlapped with R3 in the sequential case: a pivot following a pivot violated both rules at once. The rules are now orthogonal. **R1 guards transient failure** — retry safety of post-pivot successors, a local reachability-based property check. **R3 guards permanent failure** — scope-level pivot cardinality and savepoint granularity, a global check that also covers parallel twin pivots, which R1 cannot express (no path exists between them). The repair actions differ too: an R1 violation means "make this node idempotent or move it out of the post-pivot region"; an R3 violation means "split the scope." Side effect of the tightening: irreversible-but-idempotent low-stakes nodes (e.g. notification send with a dedup key) are now legal after a pivot.
-
-### 3.3 Why R3 permits at most one pivot
+### 3.5 Why R3 permits at most one pivot
 
 Two irreversible operations in one scope create a dead zone:
 
@@ -80,12 +139,20 @@ Split it into two scopes instead:
 ```
 Scope A: inventory reserve (try) → P1 payment
 Scope B: savepoint S1 (scope entry) = "paid, inventory confirmed"
-         → create picking order (compensable) → P2 logistics booking
+         → create picking order (undoable) → P2 logistics booking
 ```
 
 On P2 failure, compensate Scope B back to S1. The planner then has authority at a coherent savepoint: it can choose another carrier, another warehouse, or a refund workflow. A refund is a new forward business action, not transaction rollback. The single-pivot rule guarantees a planner-usable savepoint between irreversible actions.
 
 See page 1 of [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio).
+
+### 3.6 Rule-set revision history
+
+| Revision | Change | Reason |
+|---|---|---|
+| v0.2 | **R1 narrowed.** It originally also required `effect_class ≠ irreversible`, overlapping R3 in the sequential case, so a pivot after a pivot violated both at once. R1 now guards **transient failure** only — retry safety of post-pivot successors, a local reachability check — while R3 guards **permanent failure** — scope-level pivot cardinality, which also covers parallel twin pivots that R1 cannot express because no path exists between them. Repairs differ too: R1 means "make the node idempotent or move it out of the post-pivot region", R3 means "split the scope". Side effect: irreversible-but-idempotent low-stakes nodes, such as a notification with a dedup key, are legal after a pivot. |
+| v0.3 | **R10 and R11 added; `is_pivot` and `compensable` demoted to derived (§2.1).** R1–R9 are all *in-scope* constraints, so a planner could evade every one of them by declaring no scope, or a too-small one. R10 forces membership to exist and R11 forces it to be sufficient. |
+| v0.3 | **Two proposed rules rejected before entry.** (a) *"A scope's members must all be contained in one frozen subgraph."* Rejected: pivot uniqueness is a monotone prohibition and is decidable incrementally, and forbidding extension would break the case in §3.3 where a pivot must join a scope whose try is still open. (b) *"A pivot-less scope may not contain a non-compensable node."* Rejected as incoherent: a node with no undo path *is* a pivot (§2.1), so the configuration it describes is unreachable once R10 exists. |
 
 ## 4. Runtime Protocol
 
@@ -149,8 +216,9 @@ See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Para
 
 ## 6. Open Questions
 
+- **Conditional compensation, and pivots that appear at runtime.** The `effect_class` taxonomy assumes an undo path is either present or absent. Some are present *only within a window*: `channel.list` can be undone by `channel.unlist`, but only until a customer orders — afterwards, unlisting does not undo the sale obligation. Such a tool will be registered `reversible`, and that label becomes a lie once the window closes: the compensation chain is complete on paper while broken in fact. A fix needs a new dimension (`compensation_validity: unconditional | window(T) | conditional(pred)`) and an R4 upgraded to "the compensation is still valid at the moment it is needed". It also challenges a load-bearing assumption: **a node whose compensation has expired is effectively a pivot**, so pivot status would become "statically labelled plus runtime promotion" rather than a static property. That is a material model change and should be decided deliberately rather than patched in.
 - Parent/child savepoint semantics and partial-commit visibility for nested transaction scopes.
 - A fallback for channel APIs that cannot reserve resources, such as locally recording a simulated try and delaying execution.
 - The reconciliation fallback protocol when a pivot status-query interface is unavailable.
-- **Check-rule completeness.** R1–R9 were derived by hand, so the rule set has no completeness argument: a plan admitted by all nine may still reach a dead state. [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) attacks this from two directions — modeling the planner as an adversary bounded only by check-rules, so any invariant violation names a missing rule, and a bounded Alloy search for admissible-but-dead DAG shapes.
+- **Check-rule completeness.** R1–R11 were derived by hand, so the rule set has no completeness argument: a plan admitted by all eleven may still reach a dead state. [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) attacks this from two directions — modeling the planner as an adversary bounded only by check-rules, so any invariant violation names a missing rule, and a bounded Alloy search for admissible-but-dead DAG shapes.
 - **Unreachability of the parallel-pivot dead state (§4.3).** The argument is currently prose. [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) specifies it as invariant I1 with an unbounded guarantee over arbitrary branch counts, since scenario tests can only sample interleavings.

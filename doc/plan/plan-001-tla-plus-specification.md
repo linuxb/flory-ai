@@ -1,6 +1,6 @@
 # Plan 001: TLA+ specification of the transaction protocol
 
-- **Status:** Proposed — awaiting an owner (see §7)
+- **Status:** Active — S1 complete; S2 and S3 remain trigger-gated
 - **Date:** 2026-08-20
 - **Implements:** [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md)
 - **Specifies:** [02 transaction model](../design/02-transaction-model.md), [03 replan and recovery](../design/03-replan-and-recovery.md)
@@ -13,9 +13,9 @@ The repository currently contains documentation and no engine code. That makes t
 
 | Blocked question | Where | What the spec produces |
 |---|---|---|
-| Oscillation bound — how many replans may one episode contain | [03 §6](../design/03-replan-and-recovery.md), [06 §12](../design/06-validation-harness.md) | The **value**, derived from the shortest non-terminating cycle found by liveness property L2. Scenario S3c fails by design until this lands. |
+| Oscillation bound — how many replans may one episode contain | [03 §6](../design/03-replan-and-recovery.md), [06 §12](../design/06-validation-harness.md) | **Resolved:** the L2 lasso has two replan transitions, yielding `E = 2`; S3c is now specified to pass. |
 | Is the parallel-pivot dead state truly unreachable | [02 §6](../design/02-transaction-model.md) | A machine-checked invariant replacing a prose argument. |
-| Is the R1–R9 rule set complete | [02 §6](../design/02-transaction-model.md) | Counterexamples that name missing rules. |
+| Is the R1–R11 rule set complete | [02 §6](../design/02-transaction-model.md) | Counterexamples that name missing rules. |
 
 **A defect found now costs a document edit.** After the Go coordinator ships, the same defect costs a rewrite of the component that touches money, plus possibly a migration of live half-open brackets.
 
@@ -27,7 +27,7 @@ The plan deliberately separates *specification as a design instrument* — cheap
 
 | Stage | Trigger | Scope | Skill required |
 |---|---|---|---|
-| **S1 — now** | none; no code exists | TLC only. Invariants I1, I3. Liveness **L2** to derive the oscillation bound. Constants `N ∈ {2,3}`, `K = 3`, symmetry reduction. Target ≈150–200 lines | Ordinary TLA+, learnable in weeks |
+| **S1 — complete** | no engine code exists | TLC only. Invariants I1, I3. Liveness **L2** derived the oscillation bound. Constants `N ∈ {2,3}`, `K = 3`; symmetry is used for safety only because TLC warns against it for liveness. | Ordinary TLA+, learnable in weeks |
 | **S2** | start of Go coordinator implementation (ADR-001 Phase 2) | Add I2, I4–I7. Introduce Apalache inductive invariants for unbounded safety. Build trace validation | **Inductive invariant strengthening — scarce** |
 | **S3** | first production traffic with real logs | Alloy structural search for admissible-but-dead DAG shapes. Optional TLAPS for I1 | Specialist |
 
@@ -41,10 +41,11 @@ Merging the stages is the failure mode this table exists to prevent: pooling the
 
 ```
 spec/
-  FloryTxn.tla        -- the protocol: brackets, barrier, pivot, replan boundary
-  FloryTxn.cfg        -- TLC configuration: constants, invariants, properties
-  MCSmall.tla         -- N=2 instance with symmetry, for fast iteration
-  MCThree.tla         -- N=3 instance, run before every commit to the spec
+  FloryTxn.tla        -- protocol plus R10/R11 admission abstraction
+  MCSmall*.cfg        -- N=2 safety and liveness configurations
+  MCThree*.cfg        -- N=3 safety and liveness configurations
+  MC*.tla/.cfg        -- discovery and controlled-negative configurations
+  run-tlc.sh          -- pinned TLC runner used locally and by CI
   README.md           -- how to run, what each invariant means, current findings
 ```
 
@@ -64,13 +65,16 @@ Kept minimal — every added variable multiplies the state space.
 
 | Variable | Meaning |
 |---|---|
-| `scopeState[s]` | `open`, `barrierWaiting`, `pivotPassed`, `committed`, `cancelled` |
-| `tryState[b]` | per branch: `none`, `tried`, `confirmed`, `cancelled`, `timedOut` |
-| `holds[r]` | signed reservation per resource, owned by branch |
-| `pivotDone[s]` | whether the scope's irreversible action has executed |
-| `boundary` | the currently selected replan boundary, or none |
+| `scopeState` | `open`, `barrierWaiting`, `pivotPassed`, `cancelled` |
+| `createdNodes` | effects frozen so far; pivot identity is derived from `effect_class` |
+| `scopeMembers` | members of the current scope; grows across freezes while open |
+| `foreignScopeMembers` | another declared scope, used to demonstrate R11 narrowing rejection |
+| `tryState[b]` | per current-scope branch: `none`, `tried`, `sealed`, `failed` |
+| `holds[b]` | binary reservation held by a branch in the finite shared pool |
+| `pivotFrozen` / `barrierFrozen` | whether the pivot-introducing freeze derived the pivot and inserted its barrier |
+| `pivotDone` | whether the scope's irreversible action has executed |
 | `replanCount` | per-episode replan counter, for L2 |
-| `plannerTurn` | whose turn it is to act, for fairness |
+| `lastPlanner` / `lastPlannerFailures` | per-planner failure state for the oscillation model |
 
 Excluded from the model on purpose: token budgets, prompt assembly, projections, cost estimation, and anything about plan quality. None of them affect the invariants, and each would inflate the state space.
 
@@ -80,6 +84,8 @@ Excluded from the model on purpose: token budgets, prompt assembly, projections,
 |---|---|---|
 | I1 | No reachable state has one branch past its pivot while a sibling in the same scope requires whole-scope rollback | safety |
 | I3 | No `cancel` action occurs in a scope after `pivotPassed` | safety |
+| A10 | Every frozen side-effecting node belongs to a declared scope (R10 admission) | safety |
+| A11 | A pivot scope contains its engine-computed minimum (R11 admission) | safety |
 | L2 | Every failure episode eventually reaches commit, cancel, or L4 suspension | liveness, weak fairness on executor and planner steps |
 
 I2 and I4–I7 are deferred to S2 not because they matter less, but because S1's purpose is to answer the three blocked questions with the smallest model that can.
@@ -105,6 +111,28 @@ Item 6 is the one that makes this plan pay off even if the specification is late
 - Every counterexample is a numbered harness scenario.
 - TLC runs in CI on changes under `spec/`.
 
+### 3.7 S1 findings (updated 2026-08-21)
+
+The Flory engine team owns the specification. TLC completed the hardened
+two-branch and three-branch models with I1, I3, R10 admission, R11 admission,
+and L2 satisfied. Safety is also checked with branch symmetry reduction;
+liveness is checked separately without symmetry because TLC warns that symmetry
+may hide a liveness violation.
+
+The uncapped discovery configuration produced the shortest lasso:
+
+```text
+replan(P2) -> failure -> cancel -> replan(P1) -> failure -> cancel -> replan(P2)
+```
+
+The cycle has two `replan/boundary` transitions. The resulting episode cap is
+therefore `E = 2`: after two replans in one episode, the next cancellation
+escalates to L3 rather than opening a third replan. The controlled no-barrier,
+post-pivot-cancel, unscoped-effect, and narrow-scope models respectively violate
+I1, I3, R10, and R11. The narrow-scope counterexample keeps its effect in a
+different declared scope, so it isolates R11 from the R10 check. The reproducible
+command is `./spec/run-tlc.sh`.
+
 ## 4. What is deliberately excluded from S1
 
 | Excluded | Why |
@@ -113,7 +141,7 @@ Item 6 is the one that makes this plan pay off even if the specification is late
 | Trace validation | Needs a real log, and there is no engine yet. S2. |
 | Alloy structural search | Valuable for rule completeness, but the adversarial TLC model surfaces part of it first. S3. |
 | TLAPS | Optional even in S3. A half-finished proof provides no more assurance than a model check. |
-| Compensation algebra, R1–R9 as functions, world conservation arithmetic, projection purity | Verified against real code by the harness; see [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) exclusions. |
+| Compensation algebra, R1–R11 as functions, world conservation arithmetic, projection purity | Verified against real code by the harness; see [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) exclusions. |
 
 ## 5. A rejected shortcut
 
@@ -133,9 +161,9 @@ Implementation cost is not the constraint on this plan. Skill availability is.
 
 ## 7. Preconditions and the open decision
 
-Per [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md), three preconditions apply. Timing is satisfied — no engine code exists. The other two are not yet resolved:
+Per [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md), three preconditions apply. Timing is satisfied — no engine code exists. Ownership is now resolved; the S2 skill precondition remains open:
 
-1. **Named owner.** One person must be willing to read, run, and maintain the specification for at least a year. They need not know TLA+ today; S1 work item 1 exists for that. **This plan stays `Proposed` until an owner is named.**
+1. **Named owner — resolved.** The Flory engine team owns `spec/`, its TLC workflow, and review of changes to the transaction model.
 2. **Scarce skill for S2.** Inductive invariant strengthening for I2 will likely require capability the team does not currently have. Treat it as a hiring or training precondition attached to the S2 trigger, not an implementation detail.
 
-**If no owner can be named**, do not start S1. The recommended substitute is to spend the same effort making the harness scheduler seeded and enumerable, turning [06 §4](../design/06-validation-harness.md)'s deterministic fault injector into a deterministic simulator. It finds fewer design defects but tests real code, and — decisively — it keeps working when unmaintained, whereas an unowned specification becomes write-only documentation that creates false confidence.
+If ownership changes, assign a replacement before accepting a transaction-protocol change; an unowned specification becomes write-only documentation and creates false confidence.

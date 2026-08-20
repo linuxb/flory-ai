@@ -5,8 +5,8 @@
 ## 1. Goals
 
 - The DAG is not a predefined workflow. A planner generates it just in time in the ReAct style, through progressive disclosure: each planner expands only the next batch of certain actions and the next decision point rather than the entire graph.
-- Storage and execution history share one **append-only vertex log** in a transactional database: **a vertex is an event and `seq` is its log position**. No separate event-log component is introduced.
-- Every derived view (current DAG, planner context, progress, and token accounting) is a pure-function projection of the log, making it auditable, replayable, and forkable.
+- Storage and execution history share one **append-only vertex log** in a transactional database: **a vertex is an event and `run_seq` is its position within its DAG**. No separate event-log component is introduced, and there is no separate transaction log either — the `txn/*` brackets are rows in the same table.
+- Every derived view (current DAG, planner context, progress, and token accounting) is a pure-function projection of the log, making it auditable, replayable, and forkable. **Purity is guaranteed within one run and deliberately not across runs** (§3.3 invariant 3), which is exactly the scope every projection and every dry-run analysis operates in.
 
 ## 2. Node Roles
 
@@ -29,23 +29,65 @@ The role split is a **permission split**. Planners may append sub-DAG proposals;
 
 ### 3.1 Illustrative schema
 
-The single `vertex_log` table has a globally monotonic `seq` (a database identity column is sufficient) and immutable rows:
+`vertex_log` carries **two sequence numbers with different guarantees**, and confusing them is the most consequential mistake available in this schema (see §3.3 invariant 3).
 
 ```sql
 CREATE TABLE vertex_log (
-  seq          BIGSERIAL PRIMARY KEY,      -- globally monotonic log position
-  run_id       UUID NOT NULL,              -- one end-to-end task
-  event_type   TEXT NOT NULL,              -- see 3.2
+  run_id       UUID    NOT NULL,           -- one end-to-end task = one DAG
+  run_seq      BIGINT  NOT NULL,           -- per-run: strict, contiguous, rollback-safe
+  global_seq   BIGSERIAL,                  -- coarse global order; gappy, NOT commit-ordered
+  event_type   TEXT    NOT NULL,           -- see 3.2
   vertex_id    UUID,                       -- owning vertex; NULL for some events
-  parent_refs  UUID[],                     -- DAG edges: parent vertices define partial order
+  parent_refs  UUID[],                     -- DAG edges: parent vertices define causal order
   planner_id   UUID,                       -- planner that generated this vertex
-  payload      JSONB NOT NULL,             -- role, tool, parameters, txn attributes, result summary
-  shadowed_by  BIGINT,                     -- never backfill; shadow events declare this relationship
-  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+  scope_id     UUID,                       -- promoted from payload so it can be indexed
+  payload      JSONB   NOT NULL,           -- role, tool, params, txn attrs, result summary, blob refs
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (run_id, run_seq)
+) PARTITION BY HASH (run_id);
 ```
 
-If `shadowed_by` exists as a materialization optimization, only the projector may maintain it. Semantically, `subgraph/shadowed` is always authoritative, so a materialized field never weakens the immutable-row discipline.
+`run_seq` is allocated from a counter column on the run row, inside the appending transaction:
+
+```sql
+UPDATE run SET next_seq = next_seq + 1 WHERE run_id = $1 RETURNING next_seq;
+```
+
+That single statement buys three properties a sequence cannot provide. The row lock **serializes appends within one run**, so a run's log is strictly ordered. The counter lives in a row, so an aborted transaction **un-increments it** — no gaps from rollback, which `BIGSERIAL` explicitly does not offer. And because the lock is per-`run_id`, **different runs never contend**.
+
+The cost is that concurrent appends inside one run serialize on that row. That is acceptable and arguably desirable: a run has at most a handful of concurrent branches, the transactions are short, and the resulting order is what makes per-run reads reproducible.
+
+Not stored here: raw model input and output, which live in blob storage referenced from `payload` (§7). Hot query fields (`run_id`, `event_type`, `vertex_id`, `scope_id`) are real columns; everything else stays in JSONB.
+
+**Every intra-run reference uses `run_seq`** — `replan/boundary.boundary_seq`, `subgraph/shadowed` ranges, `fork/created.boundary_seq`. Cross-run references, such as `evidence_seqs` in harness-state ([04](./04-refine-and-harness-state.md)), must be `(run_id, run_seq)` pairs; a bare number is ambiguous.
+
+A dry-run child ([§5.2](#52-forking-is-for-dry-runs-only)) inherits the prefix with the parent's `run_seq` values unchanged and continues numbering after `seed_length`. `PRIMARY KEY (run_id, run_seq)` stays satisfied because `run_id` differs.
+
+### 3.1.1 Projections and their indexes
+
+The transaction bracket state is **not a separate log** — `txn/*` events are ordinary `vertex_log` rows. What the coordinator needs beyond the log is a set of projections for queries a raw scan cannot serve. All of them are updated **in the same database transaction as the event append**, never asynchronously: pivot admission is a safety-critical synchronous read, and a projection lagging by even a few hundred milliseconds could let an irreversible action fire that should have been blocked.
+
+| Projection | Key columns and indexes | Query it serves |
+|---|---|---|
+| `txn_scope` | `scope_id` PK, `state`, `pivot_vertex_id`, `savepoint_seq`, `opened_seq`, `closed_seq`; partial unique `(scope_id) WHERE is_pivot` | "May this scope's pivot fire?" and "is there an open bracket at this replan boundary?" |
+| `txn_bracket` | one row per try: `state`, `deadline_at`, `idempotency_key`; **partial index `WHERE state = 'tried'`**; unique `(idempotency_key)` | orphan sweep `WHERE state='tried' AND deadline_at < now()`; timer rebuild after restart |
+| `work_queue` | `vertex_id`, `ready_at`, `claimed_by`; claimed with `FOR UPDATE SKIP LOCKED` | the Go coordinator claiming executable vertices |
+
+The partial index on `txn_bracket` matters operationally: open brackets are a small hot set while closed ones are cold history, so the sweep's cost stays independent of total log size. It is also the crash-recovery mechanism — the coordinator holds no timers in memory, it re-reads open brackets by deadline on restart.
+
+### 3.1.2 Invariants pushed into the database
+
+Constraints do not forget, and the coordinator has many concurrent writers. Anything expressible as a constraint belongs there rather than in review comments — and all of these are cheap now and near-impossible to retrofit once production data exists.
+
+| Discipline | Database mechanism |
+|---|---|
+| Append-only (§3.3 inv. 1) | The application role receives `INSERT, SELECT` on `vertex_log` and no `UPDATE`/`DELETE` grant at all |
+| Event ownership ([AGENTS.md](../../AGENTS.md) #29) | `BEFORE INSERT` trigger checking `current_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Go coordinator cannot append `subgraph/*` |
+| Idempotency ([02 §2](./02-transaction-model.md)) | `UNIQUE (idempotency_key)` on `txn_bracket` — a duplicate try becomes a constraint violation instead of a duplicated side effect |
+| One pivot per scope (R3) | partial unique index on the pivot column; a second line of defence behind the freeze-time check |
+| No cancel after pivot (I3) | `BEFORE UPDATE` trigger validating the `txn_bracket` state-transition graph |
+
+`vertex_log` has no `shadowed_by` column. Shadowing is declared only by `subgraph/shadowed` events; a materialized shadow flag may exist inside a projection table, where the projector owns it.
 
 ### 3.2 Core event vocabulary
 
@@ -71,14 +113,33 @@ Unknown `event_type` values are **fail-closed**: readers reject the complete log
 
 1. **Append-only.** Every action appends a new event; state changes, shadowing, and forks never mutate historical rows. Only materialized projection columns or tables may be updated.
 2. **Atomic append.** Freezing a proposal appends `subgraph/frozen` and all `vertex/created` events in one database transaction. The entire subgraph is visible or none of it is. This is a control-plane transaction, not a business transaction.
-3. **Partial order.** `parent_refs` defines DAG order. `seq` represents write order only and **never carries causal meaning**; adjacent `seq` values in parallel branches do not imply a dependency.
+3. **Partial order, and purity scoped to one DAG.** `parent_refs` defines causal order. Neither sequence number carries causal meaning: adjacent values in parallel branches imply no dependency. The two sequences carry deliberately different guarantees, and **purity of the projection is defined only against `run_seq`**:
+
+   | | `run_seq` | `global_seq` |
+   |---|---|---|
+   | Scope | one run = one DAG | whole table |
+   | Strictly increasing | yes | yes |
+   | Contiguous, no gaps | **yes** | no |
+   | Survives rollback without skipping | **yes** (counter in a row) | no (sequences do not roll back) |
+   | Commit-ordered | **yes** (serialized by the run row lock) | **no** |
+   | Legal input to a fold | **yes** | **never** |
+   | Use | projections, replay, all intra-run references | coarse global ordering, operational triage only |
+
+   The reason for the split is that a `BIGSERIAL` is allocated before commit but observed after it. Two concurrent appends may take 100 and 101 while 101 commits first, so an incremental reader can advance past 100 and skip it permanently. Worse than a skipped event, **the same set of events can fold in two different orders on two different reads, and the projection stops being a pure function** — which would take down replay testing, prompt caching, and A/B attribution together, since all three rest on that purity.
+
+   `run_seq` removes the hazard within the boundary that matters, and the boundary is honestly declared:
+
+   - **Guaranteed:** a fold over one run is a pure function of that run's events. `surface`, `slice`, `fold`, `linearize`, and `assemble` all operate inside one run, and a dry-run analysis is likewise always scoped to one DAG. Nothing in the projection pipeline reaches across runs.
+   - **Not guaranteed:** a fold over the global stream. Cross-run analytics must therefore be computed as **fold per run, then aggregate** — never as one fold over `global_seq`. This is a rule, not a preference: the second form is not reproducible ([05 §3.2](./05-context-aggregation-and-experimentation.md)).
+
+   One more requirement follows, and it is easy to miss. Serializing appends fixes the *storage* order but not the *scheduling* order: two concurrent siblings may be assigned `run_seq` in either order across replays. Purity therefore also demands that **every reducer be commutative over concurrent events** — events with no `parent_refs` path between them. `linearize` satisfies this by sorting on `vertex_id` (§4.2), and semantic-fold reducers satisfy it because compensation is delta-based rather than state-restoring ([02 §4.3](./02-transaction-model.md) D2), which makes their operations commute. A reducer that is order-sensitive over concurrent events breaks purity even with a perfect sequence, so this is asserted by the permutation test in [06 §7](./06-validation-harness.md) O4.
 4. **Visibility assertion.** Before every planner model call, runtime asserts that the sent context equals the log projection followed by linearization. A projection-hash comparison may replace full byte comparison to avoid dsh's double-serialization cost.
 
 ## 4. Surface Projection and Linearization
 
 ### 4.1 Surface
 
-`surface(log) → current_dag` folds all events and removes subtrees shadowed by `subgraph/shadowed`, yielding the currently active DAG. It may be implemented as a materialized view or engine cache, but it **must always be reproducible from the complete log with the same result**. This is the basis of replay testing.
+`surface(run_log) → current_dag` folds one run's events in `run_seq` order and removes subtrees shadowed by `subgraph/shadowed`, yielding the currently active DAG. Its input is always a single run; no projection reaches across runs. It may be implemented as a materialized view or engine cache, but it **must always be reproducible from the complete log with the same result**. This is the basis of replay testing.
 
 ### 4.2 Linearization
 
@@ -89,7 +150,7 @@ linearize(surface, planner_vertex) → [ctx_item...]
 ```
 
 1. Include only the planner's ancestor closure and result summaries, rather than full outputs, from sibling branches.
-2. Sort parallel branches lexicographically by `vertex_id`, never by `seq`; scheduling order must not affect replay.
+2. Sort parallel branches lexicographically by `vertex_id`, never by either sequence number or completion time; scheduling order must not affect replay. `run_seq` fixes storage order but not the order in which concurrent siblings were scheduled, so sorting on it would still be non-reproducible.
 3. Inject failure evidence as an explicit structured section during replanning, rather than scattering it through history.
 
 The function is pure. The same log prefix and harness-state version produce the same prompt, allowing regression assertions without a model.
@@ -127,4 +188,5 @@ The log is both a mock script and expected output. Record one real run, replay i
 
 - **Log granularity:** dsh records streaming model chunks, which makes logs heavy and requires compression. Flory's current choice is vertex fidelity, not token fidelity: payloads contain summaries plus external blob references for raw model input and output.
 - `subgraph/shadowed` positional reasoning needs property-based tests for multi-replan boundary cases.
-- Concurrent runs writing one database need partitioning strategy. Partitioning by `run_id` is sufficient because only per-run monotonicity is required.
+- **Append contention inside one very wide run.** `run_seq` serializes appends on the run row (§3.1). A run with unusually high branch fan-out would queue on that lock. No measurement exists yet; if it becomes real, the options are batching several events per transaction or sharding the counter per branch — the latter costs the contiguity that made the design worth having, so it should not be reached for early.
+- **Offline readers still see `global_seq` gaps.** Purity is guaranteed per run (§3.3 inv. 3), which covers the projection pipeline, but trace validation and metric recomputation read across runs. They must either fold per run and then aggregate, or consume Postgres logical decoding, which delivers events in commit order. Which of the two becomes the standard path is unresolved.

@@ -12,6 +12,8 @@
 - **This is not a licence to remove colour.** "No hard-coded colors" means the *canvas background* and *neutral ink*, never the semantic palette. Every Draw.io shape keeps `fillColor` + `strokeColor` from the shared palette with `fontColor` equal to its stroke, which is what stays legible in both themes; in HTML the palette lives in CSS variables while only the surface tokens follow the theme. A monochrome diagram is a regression, not a theme fix.
 - Keep diagram labels, captions, and surrounding documentation in English.
 - Use relative links between documentation files so the documentation remains portable.
+- Keep the root `README.md` repository-layout tree synchronized whenever a top-level directory is added, removed, or repurposed. State the directory's role; the README is the entry point for contributors discovering repository structure.
+- Keep `.github/workflows/formal-verification.yml` aligned with the transaction protocol's source documents. When a documentation change adds or changes a transaction discipline, invariant, admission rule, recovery rule, or oracle expectation, add that document to the workflow's `paths` filter in the same change. Include `AGENTS.md` and the workflow file itself so changes to the discipline or its CI contract cannot bypass TLC review.
 
 ## Design Disciplines
 
@@ -22,16 +24,20 @@ These are invariants, not preferences. A change that violates one is wrong even 
 1. **Append only.** Never `UPDATE` or `DELETE` a `vertex_log` row. State transitions, shadowing, and forks are new events. Reason: every derived view, audit trail, replay test, and A/B attribution reads the same rows; mutating one row silently invalidates all of them.
 2. **Shadow, never delete.** A replanned-away subtree stays in the log behind a `subgraph/shadowed` event. Reason: it is both the audit record and the evidence that stops a planner from repeating a disproven path.
 3. **Materialized projections may be updated, but only by the projector, and must be recomputable** from the complete log with an identical result. A materialization is a cache, never a source.
+3b. **Projections that gate a side effect are updated in the same transaction as the event append, never asynchronously.** Pivot admission and replan-boundary legality are safety-critical synchronous reads; a projection lagging by milliseconds can let an irreversible action fire that should have been blocked. Both live in the same database, so this is one ordinary transaction.
+3c. **Push an invariant into a database constraint whenever it is expressible there.** Constraints do not forget and the coordinator has many concurrent writers. Required at schema-creation time, because retrofitting any of them onto live data means cleaning history first: no `UPDATE`/`DELETE` grant on `vertex_log` for the application role (enforces discipline 1); a `BEFORE INSERT` trigger checking `current_user` against event ownership (enforces discipline 29); `UNIQUE (idempotency_key)` on the bracket projection; a partial unique index for one-pivot-per-scope; a state-transition trigger for "no cancel after pivot".
 4. **Atomic append.** A frozen sub-DAG writes `subgraph/frozen` plus all its `vertex/created` events in one database transaction: the whole subgraph is visible or none of it is.
 5. **Fail closed on reads.** An unrecognized `event_type` makes the reader reject the whole log unless the event carries an explicit `ignorable` flag. Reason: silently skipping an unknown event corrupts replay in a way no test will catch.
-6. **`seq` is write order only and never carries causality.** Causality is `parent_refs`. Adjacent `seq` values in parallel branches imply nothing.
+6. **Two sequences, one of which may never feed a fold.** `run_seq` is per-run, strictly increasing, contiguous, rollback-safe, and commit-ordered — it is allocated from a counter column on the run row inside the appending transaction. `global_seq` is a `BIGSERIAL`: gappy, not commit-ordered, for coarse global ordering and operational triage only. **Never fold over `global_seq`.** Reason: a sequence is allocated before commit and observed after it, so concurrent appends can be observed out of order — which does not merely skip an event, it makes the same event set fold differently on different reads, and projection purity collapses along with replay testing, prompt caching, and A/B attribution. Neither sequence carries causality; causality is `parent_refs`.
+6b. **Projection purity is scoped to one run, and that scope is honest.** A fold over one run is pure; a fold over the global stream is not. Every projection and every dry-run analysis is single-run by construction, so this costs nothing — but cross-run analytics must be computed as **fold per run, then aggregate**, never as one fold over the global stream.
+6c. **Reducers must commute over concurrent events.** Serializing appends fixes storage order, not scheduling order: two concurrent siblings may take `run_seq` in either order across replays. Any reducer that is order-sensitive over events with no `parent_refs` path between them breaks purity even with a perfect sequence. `linearize` satisfies this by sorting on `vertex_id`; semantic folds satisfy it because compensation is delta-based (discipline 17). Asserted by the permutation test in doc 06 O4.
 7. **Keep the log vertex-fidelity, not token-fidelity.** Raw model input/output lives in blob storage referenced from `payload`; the log stores summaries. Reason: token-level logs force a compaction subsystem and leak PII into the primary table.
 
 ### Projections are pure
 
 8. **`surface`, `slice`, `fold`, `linearize`, and `assemble` are pure functions.** No I/O, no clock, no randomness, no ambient config. Reason: purity is what makes replay testing, prompt caching, and A/B attribution possible at all.
 9. **Every layer can dump its intermediate output.** Reason: a wrong prompt must be localizable to one layer instead of bisected across six.
-10. **`linearize` sorts parallel branches lexicographically by `vertex_id` — never by `seq`, timestamp, or completion order.** Reason: two reasons, and both matter. Scheduling jitter would break replay determinism, and it would also change the prompt prefix on every turn and destroy the provider prompt-cache hit rate.
+10. **`linearize` sorts parallel branches lexicographically by `vertex_id` — never by a sequence number, timestamp, or completion order.** Reason: two reasons, and both matter. Scheduling jitter would break replay determinism, and it would also change the prompt prefix on every turn and destroy the provider prompt-cache hit rate.
 11. **Assert planner visibility before every model call**: the context being sent must equal the log projection. Compare projection hashes rather than re-serializing full history.
 12. **Fold reducers are registered, versioned, and unit-tested** (`fold://inventory@v3`). A reducer may not call tools, read the clock, or perform I/O. Reason: arithmetic like "which of these 12 inventory results is current" belongs in tested code, never in a prompt.
 
@@ -71,7 +77,10 @@ Reject a change that does any of the following:
 
 - Updates or deletes a `vertex_log` row, or backfills `shadowed_by` outside the projector.
 - Adds I/O, a clock read, randomness, or ambient config to a projection layer or fold reducer.
-- Sorts planner context by `seq`, timestamp, or completion order.
+- Sorts planner context by either sequence number, timestamp, or completion order.
+- Folds over `global_seq`, or computes a cross-run metric as a single fold instead of fold-per-run-then-aggregate.
+- Adds a reducer that is order-sensitive over concurrent events.
+- Updates a side-effect-gating projection asynchronously.
 - Silently skips an unknown event type.
 - Lets a planner's own assertion substitute for a check-rule.
 - Compensates backward across `txn/pivot-passed`, or resumes planning across an open `txn/try`.

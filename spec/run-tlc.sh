@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Run all S1 TLC checks. The two negative models must fail at their named
-# invariant; the discovery model must fail L2 with the alternating-planner lasso.
+# Run all S1 TLC checks, then publish a PDF snapshot of the verified root module.
+# The controlled-negative models must fail at their named invariant; the discovery
+# model must fail L2 with the alternating-planner lasso.
 set -euo pipefail
 
 spec_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,14 +68,14 @@ run_case() {
     set -e
 
     if [[ "${expected_exit}" == "success" ]]; then
-        if [[ "${status}" -ne 0 ]] || ! rg -Fq "Model checking completed. No error has been found." "${log_path}"; then
+        if [[ "${status}" -ne 0 ]] || ! grep -Fq "Model checking completed. No error has been found." "${log_path}"; then
             cat "${log_path}" >&2
             rm -rf "${work_dir}"
             echo "${name}: expected TLC success" >&2
             exit 1
         fi
     else
-        if [[ "${status}" -eq 0 ]] || ! rg -Fq "${required_text}" "${log_path}"; then
+        if [[ "${status}" -eq 0 ]] || ! grep -Fq "${required_text}" "${log_path}"; then
             cat "${log_path}" >&2
             rm -rf "${work_dir}"
             echo "${name}: expected failure containing: ${required_text}" >&2
@@ -96,4 +97,6 @@ run_case "post-pivot-cancel-negative" "MCPostPivotCancel.tla" "MCPostPivotCancel
 run_case "unscoped-effect-negative" "MCUnscopedEffect.tla" "MCUnscopedEffect.cfg" failure "Invariant AdmissionAllEffectsScoped is violated."
 run_case "narrow-scope-negative" "MCNarrowScope.tla" "MCNarrowScope.cfg" failure "Invariant AdmissionMinimumScope is violated."
 
-echo "All S1 TLC checks passed."
+TLA_TOOLS_JAR="${jar_path}" "${spec_dir}/export-pdf.sh"
+
+echo "All S1 TLC checks passed; wrote spec/output/FloryTxn.pdf."

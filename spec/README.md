@@ -17,8 +17,12 @@ The script downloads the pinned official `tla2tools.jar` into the ignored
 `spec/.tlc/` directory, verifies its SHA-256 digest from `toolchain.env`, and
 runs TLC with Java 11 or newer. Set `TLC_WORKERS` to change the worker count.
 
-The GitHub Actions workflow runs the same command. Do not commit files under
-`spec/.tlc/` or TLC trace-exploration modules.
+After every successful full check, the same command uses the pinned jar's
+TLA2TeX renderer and `pdflatex` to write `spec/output/FloryTxn.pdf`. The PDF is
+a snapshot of the root module only after the complete TLC suite has passed; it
+is ignored locally and uploaded as the `flory-tla-specification-pdf` GitHub
+Actions artifact. Do not commit files under `spec/.tlc/`, `spec/output/`, or
+TLC trace-exploration modules.
 
 ## Model boundary
 

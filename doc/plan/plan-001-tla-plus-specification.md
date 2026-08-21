@@ -46,6 +46,8 @@ spec/
   MCThree*.cfg        -- N=3 safety and liveness configurations
   MC*.tla/.cfg        -- discovery and controlled-negative configurations
   run-tlc.sh          -- pinned TLC runner used locally and by CI
+  export-pdf.sh       -- TLA2TeX/PDF export after the full suite succeeds
+  output/             -- ignored verified-specification PDF output
   README.md           -- how to run, what each invariant means, current findings
 ```
 
@@ -100,7 +102,7 @@ I2 and I4–I7 are deferred to S2 not because they matter less, but because S1's
 | 4 | Add the replan boundary and episode counter; check L2 with fairness | the **oscillation bound**, or a proof that none is needed |
 | 5 | Run `MCThree` and compare findings against `MCSmall` | evidence that N=2 was not hiding anything |
 | 6 | Record every counterexample as a numbered scenario in [06 §6](../design/06-validation-harness.md) | permanent regression coverage |
-| 7 | Wire TLC into CI for the `spec/` directory | staleness prevention |
+| 7 | Wire TLC and the verified-specification PDF artifact into CI for the `spec/` directory | staleness prevention and reviewable output |
 
 Item 6 is the one that makes this plan pay off even if the specification is later abandoned: findings survive as harness scenarios.
 
@@ -109,7 +111,7 @@ Item 6 is the one that makes this plan pay off even if the specification is late
 - I1 and I3 hold for `N = 2` and `N = 3`, **or** counterexamples exist and the corresponding design documents have been corrected.
 - L2 yields a concrete episode replan cap, written into [03 §3](../design/03-replan-and-recovery.md) with its derivation, and S3c in [06 §6](../design/06-validation-harness.md) turns green.
 - Every counterexample is a numbered harness scenario.
-- TLC runs in CI on changes under `spec/`.
+- TLC runs in CI on changes under `spec/`, and every successful run publishes the root TLA+ module as a PDF artifact.
 
 ### 3.7 S1 findings (updated 2026-08-21)
 
@@ -131,7 +133,8 @@ escalates to L3 rather than opening a third replan. The controlled no-barrier,
 post-pivot-cancel, unscoped-effect, and narrow-scope models respectively violate
 I1, I3, R10, and R11. The narrow-scope counterexample keeps its effect in a
 different declared scope, so it isolates R11 from the R10 check. The reproducible
-command is `./spec/run-tlc.sh`.
+command is `./spec/run-tlc.sh`; after all checks pass it also writes the ignored
+`spec/output/FloryTxn.pdf`, which CI uploads as a review artifact.
 
 ## 4. What is deliberately excluded from S1
 

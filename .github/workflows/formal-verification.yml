@@ -6,19 +6,15 @@ on:
       - 'AGENTS.md'
       - '.github/workflows/formal-verification.yml'
       - 'spec/**'
-      - 'doc/design/01-jit-dag-and-vertex-log.md'
-      - 'doc/design/02-transaction-model.md'
-      - 'doc/design/03-replan-and-recovery.md'
-      - 'doc/design/06-validation-harness.md'
+      - 'doc/design/**'
+      - 'doc/plan/plan-001-tla-plus-specification.md'
   push:
     paths:
       - 'AGENTS.md'
       - '.github/workflows/formal-verification.yml'
       - 'spec/**'
-      - 'doc/design/01-jit-dag-and-vertex-log.md'
-      - 'doc/design/02-transaction-model.md'
-      - 'doc/design/03-replan-and-recovery.md'
-      - 'doc/design/06-validation-harness.md'
+      - 'doc/design/**'
+      - 'doc/plan/plan-001-tla-plus-specification.md'
   workflow_dispatch:
 
 permissions:
@@ -35,5 +31,18 @@ jobs:
         with:
           distribution: temurin
           java-version: '11'
+      - name: Install PDF export toolchain
+        run: |
+          if ! command -v pdflatex >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends texlive-latex-base texlive-latex-recommended
+          fi
       - name: Check the transaction protocol
         run: ./spec/run-tlc.sh
+      - name: Upload verified TLA+ specification PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: flory-tla-specification-pdf
+          path: spec/output/FloryTxn.pdf
+          if-no-files-found: error
+          retention-days: 14

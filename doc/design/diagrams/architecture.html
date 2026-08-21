@@ -85,12 +85,12 @@
     <div class="node n-green">Refine loop<small>gate &rarr; propose &rarr; validate &rarr; evaluate</small></div>
   </div>
 </div>
-<div class="flow"><span class="a">&#8645;</span> append events / project context &nbsp;·&nbsp; in-place replan · dry-run fork for what-ifs</div>
+<div class="flow"><span class="a">&#8645;</span> append events / project context &nbsp;·&nbsp; in-place replan · offline historical fork</div>
 
 <div class="zone z-teal">
   <h2>Control plane <span class="hint">— engine metadata, ACID by transactional DB</span></h2>
   <div class="layer">
-    <div class="node n-teal">Vertex log<small>append-only · global seq · single source of truth</small></div>
+    <div class="node n-teal">Event log<small>append-only · global seq · single source of truth</small></div>
     <div class="node n-teal">Surface projection<small>pure fold &rarr; current DAG</small></div>
     <div class="node n-teal">Linearizer<small>deterministic planner context</small></div>
     <div class="node n-yellow">Check-rules engine<small>R1–R11 · freeze or reject</small></div>
@@ -98,7 +98,7 @@
   <div style="height:12px"></div>
   <div class="layer">
     <div class="node n-green">Harness-state<small>meta-only · versioned · mem-hints</small></div>
-    <div class="node n-green">Prompt assembly<small>pure function · A/B-able</small></div>
+    <div class="node n-green">Prompt assembly<small>pure function · replayable</small></div>
     <div class="node n-teal">Budget ledger<small>token accounting per run</small></div>
   </div>
 </div>

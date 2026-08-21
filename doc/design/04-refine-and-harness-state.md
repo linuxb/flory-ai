@@ -16,7 +16,7 @@ The final prompt is assembled by a pure function:
 assemble(harness_state@vN, task_input, linearized_ctx) → prompt
 ```
 
-The same input always produces the same output. This purity enables A/B testing, automatic rollback, and replay testing.
+The same input always produces the same output. This purity enables exact prompt diffs, historical fork evaluation, inverse-edit rollback, and replay testing.
 
 ## 2. Harness-State Schema
 
@@ -50,7 +50,7 @@ The same input always produces the same output. This purity enables A/B testing,
 ```
 
 - Any text that can appear in a prompt is stored through a `*_ref` or `recipe` reference; the raw text lives in a versioned template library or memory store. Harness-state contains no prose.
-- `evidence_seqs` anchors every policy to concrete vertex-log events, preserving provenance for every lesson.
+- `evidence_seqs` anchors every policy to concrete event-log events, preserving provenance for every lesson.
 
 ## 3. Mem-Hints: Query Recipes, Not Memory
 
@@ -103,14 +103,15 @@ evaluate (Flory-specific; see 4.3)
 
 Validation rejects global-scope overreach because global is read-only during local refinement; a local override is required. Apply rejects version conflicts and writes each edit to refinement history.
 
-### 4.3 Effect evaluation and automatic rollback
+### 4.3 Historical evaluation and rollback
 
-prime-agent's `expectedOutcome` is free text and is not verified. Flory closes the loop because assembly is pure and execution is logged:
+prime-agent's `expectedOutcome` is free text and is not verified. Flory replaces it with a reproducible offline gate:
 
-- Every refine creates `harness_state@vN`; a later `run/start` records the version it used.
-- `expected_outcome` is a measurable structure, for example `{metric: replan_rate | tokens_per_task | rule_violation_rate, direction, window_runs}`.
-- At the end of the window, compare actual log-projected metrics for vN with vN-1. Deterioration beyond the threshold triggers **automatic reverse rollback**: replay inverse edits, and record the rollback as a versioned refinement event.
-- When possible, run shadow A/B tests for comparable tasks using vN and vN-1. Pure assembly makes this inexpensive.
+- Every refine creates `harness_state@vN`; evaluation substitutes that version into forks of selected historical runs while keeping every other inherited event unchanged.
+- `expected_outcome` is a measurable structure, for example `{evaluator_ref, metrics, acceptance_rules, corpus_ref}`. `corpus_ref` resolves to explicit `(run_id, at_stream_seq)` pairs rather than an undifferentiated traffic window.
+- Each source/fork pair is evaluated independently at a declared `fold_mode`. Exact prompt diffs and deterministic invariant checks are hard gates; model and live-read scores are recorded with their evaluator pins and limitations.
+- A refine that fails any hard gate is rejected before promotion. Passing cases produce a reviewable recommendation, not automatic production authorization, because unrelated ToB histories are not parallel samples.
+- Rollback remains mechanical: replay the stored inverse edits and record a new versioned refinement event. In production it is triggered by an absolute safety guardrail or an operator decision, never by a cross-case comparative estimate.
 
 ### 4.4 Scope discipline
 
@@ -119,12 +120,12 @@ prime-agent's `expectedOutcome` is free text and is not verified. Flory closes t
 
 ## 5. Interfaces with Documents 01–03
 
-- Refine input evidence is a projection of the [vertex log](./01-jit-dag-and-vertex-log.md); `evidence_seqs` directly name event sequences.
+- Refine input evidence is a projection of the [event log](./01-jit-dag-and-event-log.md); `evidence_seqs` directly name event sequences.
 - The mandatory post-rollback gate in [03](./03-replan-and-recovery.md) is the main path by which failure lessons enter `policy_hint` or the memory store.
 - Repeated check-rule rejection patterns from [02](./02-transaction-model.md) should refine policy hints to help planners avoid mistakes. The rule engine decides admission; refine reduces wasted attempts. These responsibilities do not overlap.
 
 ## 6. Open Questions
 
 - Memory-store write flow: should refine write a lesson directly or create a pending record for human review? Start with the latter.
-- Statistical power of evaluation windows for infrequent task types; small `window_runs` values can trigger false rollbacks.
+- Historical-corpus curation: define how cases are selected and retired without allowing cherry-picked examples to masquerade as general evidence.
 - The tension between assembly purity and fresh memory. Strict replay should pin a memory snapshot and resolve queries from recorded cache.

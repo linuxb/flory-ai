@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-20
 - **Deciders:** Flory engine team
-- **Related:** [ADR-001](./adr-001-engine-language-split.md) (the Go coordinator is the component specified here), [ADR-002](./adr-002-in-place-replan-and-dry-run-forks.md) (replan and dry-run semantics enter the model)
+- **Related:** [ADR-001](./adr-001-engine-language-split.md) (the Go coordinator is the component specified here), [ADR-004](./adr-004-case-specific-offline-fork-evaluation.md) (replan and offline-fork isolation enter the model)
 - **Implemented by:** [Plan 001](../../plan/plan-001-tla-plus-specification.md), which stages this scope and holds the preconditions
 
 ## Context
@@ -28,7 +28,7 @@ Specify the transaction protocol in **TLA+** and check it with **two engines aga
 
 Three complements are mandatory, each closing a gap no prover closes:
 
-- **Trace validation.** Real vertex-log traces are checked as behaviours of the specification.
+- **Trace validation.** Real event-log traces are checked as behaviours of the specification.
 - **Deterministic simulation.** The real implementation runs under a seeded, enumerable scheduler.
 - **Alloy**, for exactly one job: bounded structural search for a DAG shape that satisfies all of R1–R11 yet still reaches a dead state.
 
@@ -56,7 +56,7 @@ A corollary governs how counterexamples are read. If a check reports "a plan adm
 | I4 | At most one pivot takes effect per scope across all reachable executions | safety | Apalache, unbounded |
 | I5 | Floor property: for a given `scope_id`, the pivot action occurs at most once in the whole run, including after any replan | safety | Apalache, unbounded |
 | I6 | Sweep/confirm TOCTOU: the orphan sweep never cancels a `txn/try` that is concurrently confirming | safety | TLC then Apalache |
-| I7 | A dry-run child appends no `txn/*` event referencing a bracket opened before its `run/end-seed` | safety | Apalache |
+| I7 | A fork appends no `txn/*` event referencing a bracket opened before its `run/end-seed` | safety | Apalache |
 | L1 | Every scope eventually reaches committed, cancelled, or L4 suspension | liveness | TLC with fairness |
 | L2 | Every failure episode terminates — and the counterexample length **derives** the oscillation bound | liveness | TLC with fairness |
 

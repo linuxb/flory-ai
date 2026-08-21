@@ -1,6 +1,6 @@
 # Validation Harness: Sandbox, Scenarios, and Oracles (06)
 
-> Status: Draft v0.1 | Depends on: [01](./01-jit-dag-and-vertex-log.md), [02](./02-transaction-model.md), [03](./03-replan-and-recovery.md), [05](./05-context-aggregation-and-experimentation.md)
+> Status: Draft v0.1 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [03](./03-replan-and-recovery.md), [05](./05-context-aggregation-and-offline-evaluation.md)
 
 ## 1. What This Document Decides
 
@@ -26,7 +26,7 @@ Model calls are non-deterministic, so any assertion that depends on a live model
 | Tier | Planner | Assertion strength | Covers | Needs API key |
 |---|---|---|---|---|
 | **T-A pure function** | none | exact equality | check-rules R1–R11, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff (discipline 28) | no |
-| **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, in-place replan and dry-run fork semantics, orphan-try sweep, crash recovery | no |
+| **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, in-place replan and fork/substitute/merge semantics, orphan-try sweep, crash recovery | no |
 | **T-C live planner** | real model | statistical thresholds + guardrails | JIT planning quality, plan admissibility rate, token economics | yes |
 
 ### 2.1 T-B is the primary tier
@@ -170,10 +170,10 @@ Each row exists to kill one specific accident. A scenario that cannot fail if a 
 | S9 | compensation registered as snapshot restore | rejected at tool registration, before any run starts | O1 | T-A |
 | S10 | `inventory.commit` returns `unknown_outcome`, no status query exists | L4 suspension plus a reconciliation task; no guess, no automatic compensation | O2, O3 | T-B |
 | S11 | crash between `vertex/created` and effect, then restart | orphan `txn/try` detected by the unmatched-try sweep after `try_timeout_s` (02 §4.4) and idempotently cancelled | O1, O2 | T-B (partial in Phase 1, full in Phase 2) |
-| S11b | **dry-run fork** at a boundary that inherits a half-open `txn/try` from a live parent | **negative test**: the child identifies the inherited try relative to `run/end-seed` and **must not** cancel or confirm it — that hold belongs to a real in-flight order. The child refuses the boundary instead. A cancel here is a data-plane incident, not a test failure only (01 §5.2, 02 §4.4) | O1, O2.no_inherited_mutation | T-B |
-| S11c | dry-run child whose plan contains `logistics.book` (`irreversible`) and `logistics.quote` (`none`) | the quote **is** executed and priced into the returned plan; the booking is skipped and recorded as an unverified estimate. Ledger unchanged; dry-run budget charged for the quote only (05 §3.1) | O1, O2 | T-B |
+| S11b | **fork** at a boundary that inherits a half-open `txn/try` from a live parent | **negative test**: the child identifies the inherited try relative to `run/end-seed` and **must not** cancel or confirm it — that hold belongs to a real in-flight order. The child refuses the boundary instead. A cancel here is a data-plane incident, not a test failure only (01 §5.2, 02 §4.4) | O1, O2.no_inherited_mutation | T-B |
+| S11c | fork evaluated at `fold_mode: reads-live` whose plan contains `logistics.book` (`irreversible`) and `logistics.quote` (`none`) | the quote **is** executed and priced into the returned plan; the booking is skipped and recorded as an unverified estimate. Ledger unchanged; evaluation budget charged for the quote only (05 §3.2) | O1, O2 | T-B |
 | S12 | `duplicate_delivery` on `payment.charge` | exactly one charge in the ledger | O1 | T-B (Phase 2) |
-| S13 | **information dependence**: the same `goal_prompt` run twice, differing only in an injected fact — `inventory.check` returns 20 units in arm 1 and 0 units in arm 2 | the sub-DAGs frozen **after** the planner that consumes that fact must **differ** (arm 2 must source or substitute). Identical plans prove the graph was pre-baked rather than JIT, which the depth assertion alone cannot detect | O4.info_dependence | T-B, promoted to T-C |
+| S13 | **information dependence**: the same `goal_prompt` scenario run twice, differing only in an injected fact — `inventory.check` returns 20 units in variant 1 and 0 units in variant 2 | the sub-DAGs frozen **after** the planner that consumes that fact must **differ** (variant 2 must source or substitute). Identical plans prove the graph was pre-baked rather than JIT, which the depth assertion alone cannot detect | O4.info_dependence | T-B, promoted to T-C |
 | S14 | **clairvoyant parameters**: the scripted planner freezes a subgraph binding `carrier = "fast-co"` before any quote vertex has succeeded | rejected at freeze: every bound parameter must trace to an existing upstream vertex output or to `task_input`. A value that could not yet be known is a premature commitment, violating progressive disclosure even though depth is legal | O4.no_clairvoyance | T-B |
 
 ## 7. Oracles
@@ -191,20 +191,21 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 | `count(bookings by order_id) <= 1` | duplicate shipment |
 | every ledger delta is attributable to exactly one `scope_id` | compensation that touched another scope's footprint |
 
-### O2 — Log invariants (reads the vertex log)
+### O2 — Log invariants (reads the event log)
 
 | Assertion | Discipline |
 |---|---|
 | every `txn/try` has exactly one matching `txn/confirm` or `txn/cancel` | 02 §4.1 |
 | no `txn/cancel` appears after `txn/pivot-passed` in the same scope | 15 |
-| every `replan/boundary` and every dry-run `fork/created` boundary sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)) | 16 |
+| every `replan/boundary` and every `fork/created` boundary sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)) | 16 |
 | no such boundary precedes the most recent `txn/pivot-passed` (**floor condition**, 03 §2.1 (ii)) | 15 |
 | **witness completeness**: every ancestor planner of the failed vertex, enumerated by `parent_refs` traversal, appears in the `replan/boundary` candidate list with either a published cost or a closed-vocabulary rejection reason | 03 §4.2 |
 | **witness minimality**: the selected boundary has the lowest **published** cost among candidates not marked rejected; the oracle never recalculates the cost | 03 §4.2 |
 | **witness honesty**: each rejection reason is factually true of the log — `open_bracket` requires an unmatched `txn/try` before that vertex, `below_floor` requires a later `txn/pivot-passed`, `savepoint_precedes` requires the cancelled scope's savepoint to precede the candidate | 03 §4.2 |
-| **no online fork**: an online replan appends `replan/boundary` in the same run; `fork/created` appears only with `mode: "dry-run"` (01 §5) | 1, 2 |
-| **no inherited mutation**: a dry-run child appends no `txn/*` event referencing a scope opened before its `run/end-seed` | 02 §4.4 |
-| a dry-run child invokes only `effect_class: none` tools | 05 §3.1 |
+| **no online fork**: an online replan appends `replan/boundary` in the same stream; `fork/created` appears only for offline evaluation (01 §5) | 1, 2 |
+| **no inherited mutation**: a fork appends no `txn/*` event referencing a scope opened before its `run/end-seed` | 02 §4.4 |
+| a fork evaluation invokes no tool above its declared `fold_mode`, and never a write | 01 §5.4, discipline 7e |
+| a no-substitution fork reproduces the source surface exactly | discipline 7d |
 | no row is ever updated or deleted; shadowing is an event | 1, 2 |
 | an unknown `event_type` without `ignorable` makes the reader reject the whole log | 5 |
 | each event type was appended only by its owning service | 29 |
@@ -241,11 +242,11 @@ Structural assertions alone are **necessary but not sufficient**: an engine whos
 | every frozen subgraph passed check-rules; no freeze without a preceding admission | discipline 14 |
 | identical `hash(log_prefix)` + `projector_version` + `harness_state_version` ⇒ identical prompt hash; changing any one of the three must change it | disciplines 8, 11, 24 |
 | replaying a recorded run reproduces the log event-for-event, timestamps ignored | discipline 28 |
-| `linearize` output **and every semantic-fold view** are unchanged when parallel branch completion order is permuted | discipline 10; [01 §3.3](./01-jit-dag-and-vertex-log.md) inv. 3 |
+| `linearize` output **and every semantic-fold view** are unchanged when parallel branch completion order is permuted | discipline 10; [01 §3.3](./01-jit-dag-and-event-log.md) inv. 3 |
 
 The permutation assertion deserves emphasis: the harness runs selected scenarios twice with **deliberately permuted branch scheduling** and asserts an identical prompt hash *and* identical fold views. Scheduling jitter silently destroying replay determinism and prompt-cache hit rate is exactly the bug class that no ordinary test catches.
 
-It is also the only assertion that tests **reducer commutativity over concurrent events**. Serializing appends fixes storage order but not scheduling order, so two concurrent siblings may receive `run_seq` in either order across replays. A reducer that is order-sensitive over events with no `parent_refs` path between them breaks projection purity even with a perfect sequence ([01 §3.3](./01-jit-dag-and-vertex-log.md) inv. 3).
+It is also the only assertion that tests **reducer commutativity over concurrent events**. Serializing appends fixes storage order but not scheduling order, so two concurrent siblings may receive `stream_seq` in either order across replays. A reducer that is order-sensitive over events with no `parent_refs` path between them breaks projection purity even with a perfect sequence ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3).
 
 ### O5 — Cost-model fidelity (reads the log plus the tool registry)
 
@@ -259,39 +260,43 @@ The boundary-selection cost model ([03 §4.1](./03-replan-and-recovery.md)) pric
 
 Estimation error is recorded per replan so it can be projected over history, which is what turns `expected_plan_tokens` from a heuristic into a learned quantity (03 §4.1).
 
-## 8. Policy Validation
+## 8. Offline Historical Policy Evaluation
 
-O1–O5 validate **mechanism**: given a policy, was it executed correctly. They cannot answer whether the policy is the right one. Two of Flory's central choices — greedy backtracking and JIT planning — are currently premises rather than tested hypotheses, and both can be examined cheaply because the log makes counterfactuals possible.
+O1–O5 validate **mechanism**: given a policy, was it executed correctly. They cannot answer whether the policy is suitable for a particular historical case. Greedy backtracking and JIT planning can be examined without production writes because the log makes paired counterfactuals possible.
 
-### 8.1 Corpus replay: is greedy better than wider?
+### 8.1 Case study: would wider have helped this failure?
 
 **wider** is the L2 strategy used deliberately: rather than the nearest legal boundary, select an earlier ancestor planner and replan a larger scope.
 
-Method. Collect historical failure episodes from the log, each identified by its `(run_id, run_seq)`. For each episode create two dry-run forks from that same point (01 §5.2): arm **G** forced to the nearest legal boundary, arm **W** forced one level earlier. Each arm costs one model call; reads execute, writes are skipped.
+Method. Select an explicit historical failure episode identified by `(run_id, stream_seq)`. From that same point, run two **counterfactual evaluations** ([05 §3](./05-context-aggregation-and-offline-evaluation.md)): one substituting the pin that forces the nearest legal boundary, one forcing an earlier boundary. `fold_mode: reads-live`, so the model is called fresh and `effect_class: none` tools are actually called while writes are skipped.
 
-What a dry run can compare: model cost actually charged, plan size, real quoted tool prices from `effect_class: none` calls, the check-rules verdict, an LLM-judge score, and — the sharpest cheap signal — whether the new plan **reuses a `(tool, parameter pattern)` already recorded as disproven**. That last one is the best available proxy for "this would fail again", and it needs no writes.
+What an evaluation can compare: model cost actually charged, plan size, real quoted tool prices, the check-rules verdict, an LLM-judge score, and — the sharpest cheap signal — whether the new plan **reuses a `(tool, parameter pattern)` already recorded as disproven**. That last one is the best available proxy for "this would fail again", and it needs no writes.
 
-The comparison is deliberately asymmetric and must be reported as such: **arm G's cost is measured** (it actually happened, so `budget/charged` plus tool prices give the real number), while **arm W's cost is estimated** and its success is assumed. The conclusion is therefore "wider would probably have been cheaper on this episode", never a proof.
+Two limits must be reported alongside any result, and neither is a detail.
+
+**The comparison is asymmetric.** The greedy side's cost is *measured* — it actually happened, so `budget/charged` plus tool prices give the real number — while the wider side's cost is *estimated* and its success is *assumed*. The honest conclusion is "wider would probably have been cheaper on this episode", never a proof.
+
+**The conclusion is case-specific.** The two forks share one source history, and a different business run is not a parallel sample ([05 §3.4](./05-context-aggregation-and-offline-evaluation.md), discipline 7f). The report states whether wider appears preferable for this episode, which writes remain unverified, and why the result may not transfer.
 
 **Denominator: cost per resolved episode, never per replan attempt.** Greedy's failure mode is many cheap attempts, so per-attempt pricing structurally favours it and inverts the conclusion. Pair this with O5's detour-cost metric.
 
-Expected shape of the answer, and the reason this is worth doing: the winner is unlikely to be global. Failures whose true cause lies inside the nearest planner's remit — payload format, validation — should favour greedy, while failures that invalidate an upstream premise — supplier out of stock, warehouse unavailable — should favour wider. The useful output is therefore a **routing rule keyed on `error_class`**, not a single policy. A confirmed rule becomes a `policy_hint` in harness-state carrying `evidence_seqs` back to the episodes that justified it (04 §2), so a validation finding changes engine behaviour instead of ending as a report.
+The winner is unlikely to be global. Failures whose true cause lies inside the nearest planner's remit — payload format, validation — may favour greedy, while failures that invalidate an upstream premise — supplier out of stock, warehouse unavailable — may favour wider. A recurring pattern may motivate a **candidate routing rule keyed on `error_class`**, but every supporting case and limitation remains attached. The rule becomes a `policy_hint` only after operator review and carries `evidence_seqs` back to the histories that motivated it (04 §2).
 
-### 8.2 Baseline arm: is JIT better than up-front planning?
+### 8.2 Case study: would up-front planning have helped this task?
 
-S13 proves planning *is* JIT; it does not show JIT *pays*. In T-C, run an arm whose planner is instructed to emit one complete graph up front, and compare admissible-plan rate, tokens per success, and L4 rate against the JIT arm, stratified per §9.2. Without this arm, JIT remains an assumption the harness never tests.
+S13 proves planning *is* JIT; it does not show JIT helped a particular run. Fork a selected history before its first planning decision, substitute a planner pin that emits one complete graph, and compare it with the recorded JIT path. Report prompt and model cost, check-rule verdicts, plan size, runtime-information use, and unverified writes for that case. Repeating the procedure over a corpus produces a set of case reports, not a global ranking.
 
-### 8.3 Screening then confirmation
+### 8.3 Corpus reporting
 
-Dry-run corpus replay is cheap enough to sweep many episodes and stratify them, but it cannot measure execution success. Live A/B measures truly but costs real money and needs volume. The pipeline is therefore: **§8.1 generates and stratifies hypotheses, §9 confirms the promising ones on real traffic.** Reporting a dry-run result as though it were a live result is the misuse this section exists to prevent.
+A corpus is a versioned list of explicit `(run_id, at_stream_seq)` pairs with documented inclusion criteria. Fold each source and fork independently, then publish the case table and descriptive groupings by task type, SKU-count bucket, pivot presence, and `error_class`. Never hide contradictory cases behind one aggregate number, and never use a corpus result as automatic production authorization.
 
-## 9. Live-Model Tier (T-C)
+## 9. Live-Model Qualification Tier (T-C)
 
-Same sandbox, same faults, same oracles. What changes is that O1 and O2 remain **hard** assertions — a live model must never be allowed to break world conservation or log invariants — while O3 and O4 relax into distributions, and new quality metrics appear.
+T-C runs a live model only inside the sandbox against a fixed, versioned scenario corpus. It is still offline evaluation: no production traffic is divided, and no production write is executed. O1 and O2 remain **hard** assertions, while O3 and O4 may be reported as scenario-level distributions and additional quality metrics are recorded.
 
 ### 9.1 Metrics are log projections
 
-Per discipline 23, no separate telemetry. Every metric below is a projection over the vertex log and the ledger, so a changed definition can be recomputed over history.
+Per discipline 23, no separate telemetry. Every metric below is a projection over the event log and the ledger, so a changed definition can be recomputed over history.
 
 | Metric | Definition | Direction |
 |---|---|---|
@@ -303,15 +308,13 @@ Per discipline 23, no separate telemetry. Every metric below is a projection ove
 | **post-pivot failure rate** | failures after `txn/pivot-passed` | **guardrail** |
 | **orphan-hold incidents** | O1 violations of any severity | **guardrail, zero tolerance** |
 
-Per discipline 25, a guardrail regression vetoes a target-metric win. A configuration that cuts tokens per success by 30% while raising the L4 rate is a regression, and the harness reports it as one.
+Per discipline 25, a guardrail failure vetoes an apparent target-metric improvement. A configuration that uses fewer tokens but violates an invariant or raises risk in a paired scenario is rejected.
 
-### 9.2 Stratification
+### 9.2 Reporting and provenance
 
-Per discipline 26, results are stratified by task type, SKU-count bucket, and whether the plan contains a pivot; aggregate-only comparisons are not reported. Task heterogeneity here spans orders of magnitude, and uniform pooling lets variance swallow the effect.
+Per discipline 26, every result remains addressable by scenario and is grouped descriptively by task type, SKU-count bucket, and pivot presence. Aggregate-only comparisons are not reported because task heterogeneity spans orders of magnitude.
 
-### 9.3 Attribution
-
-Every T-C run records the attribution triple in `run/start`: `harness_state_version` + `projector_version` + `arm_id` (discipline 24). Traffic is split by run, never by turn (discipline 22). Scenario ID and fault seed are recorded alongside so a statistical result can always be reduced to a reproducible individual run.
+Every T-C fork records source scenario and position, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` (discipline 24). Scenario ID and fault seed are recorded alongside so every reported observation reduces to one reproducible source/fork pair.
 
 ## 10. Phased Rollout
 
@@ -320,10 +323,10 @@ Every T-C run records the attribution triple in `run/start`: `harness_state_vers
 | **0** | T-A only: table-driven check-rule tests, projection purity tests, replay diff. No sandbox, no key. | every rule R1–R11 has ≥ 1 passing and ≥ 1 violating fixture; every projection layer dumps its intermediate output |
 | **1** | In-process TS sandbox, scripted planner, fault injector, oracles O1–O5, scenarios S1–S10 plus S2b, S2c, S3b, S3c, S5b, S11 (partial), S11b, S11c, S13, S14 | all green with `E = 2` for S3c; S11 partial; the four mechanism questions in §1 answered without an API key |
 | **2** | Sandbox promoted to an out-of-process service; Go coordinator on real Postgres | S11 and S12 green; cross-language conformance fixtures pass (discipline 34) |
-| **3** | Policy validation (§8.1): dry-run corpus replay of greedy versus wider over recorded episodes, stratified by `error_class` | a published per-stratum cost comparison, and either a proposed `error_class` routing rule or evidence that greedy wins everywhere |
-| **4** | T-C live planner, stratified arms, guardrail gating, up-front baseline arm (§8.2) | a baseline arm with published metrics that a change must beat; the §8.1 routing rule either confirmed on live traffic or withdrawn |
+| **3** | Historical fork evaluation (§8): greedy versus wider and JIT versus up-front on a versioned corpus, at declared `fold_mode`s | complete case reports, explicit unverified writes, and any candidate rule linked to its supporting and contradicting evidence |
+| **4** | T-C live-model sandbox qualification on the fixed scenario corpus | all hard oracles pass; scenario-level quality and cost evidence is published with complete fork provenance; an operator makes the production decision |
 
-Phases 0 through 2 require no API key and no model access, which is the point: regression testing must not depend on a model provider (discipline 28). Phase 3 needs model calls but no writes, so it is cheap and carries no business risk — which is why policy validation precedes the live tier rather than following it.
+Phases 0 through 2 require no API key and no model access, which is the point: regression testing must not depend on a model provider (discipline 28). Phases 3 and 4 may need model calls and live reads but never writes, so policy evaluation remains isolated from production business effects.
 
 ## 11. Relation to Existing Work
 
@@ -335,7 +338,7 @@ Phases 0 through 2 require no API key and no model access, which is the point: r
 
 - **Forward-closure bound (resolved contradiction, new question).** [03 §2.2](./03-replan-and-recovery.md) step 2 now requires driving a post-pivot scope forward to closure rather than searching upward past the floor. Unresolved: how long forward closure may be attempted before the run is declared L4. Too short and a recoverable run is suspended for a human; too long and an unrecoverable run holds resources indefinitely. The harness currently asserts only that L4 is eventually reached, not when, so S10 cannot yet distinguish a correct bound from an arbitrary one.
 - **L2 reachability.** As specified, L2 is reachable only through structural infeasibility of the replan boundary; consecutive replan failures route L1 directly to L3 (03 §3). Whether an intermediate count-based L1 → L2 step was intended is unresolved. The harness asserts the literal specification, so if the intent was different, S3 will fail and expose it — the desired outcome, but it should be a deliberate decision rather than a surprise.
-- **Judge calibration.** §8.1 uses an LLM judge to score dry-run plans. The judge is itself a model, so its version belongs in the attribution triple; whether judge drift can masquerade as a policy improvement is unexamined.
+- **Judge calibration.** §8.1 uses an LLM judge to score counterfactual plans. The judge is itself a model, so its `pin_version` belongs in fork provenance; whether judge drift can masquerade as a policy improvement is unexamined.
 - **Scenario coverage measurement.** Rule and discipline coverage is currently tracked by hand in §6. A generated coverage report — which disciplines have no killing scenario — would be more honest.
-- **Property-based scenario generation.** S1–S14 are hand-written. Randomly generated DAG shapes with generated fault schedules, checked against O1 and O2 only, would likely find the multi-replan shadowing boundary cases flagged as an open question in [01 §7](./01-jit-dag-and-vertex-log.md).
+- **Property-based scenario generation.** S1–S14 are hand-written. Randomly generated DAG shapes with generated fault schedules, checked against O1 and O2 only, would likely find the multi-replan shadowing boundary cases flagged as an open question in [01 §7](./01-jit-dag-and-event-log.md).
 - **Sandbox fidelity ceiling.** A fake carrier that always answers `status` correctly is more cooperative than any real one. Deciding how much real-API pathology to simulate, and where simulating it stops teaching anything, is unresolved.

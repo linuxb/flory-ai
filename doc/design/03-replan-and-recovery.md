@@ -1,6 +1,6 @@
 # Replanning and Recovery (03)
 
-> Status: Draft v0.1 | Depends on: [01](./01-jit-dag-and-vertex-log.md), [02](./02-transaction-model.md)
+> Status: Draft v0.1 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md)
 
 > Diagram: [diagrams/replan-flow.drawio](./diagrams/replan-flow.drawio), including the full flow and the L0–L4 escalation ladder.
 
@@ -20,7 +20,7 @@ L4 suspend + human action (the only exit when post-pivot forward recovery cannot
 
 ### 2.1 Legal replan boundaries and the backtrack floor
 
-Replanning happens **in place, in the same run**: the failed subtree is shadowed and the chosen planner is called again ([01 §5.1](./01-jit-dag-and-vertex-log.md)). Selecting *where* to resume planning is therefore a choice of boundary, not the creation of a branch. The same boundary rules also govern dry-run forks ([01 §5.2](./01-jit-dag-and-vertex-log.md)), so they are stated once here.
+Replanning happens **in place, in the same run**: the failed subtree is shadowed and the chosen planner is called again ([01 §5.1](./01-jit-dag-and-event-log.md)). Selecting *where* to resume planning is therefore a choice of boundary, not the creation of a branch. The same boundary rules also govern offline forks ([01 §5.2](./01-jit-dag-and-event-log.md)), so they are stated once here.
 
 A **legal replan boundary** is a succeeded planner vertex satisfying both conditions:
 
@@ -52,7 +52,7 @@ vertex/failed (retries exhausted)
   → propose new sub-DAG → check-rules → freeze and execute
 ```
 
-Every step appends to the **same run**. No child run is created and no prefix is copied; `run_id` is stable for the life of the business task ([01 §5.1](./01-jit-dag-and-vertex-log.md)).
+Every step appends to the **same run**. No child run is created and no prefix is copied; `run_id` is stable for the life of the business task ([01 §5.1](./01-jit-dag-and-event-log.md)).
 
 Failure evidence is a structured section rather than a raw log dump:
 
@@ -64,7 +64,7 @@ This controls replan input cost and clearly identifies paths already disproven.
 
 ### 2.4 Three hard rules for replanning and transactions
 
-1. **Cancel before replan.** Planning never resumes across an active `try`; compensation precedes backtracking. The rule applies identically to a dry-run fork boundary, with one inversion: a dry-run child must never cancel an inherited try, because that hold belongs to the live parent ([01 §5.2](./01-jit-dag-and-vertex-log.md)). Live runs cancel to make a boundary legal; dry runs must instead refuse the boundary.
+1. **Cancel before replan.** Planning never resumes across an active `try`; compensation precedes backtracking. The rule applies identically to a fork boundary, with one inversion: a fork must never cancel an inherited try, because that hold belongs to the live source run ([01 §5.2](./01-jit-dag-and-event-log.md)). Live runs cancel to make a boundary legal; forks must instead refuse the boundary.
 2. **The pivot is a one-way gate.** Once `txn/pivot-passed` is appended, that seq becomes the backtrack floor (§2.1): no replan boundary may be selected below it, for the remainder of the run. Within the pivot's own scope, a subsequent failure may only retry the suffix idempotently (L0) or reach human intervention (L4). The prohibition is on *planner position*, not on business action — a refund issued from a boundary above the floor is a new forward action and is permitted ([02 §3.3](./02-transaction-model.md)). R1 guarantees that every forward-path node is safely idempotent.
 3. **Shadowing does not delete.** A replan-rejected subtree remains in the log for auditability and as evidence that prevents repeating the same failed approach.
 
@@ -89,7 +89,7 @@ cost(P) = context_cost(P) + rework_cost(P) + compensation_cost(P) × risk_premiu
 
 | Term | Definition | Determinacy |
 |---|---|---|
-| `context_cost(P)` | `input_token_price × uncached_tokens(linearize(P))` | **Exact.** `linearize` is pure and needs no model call, so its length is computed, not estimated. Count *uncached* tokens only: a stable prefix is usually already in the provider's prompt cache ([05 §2.4](./05-context-aggregation-and-experimentation.md)). |
+| `context_cost(P)` | `input_token_price × uncached_tokens(linearize(P))` | **Exact.** `linearize` is pure and needs no model call, so its length is computed, not estimated. Count *uncached* tokens only: a stable prefix is usually already in the provider's prompt cache ([05 §2.4](./05-context-aggregation-and-offline-evaluation.md)). |
 | `rework_cost(P)` | `output_token_price × expected_plan_tokens(P)` plus the registered call price of every tool node discarded between `P` and the failure | **Mixed.** Tool prices come from the tool registry; `expected_plan_tokens` is the one genuine heuristic. Start with the size of the shadowed subtree as its proxy, then learn it from log projections of what past replans at the same backtrack depth actually cost. |
 | `compensation_cost(P)` | Sum of registered compensation prices for every open scope between `P` and the failure | **Computable** from the log plus tool-registration metadata: count open `txn/try` brackets and sum their declared cancel costs. |
 | `risk_premium` | A scalar `≥ 1` applied to compensation only | **Policy.** The only real weight in the model. Compensation touches the external world, and a failed cancel is worse than an equal amount of wasted tokens, so this encodes risk aversion rather than price. |
@@ -125,17 +125,17 @@ A candidate record contains either a selectable candidate's computed cost or a c
 
 ## 5. Mapping to dsh Replay
 
-dsh unifies resume, fork, and replay into one primitive because a session is a cheap local object. Flory **splits** them, because a run is a business process whose identity must stay intact ([01 §5](./01-jit-dag-and-vertex-log.md)).
+dsh unifies resume, fork, and replay into one primitive because a session is a cheap local object. Flory **splits** them, because a run is a business process whose identity must stay intact ([01 §5](./01-jit-dag-and-event-log.md)).
 
 | dsh | Flory |
 |---|---|
 | `session fork(boundary_seq)` for continuing work | **In-place replan**: `replan/boundary` + `subgraph/shadowed`, same `run_id`, no prefix copy (§2.3). |
-| `session fork(boundary_seq)` for branching | **Dry-run fork only**: offline counterfactuals, replay tests, operator what-ifs; never executes writes ([01 §5.2](./01-jit-dag-and-vertex-log.md)). |
+| `session fork(boundary_seq)` for branching | **Offline fork only**: branch, substitute a `pin_version`, merge the source tail, compare folded surfaces; never executes writes ([01 §5.2](./01-jit-dag-and-event-log.md)). |
 | Reject fork in an open turn. | Reject a boundary in an open transaction bracket, or below the backtrack floor (§2.1). |
-| Resume equals fork. | **Resume is not a fork**: crash recovery re-projects the same log. |
-| `session/end-seed` marks an inherited prefix. | `run/end-seed` marks a dry-run child's inherited, read-only prefix. Live-run orphan-try detection uses timeouts and unmatched brackets instead ([02 §4.4](./02-transaction-model.md)). |
-| Replay is a pure-function fold. | Replay recalculates surface plus linearization. |
-| Fork does not handle external effects. | Cancel-before-replan explicitly handles side effects; dry-run forks are barred from touching them at all. |
+| Resume equals fork. | **Resume is not a fork**: crash recovery re-projects the same stream. |
+| `session/end-seed` marks an inherited prefix. | `run/end-seed` marks a fork's inherited, read-only prefix. Live-run orphan-try detection uses timeouts and unmatched brackets instead ([02 §4.4](./02-transaction-model.md)). |
+| Replay is a pure-function fold. | Replay is a fork with no substitutions in `fold_mode: recorded`, and must reproduce the source surface exactly ([01 §6](./01-jit-dag-and-event-log.md)). |
+| Fork does not handle external effects. | Cancel-before-replan explicitly handles side effects; forks are barred from touching them at all, and the `fold_mode` gate enforces it ([01 §5.4](./01-jit-dag-and-event-log.md)). |
 
 ## 6. Open Questions
 

@@ -9,7 +9,7 @@
 
 Flory needs an implementation language before construction starts. The engine decomposes into parts with genuinely different demands:
 
-1. **Planner loop and projection pipeline** — reads a partially ordered append-only log, folds it through pure functions, assembles prompts, and calls models. Correctness depends on exhaustive handling of an extensible event vocabulary and on the purity of the projection layers ([01](../01-jit-dag-and-vertex-log.md), [05](../05-context-aggregation-and-experimentation.md)).
+1. **Planner loop and projection pipeline** — reads a partially ordered append-only log, folds it through pure functions, assembles prompts, and calls models. Correctness depends on exhaustive handling of an extensible event vocabulary and on the purity of the projection layers ([01](../01-jit-dag-and-event-log.md), [05](../05-context-aggregation-and-offline-evaluation.md)).
 2. **Transaction coordinator and executor** — a long-running daemon holding thousands of in-flight TCC brackets with deadlines, sweeping `try_timeout_s`, detecting orphan tries, scheduling backoff retries, and calling business systems that move inventory and money ([02](../02-transaction-model.md)).
 3. **Replay and batch recomputation** — replay testing of the planner loop, plus historical metric recomputation after a projector upgrade.
 
@@ -21,7 +21,7 @@ Two services and one database:
 
 - **TypeScript** implements the engine service: planner loop, event vocabulary, the canonical projection pipeline (`surface`, `slice`, `fold`, `linearize`, `assemble`), check-rules, prompt assembly, refine loop, model adapters, and replay testing.
 - **Go** implements the coordinator service: transaction brackets, timeout sweeping, orphan-try detection, the tool executor, and tool adapters that need to sit inside existing Go infrastructure.
-- **PostgreSQL** holds the vertex log and harness-state and allocates `seq`.
+- **PostgreSQL** holds the event log and harness-state and allocates `seq`.
 - **The boundary is the log.** The two services never call each other's internals; they communicate by appending events, and each owns an exclusive set of event types (table in `AGENTS.md`). Work handoff is `FOR UPDATE SKIP LOCKED` or `LISTEN/NOTIFY` — no message broker until load demands one.
 - **Canonical projections have exactly one implementation, in TypeScript.** Operational folds (unmatched-try scanning, timeout sweeps, executor readiness) may live in either service.
 
@@ -29,7 +29,7 @@ Two services and one database:
 
 ### Why TypeScript for the engine core
 
-- The log is a tagged union discriminated by `event_type`, and [01](../01-jit-dag-and-vertex-log.md) requires fail-closed reads. A discriminated union with exhaustive `switch` makes the compiler enforce that requirement. Go has no sum types; the equivalent is an interface plus a type switch, where a forgotten branch after adding an event type compiles silently. For a system whose foundation is log-reading correctness, that is not a matter of taste.
+- The log is a tagged union discriminated by `event_type`, and [01](../01-jit-dag-and-event-log.md) requires fail-closed reads. A discriminated union with exhaustive `switch` makes the compiler enforce that requirement. Go has no sum types; the equivalent is an interface plus a type switch, where a forgotten branch after adding an event type compiles silently. For a system whose foundation is log-reading correctness, that is not a matter of taste.
 - The projection pipeline is pure-function composition over immutable data — idiomatic in TypeScript, verbose in Go and prone to accidental shared mutability.
 - One schema library (zod) covers check-rule validation, refine edit validation, and mem-hint template whitelisting. All three need runtime validation plus static types, which is exactly its purpose.
 - Model SDKs, streaming, structured output, and tool-schema generation are first-class. The two systems whose designs Flory borrows from — deepseek-harness and prime-agent — are both TypeScript, so patterns transfer directly.
@@ -44,14 +44,14 @@ Two services and one database:
 
 ### Why the split is cheap here
 
-Because the log is the single source of truth, the two services share no mutable state and expose no internal RPC to each other; PostgreSQL allocates `seq`, so no coordination protocol is needed. Had the design used mutable shared state with inter-service RPC, this split would have introduced consistency problems instead. The log-as-truth decision in [01](../01-jit-dag-and-vertex-log.md) is what makes polyglot affordable.
+Because the log is the single source of truth, the two services share no mutable state and expose no internal RPC to each other; PostgreSQL allocates `seq`, so no coordination protocol is needed. Had the design used mutable shared state with inter-service RPC, this split would have introduced consistency problems instead. The log-as-truth decision in [01](../01-jit-dag-and-event-log.md) is what makes polyglot affordable.
 
 ### Why replay stays in TypeScript
 
 "Replay" names two activities, and the deciding constraint is the same for both: **how many implementations of the projection semantics can we afford? Exactly one.**
 
 - Replay testing exercises the projection pipeline and planner loop themselves, so it must run the same code as production. If projections are in TypeScript, replay testing is in TypeScript.
-- Batch historical recomputation looks like a Go task — CPU-bound, embarrassingly parallel, read-only — but porting the projector to Go creates two projectors that can disagree on edge cases, which makes discipline 3 (identical recomputation) unverifiable and destroys `projector_version` attribution ([05](../05-context-aggregation-and-experimentation.md) §3.1). Scale it instead by sharding on `run_id` across worker processes, or by pushing a fold down into SQL.
+- Batch historical recomputation looks like a Go task — CPU-bound, embarrassingly parallel, read-only — but porting the projector to Go creates two projectors that can disagree on edge cases, which makes discipline 3 (identical recomputation) unverifiable and destroys `projector_version` attribution ([05](../05-context-aggregation-and-offline-evaluation.md) §3.1). Scale it instead by sharding on `run_id` across worker processes, or by pushing a fold down into SQL.
 
 ## Consequences
 

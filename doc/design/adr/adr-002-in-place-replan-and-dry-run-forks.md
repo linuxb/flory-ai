@@ -1,20 +1,20 @@
 # ADR-002: Replan in place; reserve forks for dry runs
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-004
 - **Date:** 2026-08-19
 - **Deciders:** Flory engine team
 - **Supersedes:** the online-fork recovery model described by earlier design drafts
 
 ## Context
 
-Flory uses an append-only vertex log and supports both recovery from failed tool calls and offline evaluation of alternate plans. The original model used `fork(boundary)` for recovery, following deepseek-harness (dsh), where a session fork also supports resume and replay.
+Flory uses an append-only event log and supports both recovery from failed tool calls and offline evaluation of alternate plans. The original model used `fork(boundary)` for recovery, following deepseek-harness (dsh), where a session fork also supports resume and replay.
 
 That equivalence does not hold for Flory. A run represents one business process, such as an order or replenishment. Its identity is part of the audit trail, and the run may own active inventory holds and other data-plane state. We must distinguish live recovery from a counterfactual evaluation without allowing an offline child to mutate the live process.
 
 ## Decision
 
 - An online replan appends `replan/boundary` and `subgraph/shadowed` to the **same** `run_id`, then calls the selected planner again. It never creates a child run or copies a log prefix.
-- `fork/created` is reserved for offline child runs with `mode: "dry-run"`: counterfactual A/B evaluation, replay testing, recovery-strategy comparison, and operator what-if previews.
+- `fork/created` is reserved for offline child runs: counterfactual evaluation, replay testing, recovery-strategy comparison, and operator what-if previews. The decision recorded here is that forks are offline-only; the mechanism was later elaborated into branch/substitute/merge over `pin_version` with a `fold_mode` ladder, and forks were found unusable as A/B arms — see [01 §5](../01-jit-dag-and-event-log.md), which carries the current design.
 - A dry-run child executes only tools with `effect_class: none`. It may read current state, but skips and records estimates for every side-effecting tool.
 - Events inherited before a dry-run child's `run/end-seed` are read-only. The child must never cancel or confirm an inherited `txn/try`; an open inherited bracket makes the boundary ineligible for a dry run.
 - The legal boundary for either mechanism is a succeeded planner outside every open transaction bracket and at or after the most recent `txn/pivot-passed`.
@@ -51,7 +51,7 @@ Dry runs remain valuable precisely because they are isolated. A forked child can
 
 ## References
 
-- [JIT-DAG and vertex log](../01-jit-dag-and-vertex-log.md) §5
+- [JIT-DAG and event log](../01-jit-dag-and-event-log.md) §5
 - [Replanning and recovery](../03-replan-and-recovery.md) §2
-- [Context aggregation and experimentation](../05-context-aggregation-and-experimentation.md) §3
+- [Context aggregation and experimentation](../05-context-aggregation-and-offline-evaluation.md) §3
 - [Validation harness](../06-validation-harness.md) scenarios S2c and S11b

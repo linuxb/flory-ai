@@ -50,11 +50,11 @@ Scope membership may only grow while that scope is open. This is an abstract
 model of the admission boundary, not a proof of the real R1-R11 functions;
 those pure functions remain harness tests.
 
-Nested scopes, hold-conservation arithmetic, orphan-sweep races, dry-run seed
+Nested scopes, hold-conservation arithmetic, orphan-sweep races, offline-fork seed
 isolation, Apalache induction, Alloy search, and real-log trace validation are
 deferred to the later stages defined in ADR-003. `PassPivot` is one atomic TLA+
 action, deliberately abstracting the required same-database-transaction
-projection read and `txn/pivot-passed` append. The `run_seq`/`global_seq` split,
+projection read and `txn/pivot-passed` append. The `stream_seq`/`global_seq` split,
 database constraints, and implementation interleavings are S2 trace and
 coordinator concerns rather than extra S1 state variables.
 

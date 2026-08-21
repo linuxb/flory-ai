@@ -1,6 +1,6 @@
 # Transaction Model: TCC and Pivot-Saga (02)
 
-> Status: Draft v0.1 | Depends on: [01-jit-dag-and-vertex-log](./01-jit-dag-and-vertex-log.md)
+> Status: Draft v0.1 | Depends on: [01-jit-dag-and-event-log](./01-jit-dag-and-event-log.md)
 
 ## 1. Why Two Transaction Modes Are Needed
 
@@ -73,7 +73,7 @@ This is computed, never asked of the planner. In the example `reserve 3 units �
 
 **Footprints need only be soundly over-approximated at freeze, not exactly resolved.** If the warehouse has not been chosen yet, `inventory:SKU-123@{A,B}` — the union of candidates — is a valid footprint. Over-approximation can only manufacture *false* conflicts, causing extra barriers or serialization; it can never miss a real one. For a safety rule that is the correct direction to err.
 
-This matters because it dissolves an apparent conflict with progressive disclosure. A node's parameters may be **references to upstream vertex outputs** rather than literals ([01 §2.2](./01-jit-dag-and-vertex-log.md)), so `warehouse = ref(T1.output.best_warehouse)` freezes cleanly. The "no clairvoyant parameters" assertion ([06 §6](./06-validation-harness.md) S14) forbids *inventing* a value the planner cannot know; it does not forbid *referencing* a value that will exist. A query-then-reserve-then-book flow can therefore be one scope in one frozen subgraph.
+This matters because it dissolves an apparent conflict with progressive disclosure. A node's parameters may be **references to upstream vertex outputs** rather than literals ([01 §2.2](./01-jit-dag-and-event-log.md)), so `warehouse = ref(T1.output.best_warehouse)` freezes cleanly. The "no clairvoyant parameters" assertion ([06 §6](./06-validation-harness.md) S14) forbids *inventing* a value the planner cannot know; it does not forbid *referencing* a value that will exist. A query-then-reserve-then-book flow can therefore be one scope in one frozen subgraph.
 
 The one case where splitting is genuinely forced is an **unenumerable resource identity** — "reserve whatever SKU the supplier recommends", where the candidate set cannot be listed at freeze. The over-approximation degenerates to the entire resource class, which serializes everything that touches it. Splitting is then a correctness-preserving throughput fix, not a rule requirement.
 
@@ -83,7 +83,7 @@ The planner declares `txn/scope`: member vertices and the scope savepoint. The p
 
 **Widening** means declaring a scope larger than the computed minimum, and it is the planner's real contribution. Continuing the example: the business may require that a promotional price only take effect if the goods actually ship, so a booking failure must also revert the price. The engine cannot derive this — the two footprints are disjoint and technically unrelated. This is a **business atomicity** requirement, and its source must be `task_input` or a workflow policy. A planner inferring atomicity from general world knowledge is producing exactly the kind of unverifiable judgement this architecture exists to avoid; if that starts happening, the missing piece is the policy channel, not a better prompt.
 
-Widening is not free: a wider scope has more to compensate on failure, and its R9 barrier suppresses more concurrency. It should be driven by an explicit requirement, never by "圈进来更保险".
+Widening is not free: a wider scope has more to compensate on failure, and its R9 barrier suppresses more concurrency. It should be driven by an explicit requirement, never by a vague belief that including more nodes is safer.
 
 **Narrowing** — declaring a scope smaller than the minimum — is always illegal, because it is how a planner would escape the rules by simply not declaring. Omit the reservation from the booking's scope and R2 no longer applies to it: R2 constrains "in-scope nodes before a pivot", and the node is now out of scope. A booking failure then cancels nothing, and three units stay held until `try_timeout_s` expires while other orders see reduced availability.
 
@@ -204,9 +204,9 @@ See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Para
 
 ### 4.4 Orphan try detection
 
-**In a live run**, scan for `txn/try` events with no matching confirm or cancel after `try_timeout_s` and append an idempotent `cancel`. Crash recovery uses the same sweep — it needs no marker of its own, because a resumed run re-projects its own log and every bracket in it belongs to that run ([01 §5.1](./01-jit-dag-and-vertex-log.md)).
+**In a live run**, scan for `txn/try` events with no matching confirm or cancel after `try_timeout_s` and append an idempotent `cancel`. Crash recovery uses the same sweep — it needs no marker of its own, because a resumed run re-projects its own log and every bracket in it belongs to that run ([01 §5.1](./01-jit-dag-and-event-log.md)).
 
-**In a dry-run child**, the sweep is inverted into a prohibition. Every `txn/try` inherited before `run/end-seed` belongs to a live parent run, so the child must **never** cancel or confirm it: doing so would release a real hold out from under a real order. This is the actual purpose of the end-seed marker — it separates "inherited, read-only" from "mine" ([01 §5.2](./01-jit-dag-and-vertex-log.md)). A dry-run child that finds an inherited open bracket at its boundary must refuse the boundary rather than clear it.
+**In a fork**, the sweep is inverted into a prohibition. Every `txn/try` inherited before `run/end-seed` belongs to a live parent run, so the fork must **never** cancel or confirm it: doing so would release a real hold out from under a real order. This is the actual purpose of the end-seed marker — it separates "inherited, read-only" from "mine" ([01 §5.2](./01-jit-dag-and-event-log.md)). A fork that finds an inherited open bracket at its boundary must refuse the boundary rather than clear it.
 
 ## 5. Relation to Existing Work
 

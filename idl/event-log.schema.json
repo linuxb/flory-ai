@@ -1,38 +1,77 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://flory.dev/idl/event-log/v1.schema.json",
-  "title": "Flory Event Log v1",
-  "type": "object",
-  "required": ["event_type", "payload"],
-  "properties": {
-    "event_type": { "type": "string" },
-    "vertex_id": { "type": ["string", "null"], "format": "uuid" },
-    "parent_refs": { "type": "array", "items": { "type": "string", "format": "uuid" } },
-    "planner_id": { "type": ["string", "null"], "format": "uuid" },
-    "scope_id": { "type": ["string", "null"], "format": "uuid" },
-    "pin_version": { "type": ["string", "null"] },
-    "ignorable": { "type": "boolean", "default": false },
-    "payload": { "type": "object" }
-  },
-  "allOf": [{
-    "if": { "properties": { "event_type": { "not": { "enum": ["run/start", "run/end", "run/end-seed", "subgraph/proposed", "subgraph/frozen", "subgraph/rejected", "subgraph/shadowed", "replan/boundary", "fork/created", "vertex/created", "vertex/started", "vertex/succeeded", "vertex/failed", "vertex/retried", "txn/scope", "txn/try", "txn/confirm", "txn/cancel", "txn/pivot-passed", "budget/charged"] } } } },
-    "then": { "required": ["ignorable"], "properties": { "ignorable": { "const": true } } }
-  }],
-  "additionalProperties": false,
-  "$defs": {
-    "forkRequest": {
-      "type": "object",
-      "required": ["source_run_id", "at_stream_seq", "substitutions", "fold_mode", "evaluator_pin", "projector_version", "harness_state_version"],
-      "properties": {
-        "source_run_id": { "type": "string", "format": "uuid" },
-        "at_stream_seq": { "type": "integer", "minimum": 1 },
-        "substitutions": { "type": "array", "items": { "type": "object", "required": ["stream_seq", "pin_version"], "properties": { "stream_seq": { "type": "integer", "minimum": 1 }, "pin_version": { "type": "string", "minLength": 1 } }, "additionalProperties": false } },
-        "fold_mode": { "enum": ["recorded", "model-live", "reads-live"] },
-        "evaluator_pin": { "type": "string", "minLength": 1 },
-        "projector_version": { "type": "string", "minLength": 1 },
-        "harness_state_version": { "type": "string", "minLength": 1 }
-      },
-      "additionalProperties": false
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://flory.dev/idl/event-log/v1.schema.json",
+    "title": "Flory Event Log v1",
+    "type": "object",
+    "required": ["event_type", "payload"],
+    "properties": {
+        "event_type": {"type": "string"},
+        "vertex_id": {"type": ["string", "null"], "format": "uuid"},
+        "parent_refs": {"type": "array", "items": {"type": "string", "format": "uuid"}},
+        "planner_id": {"type": ["string", "null"], "format": "uuid"},
+        "scope_id": {"type": ["string", "null"], "format": "uuid"},
+        "pin_version": {"type": ["string", "null"]},
+        "ignorable": {"type": "boolean", "default": false},
+        "payload": {"type": "object"}
+    },
+    "allOf": [
+        {
+            "if": {
+                "properties": {
+                    "event_type": {
+                        "not": {
+                            "enum": [
+                                "run/start",
+                                "run/end",
+                                "run/end-seed",
+                                "subgraph/proposed",
+                                "subgraph/frozen",
+                                "subgraph/rejected",
+                                "subgraph/shadowed",
+                                "replan/boundary",
+                                "fork/created",
+                                "vertex/created",
+                                "vertex/started",
+                                "vertex/succeeded",
+                                "vertex/failed",
+                                "vertex/retried",
+                                "txn/scope",
+                                "txn/try",
+                                "txn/confirm",
+                                "txn/cancel",
+                                "txn/pivot-passed",
+                                "budget/charged"
+                            ]
+                        }
+                    }
+                }
+            },
+            "then": {"required": ["ignorable"], "properties": {"ignorable": {"const": true}}}
+        }
+    ],
+    "additionalProperties": false,
+    "$defs": {
+        "forkRequest": {
+            "type": "object",
+            "required": ["source_run_id", "at_stream_seq", "substitutions", "fold_mode", "evaluator_pin", "projector_version", "harness_state_version"],
+            "properties": {
+                "source_run_id": {"type": "string", "format": "uuid"},
+                "at_stream_seq": {"type": "integer", "minimum": 1},
+                "substitutions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["stream_seq", "pin_version"],
+                        "properties": {"stream_seq": {"type": "integer", "minimum": 1}, "pin_version": {"type": "string", "minLength": 1}},
+                        "additionalProperties": false
+                    }
+                },
+                "fold_mode": {"enum": ["recorded", "model-live", "reads-live"]},
+                "evaluator_pin": {"type": "string", "minLength": 1},
+                "projector_version": {"type": "string", "minLength": 1},
+                "harness_state_version": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+        }
     }
-  }
 }

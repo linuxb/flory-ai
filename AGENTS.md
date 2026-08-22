@@ -107,7 +107,7 @@ Reject a change that does any of the following:
 
 - Hand-written TypeScript and JavaScript must follow the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html). Generated sources are exempt except for identifiers that are consumed by hand-written code.
 - Use UTF-8, LF line endings, four spaces for indentation, single-quoted strings, trailing commas, and no trailing whitespace. Apply the repository Prettier configuration; do not hand-format around it.
-- The project line limit is **200 columns**. Wrap expressions, parameter lists, object literals, and test fixtures so every TypeScript or JavaScript line stays within this limit. An unbreakable external URL or required wire literal is the only exception and must be documented locally.
+- The project line limit is **200 columns**. Wrap expressions, parameter lists, object literals, test fixtures, and JSON Schema declarations so every TypeScript, JavaScript, and IDL schema line stays within this limit. An unbreakable external URL or required wire literal is the only exception and must be documented locally.
 - Use lowerCamelCase for TypeScript identifiers and UpperCamelCase for types. Preserve snake_case only for externally defined protocol, JSON, SQL, or generated field names.
 - Use `import type` and `export type` for type-only references. Document every top-level export in non-generated source with JSDoc; also document any property or method whose purpose is not immediately obvious from its name and type.
 - Run `npm run format:check` before review. It checks both Prettier conformance and the 200-column limit.

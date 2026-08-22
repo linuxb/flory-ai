@@ -3,6 +3,7 @@ import {join} from 'node:path';
 
 const MAX_LINE_LENGTH = 200;
 const SOURCE_DIRECTORIES = ['db', 'engine', 'scripts', 'test'];
+const STYLE_FILES = ['idl/event-log.schema.json'];
 const TYPE_SCRIPT_EXTENSIONS = new Set(['.cts', '.mts', '.ts', '.mjs']);
 
 async function listSourceFiles(directory) {
@@ -25,7 +26,8 @@ async function findLongLines(path) {
 }
 
 const sourceFiles = (await Promise.all(SOURCE_DIRECTORIES.map(listSourceFiles))).flat();
-const violations = (await Promise.all(sourceFiles.map(findLongLines))).flat();
+const checkedFiles = [...sourceFiles, ...STYLE_FILES];
+const violations = (await Promise.all(checkedFiles.map(findLongLines))).flat();
 if (violations.length > 0) {
-    throw new Error(`TypeScript and JavaScript lines must be at most ${MAX_LINE_LENGTH} columns:\n` + violations.join('\n'));
+    throw new Error(`Checked source lines must be at most ${MAX_LINE_LENGTH} columns:\n` + violations.join('\n'));
 }

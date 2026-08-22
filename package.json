@@ -8,8 +8,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
-    "format": "prettier --write engine test db scripts --ignore-unknown",
-    "format:check": "prettier --check engine test db scripts --ignore-unknown && node scripts/check-style.mjs",
+    "format": "prettier --write engine test db scripts idl/event-log.schema.json --ignore-unknown",
+    "format:check": "prettier --check engine test db scripts idl/event-log.schema.json --ignore-unknown && node scripts/check-style.mjs",
     "generate": "node scripts/generate-event-types.mjs",
     "generate:check": "node scripts/generate-event-types.mjs --check",
     "db:up": "docker compose up -d --wait postgres",

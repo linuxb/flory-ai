@@ -47,10 +47,102 @@
                 }
             },
             "then": {"required": ["ignorable"], "properties": {"ignorable": {"const": true}}}
-        }
+        },
+        {"if": {"properties": {"event_type": {"const": "vertex/created"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/vertexCreatedPayload"}}}},
+        {"if": {"properties": {"event_type": {"const": "txn/scope"}}, "required": ["event_type"]}, "then": {"required": ["scope_id"], "properties": {"payload": {"$ref": "#/$defs/txnScopePayload"}}}},
+        {
+            "if": {"properties": {"event_type": {"const": "txn/try"}}, "required": ["event_type"]},
+            "then": {"required": ["scope_id", "vertex_id"], "properties": {"payload": {"$ref": "#/$defs/txnTryPayload"}}}
+        },
+        {
+            "if": {"properties": {"event_type": {"const": "txn/confirm"}}, "required": ["event_type"]},
+            "then": {"required": ["scope_id", "vertex_id"], "properties": {"payload": {"$ref": "#/$defs/txnConfirmPayload"}}}
+        },
+        {"if": {"properties": {"event_type": {"const": "txn/cancel"}}, "required": ["event_type"]}, "then": {"required": ["scope_id"], "properties": {"payload": {"$ref": "#/$defs/txnCancelPayload"}}}}
     ],
     "additionalProperties": false,
     "$defs": {
+        "retryPolicy": {
+            "type": "object",
+            "required": ["max_attempts", "initial_backoff_ms", "multiplier", "max_backoff_ms"],
+            "properties": {
+                "max_attempts": {"type": "integer", "minimum": 1},
+                "initial_backoff_ms": {"type": "integer", "minimum": 0},
+                "multiplier": {"type": "number", "minimum": 1},
+                "max_backoff_ms": {"type": "integer", "minimum": 0}
+            },
+            "additionalProperties": false
+        },
+        "transactionSpec": {
+            "type": "object",
+            "required": ["effect_class", "mode"],
+            "properties": {
+                "effect_class": {"enum": ["none", "bufferable", "reversible", "irreversible"]},
+                "mode": {"enum": ["plain", "tcc", "saga"]},
+                "idempotency_key": {"type": "string", "minLength": 1},
+                "try_timeout_s": {"type": "integer", "minimum": 1},
+                "confirm_tool": {"type": "string", "minLength": 1},
+                "cancel_tool": {"type": "string", "minLength": 1},
+                "compensate_tool": {"type": "string", "minLength": 1},
+                "status_tool": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+        },
+        "vertexCreatedPayload": {
+            "oneOf": [
+                {"type": "object", "required": ["role"], "properties": {"role": {"const": "planner"}}, "additionalProperties": true},
+                {"type": "object", "required": ["role"], "properties": {"role": {"const": "confirmation-barrier"}}, "additionalProperties": false},
+                {
+                    "type": "object",
+                    "required": ["role", "tool", "input", "retry_policy", "txn"],
+                    "properties": {
+                        "role": {"const": "tool"},
+                        "tool": {"type": "string", "minLength": 1},
+                        "input": {"type": "object"},
+                        "retry_policy": {"$ref": "#/$defs/retryPolicy"},
+                        "txn": {"$ref": "#/$defs/transactionSpec"}
+                    },
+                    "additionalProperties": false
+                }
+            ]
+        },
+        "txnScopePayload": {
+            "type": "object",
+            "required": ["state"],
+            "properties": {
+                "state": {"enum": ["open", "committed", "cancelled", "suspended"]},
+                "member_vertices": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+                "required_try_vertices": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
+                "pivot_vertex": {"type": ["string", "null"], "format": "uuid"},
+                "savepoint_seq": {"type": ["integer", "null"], "minimum": 1}
+            },
+            "additionalProperties": false
+        },
+        "txnTryPayload": {
+            "type": "object",
+            "required": ["idempotency_key", "deadline_at"],
+            "properties": {
+                "idempotency_key": {"type": "string", "minLength": 1},
+                "deadline_at": {"type": "string", "format": "date-time"},
+                "confirm_tool": {"type": "string", "minLength": 1},
+                "cancel_tool": {"type": "string", "minLength": 1},
+                "compensate_tool": {"type": "string", "minLength": 1},
+                "retry_policy": {"$ref": "#/$defs/retryPolicy"},
+                "input": {"type": "object"}
+            },
+            "additionalProperties": false
+        },
+        "txnConfirmPayload": {"type": "object", "required": ["idempotency_key"], "properties": {"idempotency_key": {"type": "string", "minLength": 1}}, "additionalProperties": false},
+        "txnCancelPayload": {
+            "type": "object",
+            "required": ["idempotency_key", "phase"],
+            "properties": {
+                "idempotency_key": {"type": "string", "minLength": 1},
+                "phase": {"enum": ["requested", "completed"]},
+                "reason": {"type": "string"}
+            },
+            "additionalProperties": false
+        },
         "forkRequest": {
             "type": "object",
             "required": ["source_run_id", "at_stream_seq", "substitutions", "fold_mode", "evaluator_pin", "projector_version", "harness_state_version"],

@@ -16,6 +16,7 @@
     "db:down": "docker compose down",
     "db:migrate": "tsx db/migrate.ts",
     "db:reset": "tsx db/reset.ts",
+    "sandbox": "tsx test/sandbox/server.ts",
     "test": "vitest run",
     "verify": "npm run generate:check && npm run build && npm run test"
   },

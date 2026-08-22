@@ -1,0 +1,50 @@
+{
+    "cases": [
+        {
+            "name": "scope commits only after pivot and confirm",
+            "valid": true,
+            "expected_scope_state": "committed",
+            "events": [
+                {"stream_seq": 1, "event_type": "txn/scope", "scope_id": "00000000-0000-4000-8000-000000000100", "payload": {"state": "open"}},
+                {
+                    "stream_seq": 2,
+                    "event_type": "txn/try",
+                    "vertex_id": "00000000-0000-4000-8000-000000000101",
+                    "scope_id": "00000000-0000-4000-8000-000000000100",
+                    "payload": {"idempotency_key": "scope-100:hold", "deadline_at": "2026-08-23T00:00:00Z", "confirm_tool": "inventory.confirm"}
+                },
+                {"stream_seq": 3, "event_type": "txn/pivot-passed", "vertex_id": "00000000-0000-4000-8000-000000000102", "scope_id": "00000000-0000-4000-8000-000000000100", "payload": {}},
+                {
+                    "stream_seq": 4,
+                    "event_type": "txn/confirm",
+                    "vertex_id": "00000000-0000-4000-8000-000000000101",
+                    "scope_id": "00000000-0000-4000-8000-000000000100",
+                    "payload": {"idempotency_key": "scope-100:hold"}
+                },
+                {"stream_seq": 5, "event_type": "txn/scope", "scope_id": "00000000-0000-4000-8000-000000000100", "payload": {"state": "committed"}}
+            ]
+        },
+        {
+            "name": "scope cancel is one requested-completed lifecycle",
+            "valid": true,
+            "expected_scope_state": "cancelled",
+            "events": [
+                {"stream_seq": 1, "event_type": "txn/scope", "scope_id": "00000000-0000-4000-8000-000000000200", "payload": {"state": "open"}},
+                {"stream_seq": 2, "event_type": "txn/cancel", "scope_id": "00000000-0000-4000-8000-000000000200", "payload": {"idempotency_key": "scope-200:cancel", "phase": "requested"}},
+                {"stream_seq": 3, "event_type": "txn/cancel", "scope_id": "00000000-0000-4000-8000-000000000200", "payload": {"idempotency_key": "scope-200:cancel", "phase": "completed"}}
+            ]
+        },
+        {
+            "name": "unknown event fails closed",
+            "valid": false,
+            "expected_scope_state": "open",
+            "events": [{"stream_seq": 1, "event_type": "extension/unsafe", "payload": {}}]
+        },
+        {
+            "name": "ignorable unknown event is accepted",
+            "valid": true,
+            "expected_scope_state": "open",
+            "events": [{"stream_seq": 1, "event_type": "extension/diagnostic", "ignorable": true, "payload": {}}]
+        }
+    ]
+}

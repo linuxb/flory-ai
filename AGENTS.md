@@ -117,7 +117,7 @@ Reject a change that does any of the following:
 Two services, one database. Rationale and rejected alternatives: [ADR-001](doc/design/adr/adr-001-engine-language-split.md).
 
 - **TypeScript** — engine service: planner loop, event vocabulary as discriminated unions, the canonical projection pipeline, check-rules, prompt assembly, refine loop, model adapters, and replay testing.
-- **Go** — coordinator service: transaction brackets, timeout sweeping, orphan-try detection, the tool executor, and tool adapters that must live inside existing Go infrastructure.
+- **Go 1.25** — implementation language for the Distributed Transaction Coordinator: transaction scopes, timeout sweeping, orphan-try detection, the tool executor, and adapters that must live inside existing Go infrastructure.
 - **PostgreSQL** — the event log and harness-state. It allocates `seq`, so the two services need no coordination protocol. Work handoff uses `SELECT … FOR UPDATE SKIP LOCKED` or `LISTEN/NOTIFY`; do not introduce a message broker before there is load that requires one.
 - No third language in the engine without a new ADR.
 
@@ -128,12 +128,12 @@ The two services never call each other's internals. They communicate only by app
 | Owner | Exclusive write access |
 |---|---|
 | TS engine | `run/start`, `run/end`, `run/end-seed`, `subgraph/proposed`, `subgraph/frozen`, `subgraph/rejected`, `subgraph/shadowed`, `replan/boundary`, `fork/created`, `vertex/created`, `budget/charged` |
-| Go coordinator | `vertex/started`, `vertex/succeeded`, `vertex/failed`, `vertex/retried`, `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` |
+| Distributed Transaction Coordinator | `vertex/started`, `vertex/succeeded`, `vertex/failed`, `vertex/retried`, `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` |
 
 29. **Enforce event ownership at the append boundary** in both services. A service appending an event type it does not own is a bug, not a shortcut.
 30. **Canonical projections have exactly one implementation, in TypeScript.** `surface`, `slice`, `fold`, `linearize`, and `assemble` may never be reimplemented in Go. Reason: a second implementation of the projection semantics produces the worst available bug class — two projectors that disagree on an edge case — and it makes discipline 3 (identical recomputation) and discipline 24 (`projector_version` attribution) unverifiable.
 30a. **The engine is domain-neutral, and mocks are test-only.** The canonical pipeline owns generic reducer registration, deterministic dispatch, and projection mechanics only. A mock business world, mock reducer, mock view, or mock oracle belongs under `test/mocks/`, not under `engine/` or a production `domain/` package. Reason: importing a SKU, carrier, payment, or any other business concept into the engine turns a reusable safety boundary into an e-commerce-specific implementation; promoting a verification fake to `domain/` makes tests look like production business behavior.
-31. **Operational projections may live in either service.** Narrow, local folds that serve execution or operations — unmatched `txn/try` scanning, timeout sweeps, executor readiness checks — are not canonical projections. They do not feed a prompt, do not participate in attribution, and are independently testable. Discipline 30 restricts planner-context projection, not log reading in general; the Go coordinator is expected to read the log.
+31. **Operational projections may live in either service.** Narrow, local folds that serve execution or operations — unmatched `txn/try` scanning, timeout sweeps, executor readiness checks — are not canonical projections. They do not feed a prompt, do not participate in attribution, and are independently testable. Discipline 30 restricts planner-context projection, not log reading in general; the Distributed Transaction Coordinator is expected to read the log.
 32. **Replay testing lives wherever the projector lives**, i.e. in TypeScript, because it must exercise the same code as production. Batch historical recomputation is also driven by the canonical projector: scale it by sharding on `run_id` across worker processes, or push a fold down into SQL. Never by porting the projector.
 33. **The event schema is a shared, versioned artifact** — a schema-first IDL in the repository with generated types for both languages. A field change means editing the schema and regenerating, never editing one side's types.
 34. **Cross-language conformance tests are required** for any log-reading semantics both services implement: golden log fixtures plus expected outcomes that both readers must satisfy. Fail-closed behavior on an unknown `event_type` without an `ignorable` flag is a mandatory fixture.

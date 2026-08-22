@@ -34,6 +34,7 @@ export interface StoredEvent extends Required<Omit<EventDraft, 'vertex_id' | 'pl
 const schema = JSON.parse(readFileSync(resolve(process.cwd(), 'idl/event-log.schema.json'), 'utf8'));
 const ajv = new Ajv2020({allErrors: true, strict: false});
 ajv.addFormat('uuid', /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+ajv.addFormat('date-time', {validate: (value: string) => !Number.isNaN(Date.parse(value))});
 const validateSchema = ajv.compile(schema);
 const known = new Set<string>(EVENT_TYPES);
 

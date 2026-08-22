@@ -1,6 +1,6 @@
 # Plan 001: TLA+ specification of the transaction protocol
 
-- **Status:** Active — S1 complete; S2 and S3 remain trigger-gated
+- **Status:** Active — S1 and S2 complete; S3 remains trigger-gated
 - **Date:** 2026-08-20
 - **Implements:** [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md)
 - **Specifies:** [02 transaction model](../design/02-transaction-model.md), [03 replan and recovery](../design/03-replan-and-recovery.md)
@@ -17,7 +17,7 @@ The repository currently contains documentation and no engine code. That makes t
 | Is the parallel-pivot dead state truly unreachable | [02 §6](../design/02-transaction-model.md) | A machine-checked invariant replacing a prose argument. |
 | Is the R1–R11 rule set complete | [02 §6](../design/02-transaction-model.md) | Counterexamples that name missing rules. |
 
-**A defect found now costs a document edit.** After the Go coordinator ships, the same defect costs a rewrite of the component that touches money, plus possibly a migration of live half-open brackets.
+**A defect found now costs a document edit.** After the Distributed Transaction Coordinator ships, the same defect costs a rewrite of the component that touches money, plus possibly a migration of live half-open brackets.
 
 **R9 was found by a human noticing it.** It emerged during a design discussion about parallel branches. The rule set's completeness therefore currently depends on someone happening to think of a case. The adversarial planner model (§3.2) automates that. If an R10 exists, finding it now is nearly free.
 
@@ -28,7 +28,7 @@ The plan deliberately separates *specification as a design instrument* — cheap
 | Stage | Trigger | Scope | Skill required |
 |---|---|---|---|
 | **S1 — complete** | no engine code exists | TLC only. Invariants I1, I3. Liveness **L2** derived the oscillation bound. Constants `N ∈ {2,3}`, `K = 3`; symmetry is used for safety only because TLC warns against it for liveness. | Ordinary TLA+, learnable in weeks |
-| **S2** | start of Go coordinator implementation (ADR-001 Phase 2) | Add I2, I4–I7. Introduce Apalache inductive invariants for unbounded safety. Build trace validation | **Inductive invariant strengthening — scarce** |
+| **S2 — complete** | start of Distributed Transaction Coordinator implementation (ADR-001 Phase 2) | I2 and I4–I7 in `CoordinatorS2.tla`; Apalache inductive checks for explicit `N = 2` and `N = 3`; real-log trace validation in the Coordinator | Inductive invariant strengthening |
 | **S3** | first production traffic with real logs | Alloy structural search for admissible-but-dead DAG shapes. Optional TLAPS for I1 | Specialist |
 
 Stage triggers are objective events, not availability. S2 is required at the moment coordinator implementation begins; "when we have time" is not a trigger.
@@ -90,7 +90,7 @@ Excluded from the model on purpose: token budgets, prompt assembly, projections,
 | A11 | A pivot scope contains its engine-computed minimum (R11 admission) | safety |
 | L2 | Every failure episode eventually reaches commit, cancel, or L4 suspension | liveness, weak fairness on executor and planner steps |
 
-I2 and I4–I7 are deferred to S2 not because they matter less, but because S1's purpose is to answer the three blocked questions with the smallest model that can.
+I2 and I4–I7 were intentionally outside S1 because its purpose was to answer the three blocked questions with the smallest model that could. S2 now checks them in the implementation-aligned `CoordinatorS2` model.
 
 ### 3.5 Work items
 
@@ -140,8 +140,8 @@ command is `./spec/run-tlc.sh`; after all checks pass it also writes the ignored
 
 | Excluded | Why |
 |---|---|
-| Apalache and unbounded guarantees | S1 answers design questions; unbounded assurance is about a shipped protocol. Deferred to S2 with its own trigger. |
-| Trace validation | Needs a real log, and there is no engine yet. S2. |
+| Apalache inductive checks | Outside S1. S2 now checks invariant closure without an execution-length bound for the explicit two- and three-branch configurations. |
+| Trace validation | Outside S1. S2 now validates real event logs with the Coordinator trace validator. |
 | Alloy structural search | Valuable for rule completeness, but the adversarial TLC model surfaces part of it first. S3. |
 | TLAPS | Optional even in S3. A half-finished proof provides no more assurance than a model check. |
 | Compensation algebra, R1–R11 as functions, world conservation arithmetic, projection purity | Verified against real code by the harness; see [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) exclusions. |
@@ -157,16 +157,16 @@ Rejected. It is a reimplementation of a model checker, and it gives up the one c
 | Stage | Estimate |
 |---|---|
 | S1 | 2–3 weeks for one person including the primer; ≈150–200 lines of spec |
-| S2 | Substantially larger, dominated by manual invariant strengthening for I2 |
+| S2 | Complete; the principal cost was strengthening the inductive invariant for I2 and the protocol shape |
 | S3 | Specialist, scoped per finding |
 
 Implementation cost is not the constraint on this plan. Skill availability is.
 
 ## 7. Preconditions and the open decision
 
-Per [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md), three preconditions apply. Timing is satisfied — no engine code exists. Ownership is now resolved; the S2 skill precondition remains open:
+Per [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md), the verification artifacts must have an owner and must be maintained with the implementation. Both conditions are now satisfied:
 
 1. **Named owner — resolved.** The Flory engine team owns `spec/`, its TLC workflow, and review of changes to the transaction model.
-2. **Scarce skill for S2.** Inductive invariant strengthening for I2 will likely require capability the team does not currently have. Treat it as a hiring or training precondition attached to the S2 trigger, not an implementation detail.
+2. **S2 capability — resolved.** The strengthened invariant closes for the explicit `N = 2` and `N = 3` configurations, and CI runs the digest-pinned Apalache checks with every transaction-protocol change.
 
 If ownership changes, assign a replacement before accepting a transaction-protocol change; an unowned specification becomes write-only documentation and creates false confidence.

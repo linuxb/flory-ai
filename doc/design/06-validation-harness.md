@@ -98,7 +98,7 @@ The delivered Phase 1 slice is an **in-process TypeScript mock world** under `te
 
 The remaining Phase 1 work is the scripted executor, event-owning actor adapter, deterministic fault injector, and the complete O1-O5/S1-S14 scenario set. Two constraints govern that implementation:
 
-1. **Event ownership is enforced even in-process.** The scripted executor stands in for the Go coordinator and may append only coordinator-owned event types (discipline 29). An in-process harness that lets one component append everything would validate a system that does not exist.
+1. **Event ownership is enforced even in-process.** The scripted executor stands in for the Distributed Transaction Coordinator and may append only coordinator-owned event types (discipline 29). An in-process harness that lets one component append everything would validate a system that does not exist.
 2. **Every tool call crosses a serialization boundary.** Arguments and results are encoded and decoded even though no socket is involved, so no test accidentally depends on shared object identity.
 
 Crash and duplicate-delivery scenarios (S11-S12), plus the temporal assertion that a runtime barrier waits until every participating try is sealed, cannot be honestly claimed by the current static harness. They require the coordinator and real PostgreSQL work handoff, are deferred to Phase 2, and remain marked as such in the matrix.
@@ -322,7 +322,7 @@ Every T-C fork records source scenario and position, substitutions, `fold_mode`,
 |---|---|---|---|
 | **0** | Implemented | T-A table-driven R1-R11 checks, projection purity, event-store and fork replay tests; no sandbox or key | every R1-R11 code has an admitted baseline and an explicit violating fixture; projection and replay suites are green |
 | **1** | Partial | Test-only in-process inventory, payment, logistics, and channel actors plus complex DAG and static barrier fixtures are delivered; scripted execution, fault injection, O1-O5, and the remaining scenario corpus are pending | all S1-S10 variants and partial S11 scenarios are green; the four mechanism questions in §1 are answered without an API key |
-| **2** | Not started | Sandbox promoted to an out-of-process service; Go coordinator on real PostgreSQL | temporal barrier behavior, S11, and S12 are green; cross-language conformance fixtures pass (discipline 34) |
+| **2** | Active | Sandbox promoted to an out-of-process service; Distributed Transaction Coordinator on real PostgreSQL | temporal barrier behavior, S11, and S12 are green; cross-language conformance fixtures pass (discipline 34) |
 | **3** | Not started | Historical fork evaluation (§8): greedy versus wider and JIT versus up-front on a versioned corpus, at declared `fold_mode`s | complete case reports, explicit unverified writes, and any candidate rule linked to its supporting and contradicting evidence |
 | **4** | Not started | T-C live-model sandbox qualification on the fixed scenario corpus | all hard oracles pass; scenario-level quality and cost evidence is published with complete fork provenance; an operator makes the production decision |
 

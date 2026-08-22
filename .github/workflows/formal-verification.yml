@@ -24,7 +24,7 @@ jobs:
   tlc:
     name: TLC S1
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -39,6 +39,8 @@ jobs:
           fi
       - name: Check the transaction protocol
         run: ./spec/run-tlc.sh
+      - name: Check S2 inductive invariants
+        run: ./spec/run-apalache.sh
       - name: Upload verified TLA+ specification PDF
         uses: actions/upload-artifact@v4
         with:

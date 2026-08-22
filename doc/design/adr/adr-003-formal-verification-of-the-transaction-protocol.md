@@ -24,7 +24,7 @@ Implementation cost is explicitly not a constraint for this decision; verificati
 Specify the transaction protocol in **TLA+** and check it with **two engines against one specification**:
 
 - **TLC** (explicit-state model checking) for exploratory checking, counterexample discovery, and **liveness** under fairness assumptions. Small constants with symmetry reduction.
-- **Apalache** (SMT-based symbolic model checking) for **inductive invariants**, yielding **unbounded safety guarantees** for arbitrary branch counts, SKU counts, and quantities.
+- **Apalache** (SMT-based symbolic model checking) for **inductive invariants**, removing the execution-length bound for each explicitly configured finite branch and quantity bound.
 
 Three complements are mandatory, each closing a gap no prover closes:
 
@@ -50,17 +50,17 @@ A corollary governs how counterexamples are read. If a check reports "a plan adm
 
 | ID | Property | Kind | Engine |
 |---|---|---|---|
-| I1 | Pivot-barrier unreachability: no reachable state has A past its pivot while B requires whole-scope rollback | safety | Apalache, unbounded (+ optional TLAPS) |
-| I2 | Hold conservation and no amplification: `Σ open_holds(sku) ≤ Σ demanded(sku)`, and `on_hand + Σ holds + Σ shipped == initial` | safety | Apalache, unbounded |
-| I3 | No `txn/cancel` after `txn/pivot-passed` in the same scope | safety | Apalache, unbounded |
-| I4 | At most one pivot takes effect per scope across all reachable executions | safety | Apalache, unbounded |
-| I5 | Floor property: for a given `scope_id`, the pivot action occurs at most once in the whole run, including after any replan | safety | Apalache, unbounded |
+| I1 | Pivot-barrier unreachability: no reachable state has A past its pivot while B requires whole-scope rollback | safety | Apalache induction (+ optional TLAPS) |
+| I2 | Hold conservation and no amplification: `Σ open_holds(sku) ≤ Σ demanded(sku)`, and `on_hand + Σ holds + Σ shipped == initial` | safety | Apalache induction |
+| I3 | No `txn/cancel` after `txn/pivot-passed` in the same scope | safety | Apalache induction |
+| I4 | At most one pivot takes effect per scope across all reachable executions | safety | Apalache induction |
+| I5 | Floor property: for a given `scope_id`, the pivot action occurs at most once in the whole run, including after any replan | safety | Apalache induction |
 | I6 | Sweep/confirm TOCTOU: the orphan sweep never cancels a `txn/try` that is concurrently confirming | safety | TLC then Apalache |
 | I7 | A fork appends no `txn/*` event referencing a bracket opened before its `run/end-seed` | safety | Apalache |
 | L1 | Every scope eventually reaches committed, cancelled, or L4 suspension | liveness | TLC with fairness |
 | L2 | Every failure episode terminates — and the counterexample length **derives** the oscillation bound | liveness | TLC with fairness |
 
-Parameterization: branch count `N`, SKU count `M`, unit quantity `K`, DAG depth, and replan count. TLC uses small constants (`N ∈ {2,3}`, `K = 3`) with symmetry reduction; Apalache leaves them free and proves by induction.
+Parameterization: branch count `N`, SKU count `M`, unit quantity `K`, DAG depth, and replan count. TLC uses small constants with symmetry reduction. Apalache checks Init inclusion, one-step inductive closure, and safety implication for explicit `N = 2` and `N = 3` configurations. Induction removes the execution-length bound; it does not turn those finite configurations into a proof for arbitrary `N`.
 
 L2 is the item that produces a design answer rather than confidence: [03 §6](../03-replan-and-recovery.md) currently proposes an episode-level replan cap with no principled value. A liveness counterexample exhibits the shortest non-terminating cycle, and its length gives the bound.
 
@@ -78,14 +78,14 @@ L2 is the item that produces a design answer rather than confidence: [03 §6](..
 
 ### Why the TLA+ ecosystem, and why two engines
 
-Completeness decomposes into four independent gaps, and no single tool closes more than two:
+Completeness decomposes into four independent gaps:
 
-1. **State-space completeness** — were all interleavings explored? TLC, bounded; Apalache, unbounded via induction.
-2. **Parameter completeness** — does the result hold for arbitrary `N`? This is the gap TLC alone leaves open, and the reason Apalache is not optional. A protocol verified for two branches is not verified for five.
-3. **Specification-implementation completeness** — does the code do what the specification says? No prover closes this. Trace validation and deterministic simulation do.
-4. **Invariant completeness** — is the set of invariants right and complete? **No tool closes this.** With cost removed, this becomes the binding constraint, which is why the adversarial planner model and the Alloy structural search receive dedicated budget rather than being treated as extras.
+1. **Execution-depth completeness** — TLC explores bounded executions; Apalache proves that the strengthened invariant is closed under every next step, so the checked finite configuration has no execution-length bound.
+2. **Parameter coverage** — branch count, quantity, and structural bounds remain explicit. A protocol checked for two and three branches is not thereby proved for five; additional configurations or a separate theorem are required.
+3. **Specification-implementation completeness** — no model checker proves that runtime code matches the model. Trace validation and deterministic simulation close part of this gap.
+4. **Invariant completeness** — no tool proves that the chosen invariants express every safety obligation. Adversarial planner modeling, negative controls, and Alloy structural search remain necessary.
 
-One specification, two engines, is standard modern TLA+ practice and avoids maintaining two models that can drift.
+One specification family with explicit S1 and S2 modules keeps exploratory liveness and implementation-aligned inductive safety reviewable without overstating parameter coverage.
 
 ### Why trace validation is unusually valuable here
 
@@ -101,13 +101,13 @@ TLA+ verifies the protocol; the coordinator's implementation can still race. Sim
 
 ## Alternatives considered
 
-**TLC alone.** Rejected as insufficient: it leaves gap 2 entirely open, and the protocol's whole point is behaviour under arbitrary parallel branches.
+**TLC alone.** Rejected as insufficient because a passing bounded exploration still has an execution-depth limit. It remains the right engine for liveness and counterexample discovery.
 
 **TLAPS as the primary engine.** Rejected as primary, retained as optional for I1. Machine-checked proofs remove trust in the SMT solver, and liveness proofs are extremely laborious. Decisive consideration: a **half-finished proof provides no more assurance than a model check**, so a proof effort that stalls has produced nothing, whereas Apalache's inductive invariants are useful the moment they close.
 
 **P.** Rejected. Its systematic exploration is weaker than TLC's exhaustive check, and its genuine advantage — proximity to implementation — is already covered by deterministic simulation.
 
-**Ivy.** Rejected. Its decidable EPR fragment gives automated unbounded proofs, which is attractive, but Apalache's inductive invariants reach equivalent unbounded safety guarantees with better tooling maturity and no requirement to re-express the protocol inside a restrictive logic.
+**Ivy.** Rejected. Its decidable EPR fragment offers a different proof boundary, but adopting it would require re-expressing the protocol in a restrictive logic and would not remove the implementation-trace gap.
 
 **Coq or Isabelle.** Rejected. Maximum assurance about a *model*, while gap 3 remains open unless verified extraction is adopted — a far larger commitment than this protocol warrants.
 
@@ -119,7 +119,7 @@ TLA+ verifies the protocol; the coordinator's implementation can still race. Sim
 
 1. **Timing.** The specification must be complete **before the Go coordinator is implemented** (harness Phase 2, ADR-001). A specification written afterwards is archaeology; its value lies in still being able to change the design.
 2. **Ownership.** One named owner must be able to read, run, and maintain the specification. An unowned specification degrades into write-only documentation and is worse than none, because it creates false confidence.
-3. **Skill availability.** I2's unbounded proof will very likely require **manual invariant strengthening** — finding a stronger, self-closing form. This consumes scarce skill rather than time, so "cost is not a constraint" does not discharge it. Treat it as a hiring or training precondition, not an implementation detail.
+3. **Skill availability.** I2 induction requires **manual invariant strengthening** — finding a stronger, self-closing protocol shape. This consumes scarce skill rather than time, so "cost is not a constraint" does not discharge it.
 
 ### Ongoing obligations
 
@@ -129,7 +129,7 @@ TLA+ verifies the protocol; the coordinator's implementation can still race. Sim
 
 ### Gained
 
-- Unreachability and termination claims move from prose argument to machine-checked proposition, including for arbitrary branch counts.
+- Unreachability and conservation claims move from prose to machine-checked induction for the declared two- and three-branch configurations, with the parameter boundary stated explicitly.
 - The oscillation bound is derived rather than guessed, closing [03 §6](../03-replan-and-recovery.md) and un-blocking S3c.
 - A mechanism that discovers missing check-rules without depending on someone imagining the failure.
 

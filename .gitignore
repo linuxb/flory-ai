@@ -39,6 +39,7 @@ coverage/
 spec/.tlc/
 spec/*_TTrace_*
 spec/output/
+spec/_apalache-out/
 
 # Node.js logs and runtime state
 logs/

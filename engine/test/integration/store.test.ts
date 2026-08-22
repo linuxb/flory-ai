@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
+import {Client} from 'pg';
 import {EventStore} from '../../src/store.js';
 import {replayIdentity} from '../../src/harness/oracles.js';
 
@@ -37,14 +38,50 @@ describe('PostgreSQL event store', () => {
 
     it('enforces event ownership and synchronous transaction projections', async () => {
         const scopeId = randomUUID();
+        const tryVertex = randomUUID();
         const run = await engine.createRun();
-        await expect(engine.appendEvents(run, [{event_type: 'txn/scope', scope_id: scopeId, payload: {}}])).rejects.toThrow('engine_role');
+        await expect(engine.appendEvents(run, [{event_type: 'txn/scope', scope_id: scopeId, payload: {state: 'open'}}])).rejects.toThrow('engine_role');
         await coordinator.appendEvents(run, [
-            {event_type: 'txn/scope', scope_id: scopeId, payload: {state: 'opened'}},
-            {event_type: 'txn/try', scope_id: scopeId, vertex_id: randomUUID(), payload: {idempotency_key: `key-${run}`}},
-            {event_type: 'txn/pivot-passed', scope_id: scopeId, vertex_id: randomUUID(), payload: {}},
+            {event_type: 'txn/scope', scope_id: scopeId, payload: {state: 'open', required_try_vertices: [tryVertex]}},
+            {event_type: 'txn/try', scope_id: scopeId, vertex_id: tryVertex, payload: {idempotency_key: `key-${run}`, deadline_at: new Date(Date.now() + 60_000).toISOString()}},
         ]);
-        await expect(coordinator.appendEvents(run, [{event_type: 'txn/cancel', scope_id: scopeId, payload: {idempotency_key: `key-${run}`}}])).rejects.toThrow('cannot cancel after pivot');
+        const pivotVertex = randomUUID();
+        const client = new Client({connectionString: coordinatorUrl});
+        await client.connect();
+        expect((await client.query<{admit_pivot: boolean}>('SELECT admit_pivot($1, $2, $3)', [run, scopeId, pivotVertex])).rows[0]?.admit_pivot).toBe(true);
+        await client.end();
+        await coordinator.appendEvents(run, [{event_type: 'txn/pivot-passed', scope_id: scopeId, vertex_id: pivotVertex, payload: {}}]);
+        await expect(coordinator.appendEvents(run, [{event_type: 'txn/cancel', scope_id: scopeId, payload: {idempotency_key: `scope-${run}`, phase: 'requested'}}])).rejects.toThrow('cannot cancel');
+    });
+
+    it('leases one ready vertex to only one concurrent worker', async () => {
+        const run = await engine.createRun();
+        const vertexId = randomUUID();
+        await engine.appendEvents(run, [
+            {event_type: 'run/start', payload: {schema_version: 'v1'}},
+            {
+                event_type: 'vertex/created',
+                vertex_id: vertexId,
+                payload: {
+                    role: 'tool',
+                    tool: 'inventory.check',
+                    input: {sku: 'SKU-1'},
+                    retry_policy: {max_attempts: 2, initial_backoff_ms: 0, multiplier: 2, max_backoff_ms: 0},
+                    txn: {effect_class: 'none', mode: 'plain'},
+                },
+            },
+        ]);
+        const first = new Client({connectionString: coordinatorUrl});
+        const second = new Client({connectionString: coordinatorUrl});
+        await Promise.all([first.connect(), second.connect()]);
+        const claims = await Promise.all([
+            first.query<{vertex_id: string}>('SELECT vertex_id FROM claim_ready_work($1, $2)', ['worker-a', 30]),
+            second.query<{vertex_id: string}>('SELECT vertex_id FROM claim_ready_work($1, $2)', ['worker-b', 30]),
+        ]);
+        expect(claims.flatMap((claim) => claim.rows.map((row) => row.vertex_id))).toEqual([vertexId]);
+        const winner = claims[0].rowCount === 1 ? 'worker-a' : 'worker-b';
+        await (winner === 'worker-a' ? first : second).query('SELECT complete_work($1, $2)', [winner, vertexId]);
+        await Promise.all([first.end(), second.end()]);
     });
 
     it('forks an immutable snapshot and preserves a no-substitution surface', async () => {
@@ -70,8 +107,8 @@ describe('PostgreSQL event store', () => {
         const openScope = randomUUID();
         const key = `inherited-${run}`;
         await coordinator.appendEvents(run, [
-            {event_type: 'txn/scope', scope_id: openScope, payload: {state: 'opened'}},
-            {event_type: 'txn/try', scope_id: openScope, vertex_id: randomUUID(), payload: {idempotency_key: key}},
+            {event_type: 'txn/scope', scope_id: openScope, payload: {state: 'open'}},
+            {event_type: 'txn/try', scope_id: openScope, vertex_id: randomUUID(), payload: {idempotency_key: key, deadline_at: new Date(Date.now() + 60_000).toISOString()}},
         ]);
         const result = await engine.fork({
             source_run_id: run,
@@ -84,7 +121,7 @@ describe('PostgreSQL event store', () => {
         });
         expect((await engine.readStream(run)).find((event) => event.stream_seq === 2)?.pin_version).toBe('model://planner@v1');
         expect((await engine.readStream(result.child_run_id)).find((event) => event.stream_seq === 2)?.pin_version).toBe('model://planner@v2');
-        await expect(coordinator.appendEvents(result.child_run_id, [{event_type: 'txn/cancel', scope_id: openScope, payload: {idempotency_key: key}}])).rejects.toThrow(
+        await expect(coordinator.appendEvents(result.child_run_id, [{event_type: 'txn/cancel', scope_id: openScope, payload: {idempotency_key: `scope-${key}`, phase: 'requested'}}])).rejects.toThrow(
             'inherited transaction bracket',
         );
     });
@@ -94,8 +131,8 @@ describe('PostgreSQL event store', () => {
         const openScope = randomUUID();
         const laterPlanner = randomUUID();
         await coordinator.appendEvents(openRun, [
-            {event_type: 'txn/scope', scope_id: openScope, payload: {state: 'opened'}},
-            {event_type: 'txn/try', scope_id: openScope, vertex_id: randomUUID(), payload: {idempotency_key: `open-${openRun}`}},
+            {event_type: 'txn/scope', scope_id: openScope, payload: {state: 'open'}},
+            {event_type: 'txn/try', scope_id: openScope, vertex_id: randomUUID(), payload: {idempotency_key: `open-${openRun}`, deadline_at: new Date(Date.now() + 60_000).toISOString()}},
         ]);
         await engine.appendEvents(openRun, [{event_type: 'vertex/created', vertex_id: laterPlanner, payload: {role: 'planner'}}]);
         await coordinator.appendEvents(openRun, [{event_type: 'vertex/succeeded', vertex_id: laterPlanner, payload: {result: {}}}]);
@@ -113,11 +150,13 @@ describe('PostgreSQL event store', () => {
 
         const pivotRun = await plannerRun();
         const pivotScope = randomUUID();
-        await coordinator.appendEvents(pivotRun, [
-            {event_type: 'txn/scope', scope_id: pivotScope, payload: {state: 'opened'}},
-            {event_type: 'txn/try', scope_id: pivotScope, vertex_id: randomUUID(), payload: {idempotency_key: `pivot-${pivotRun}`}},
-            {event_type: 'txn/pivot-passed', scope_id: pivotScope, vertex_id: randomUUID(), payload: {}},
-        ]);
+        const pivotVertex = randomUUID();
+        await coordinator.appendEvents(pivotRun, [{event_type: 'txn/scope', scope_id: pivotScope, payload: {state: 'open'}}]);
+        const client = new Client({connectionString: coordinatorUrl});
+        await client.connect();
+        expect((await client.query<{admit_pivot: boolean}>('SELECT admit_pivot($1, $2, $3)', [pivotRun, pivotScope, pivotVertex])).rows[0]?.admit_pivot).toBe(true);
+        await client.end();
+        await coordinator.appendEvents(pivotRun, [{event_type: 'txn/pivot-passed', scope_id: pivotScope, vertex_id: pivotVertex, payload: {}}]);
         await expect(
             engine.fork({
                 source_run_id: pivotRun,

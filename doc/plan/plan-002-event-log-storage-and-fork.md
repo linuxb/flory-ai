@@ -16,4 +16,4 @@ The TypeScript framework supplies pure surface, slice, generic reducer registrat
 
 ## Deferred Work
 
-This increment does not implement the Go coordinator, business-tool sandbox, scripted planner, recovery/check-rule engine, live-model tier, or the full Doc 06 S1–S14 scenario matrix. Those components must consume the existing IDL and append only through their assigned database role; they may not reimplement the TypeScript canonical projection pipeline.
+This increment does not implement the Distributed Transaction Coordinator, business-tool sandbox, scripted planner, recovery/check-rule engine, live-model tier, or the full Doc 06 S1–S14 scenario matrix. Those components must consume the existing IDL and append only through their assigned database role; they may not reimplement the TypeScript canonical projection pipeline.

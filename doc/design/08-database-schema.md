@@ -1,6 +1,6 @@
 # Database Schema and Storage Model (08)
 
-> Status: Implemented storage-core v0.1 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [05](./05-context-aggregation-and-offline-evaluation.md)
+> Status: Implemented storage and Coordinator projections v0.2 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [05](./05-context-aggregation-and-offline-evaluation.md), [07](./07-distributed-transaction-coordinator.md)
 
 ## 1. Executable Boundary
 
@@ -14,13 +14,14 @@ PostgreSQL has three development roles. `flory` owns migrations. `engine_role` c
 
 `append_events(run_id, events)` locks the run row, increments `next_seq`, and inserts every supplied event inside the caller's transaction. A failed batch rolls back the counter and every row, so `stream_seq` stays contiguous and commit ordered within one stream. `global_seq` remains intentionally gappy and must never drive a fold.
 
-The same migration creates synchronous operational projections:
+The migrations create synchronous safety projections and recoverable operational queues:
 
 | Table | Enforced purpose |
 | --- | --- |
-| `txn_scope` | Scope lifecycle, savepoint, and one pivot state per scope |
-| `txn_bracket` | Idempotency key, open/closed try state, deadline, and orphan-sweep index |
-| `work_queue` | Coordinator work claiming with `FOR UPDATE SKIP LOCKED` |
+| `txn_scope` | Required try members plus `open`, `cancelling`, `pivot-inflight`, `pivot-passed`, `committed`, `cancelled`, and `suspended` lifecycle states |
+| `txn_bracket` | Globally unique idempotency key, sealed half-open state, deadline, inverse/confirm operations, frozen input, and retry policy |
+| `work_queue` | Parent references, deterministic readiness time, attempt count, and recoverable Coordinator lease claimed with `FOR UPDATE SKIP LOCKED` |
+| `scope_cancel_member` | Recoverable inverse-operation work materialized for one requested scope cancellation; dependency depth makes descendants reverse before ancestors without using sequence order |
 
 No application role receives `UPDATE` or `DELETE` access to `event_log`. Shadowing is represented only by a new `subgraph/shadowed` event.
 
@@ -28,7 +29,11 @@ No application role receives `UPDATE` or `DELETE` access to `event_log`. Shadowi
 
 Before an event is inserted, ownership validation rejects an engine attempt to append coordinator events, a coordinator attempt to append engine events, and an unknown event without `ignorable: true`. The inherited-copy function is engine-only and sets a transaction-local marker solely while reproducing a source stream into a fork; it is not a general ownership bypass.
 
-An insert trigger rejects `txn/cancel` after the same scope has passed its pivot. It also rejects a child `txn/confirm` or `txn/cancel` when the scope's `txn/try` was inherited before `run/end-seed`. An after-insert trigger updates `txn_scope` and `txn_bracket` in the same transaction, so the database state used for transaction safety cannot lag the log.
+An insert trigger locks the scope and rejects `txn/cancel` after pivot admission or pivot passage. It also rejects a child `txn/confirm` or `txn/cancel` when the scope's `txn/try` was inherited before `run/end-seed`. After-insert triggers update `txn_scope` and `txn_bracket` in the same transaction, so the database state used for transaction safety cannot lag the log.
+
+`admit_pivot` locks an open scope, verifies that every required try is sealed, moves the scope to `pivot-inflight`, and appends `vertex/started` atomically. `resolve_pivot_absent` is the only transition back to `open`, and is called only after an adapter status query proves that the irreversible effect did not happen. Once `txn/pivot-passed` is appended, only forward confirmation and retry remain.
+
+Scope cancellation uses two `txn/cancel` phases. `requested` fences the whole scope and materializes inverse work for all sealed members. Workers claim those members idempotently; `completed` is accepted only when none remain. No per-try cancel event exists.
 
 ## 4. Fork Storage Transaction
 
@@ -43,4 +48,4 @@ The fork copies recorded semantics only. It does not call a tool or replay an ex
 
 ## 5. Verification Surface
 
-[`engine/`](../../engine/) contains the only canonical TypeScript projection framework: active-DAG `surface`, ancestor `slice`, reducer registration and dispatch, lexicographic `linearize`, and deterministic assembly hashes. [`test/mocks/ecommerce/`](../../test/mocks/ecommerce/) contains the current delta-based `fold://inventory@v1` validation mock and inventory conservation oracle; it is not production domain behavior. The harness uses framework functions and explicitly registered test mocks to check fail-closed decoding, event ownership, atomic append behavior, replay identity, inherited-bracket protection, and commutative folds. Full Go execution, the business-world sandbox, and recovery scenarios are deliberately deferred.
+[`engine/`](../../engine/) contains the only canonical TypeScript projection framework: active-DAG `surface`, ancestor `slice`, reducer registration and dispatch, lexicographic `linearize`, and deterministic assembly hashes. [`coordinator/`](../../coordinator/) contains the Go 1.25 Coordinator runtime and trace validator, while [`test/sandbox/`](../../test/sandbox/) exposes the deterministic commerce actors through the HTTP adapter contract. Integration tests verify runtime barrier admission, post-pivot confirm ordering, scope-level cancellation, fail-closed trace decoding, and duplicate-safe adapters against PostgreSQL 17.

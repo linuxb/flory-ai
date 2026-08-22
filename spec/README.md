@@ -1,16 +1,17 @@
-# Flory Transaction Protocol: TLA+ S1
+# Flory Transaction Protocol: TLA+ S1 and S2 Trace Validation
 
 **Owner:** Flory engine team
 
 This directory contains the Stage S1 executable model required by
 [ADR-003](../doc/design/adr/adr-003-formal-verification-of-the-transaction-protocol.md).
 It is a verification artifact only. Neither the TLA+ tools nor this model are
-runtime dependencies of the TypeScript engine or Go coordinator.
+runtime dependencies of the TypeScript Engine or Distributed Transaction Coordinator.
 
 ## Run the model
 
 ```bash
 ./spec/run-tlc.sh
+./spec/run-apalache.sh
 ```
 
 The script downloads the pinned official `tla2tools.jar` into the ignored
@@ -21,8 +22,10 @@ After every successful full check, the same command uses the pinned jar's
 TLA2TeX renderer and `pdflatex` to write `spec/output/FloryTxn.pdf`. The PDF is
 a snapshot of the root module only after the complete TLC suite has passed; it
 is ignored locally and uploaded as the `flory-tla-specification-pdf` GitHub
-Actions artifact. Do not commit files under `spec/.tlc/`, `spec/output/`, or
-TLC trace-exploration modules.
+Actions artifact. The Apalache script uses the digest-pinned v0.58.3 container
+and checks Init inclusion, one-step inductive closure, and implication of I1-I7
+for two- and three-branch configurations. Do not commit files under
+`spec/.tlc/`, `spec/_apalache-out/`, `spec/output/`, or trace-exploration modules.
 
 ## Model boundary
 
@@ -50,13 +53,17 @@ Scope membership may only grow while that scope is open. This is an abstract
 model of the admission boundary, not a proof of the real R1-R11 functions;
 those pure functions remain harness tests.
 
-Nested scopes, hold-conservation arithmetic, orphan-sweep races, offline-fork seed
-isolation, Apalache induction, Alloy search, and real-log trace validation are
-deferred to the later stages defined in ADR-003. `PassPivot` is one atomic TLA+
-action, deliberately abstracting the required same-database-transaction
-projection read and `txn/pivot-passed` append. The `stream_seq`/`global_seq` split,
-database constraints, and implementation interleavings are S2 trace and
-coordinator concerns rather than extra S1 state variables.
+Nested-scope expansion and Alloy structural search remain in the later stage
+defined in ADR-003. S2 hold conservation, pivot uniqueness, sweep/confirm
+exclusion, fork isolation, and protocol-shape safety are checked by
+`CoordinatorS2.tla` with Apalache for explicit two- and three-branch
+configurations. S2 real-log validation lives in `coordinator/cmd/trace-validator`;
+it checks fail-closed reads, pivot uniqueness, post-pivot cancellation, terminal
+cancel/confirm consistency, and inherited-bracket isolation. `PassPivot` is one
+atomic TLA+ action, deliberately abstracting the required same-database-transaction
+projection read and `txn/pivot-passed` append. Database constraints and
+implementation interleavings remain Coordinator concerns rather than extra S1
+state variables.
 
 ## Configurations and findings
 

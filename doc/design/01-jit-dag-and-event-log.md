@@ -77,7 +77,7 @@ The transaction bracket state is **not a separate log** — `txn/*` events are o
 |---|---|---|
 | `txn_scope` | `scope_id` PK, `state`, `pivot_vertex_id`, `savepoint_seq`, `opened_seq`, `closed_seq`; partial unique `(scope_id) WHERE is_pivot` | "May this scope's pivot fire?" and "is there an open bracket at this replan boundary?" |
 | `txn_bracket` | one row per try: `state`, `deadline_at`, `idempotency_key`; **partial index `WHERE state = 'tried'`**; unique `(idempotency_key)` | orphan sweep `WHERE state='tried' AND deadline_at < now()`; timer rebuild after restart |
-| `work_queue` | `vertex_id`, `ready_at`, `claimed_by`; claimed with `FOR UPDATE SKIP LOCKED` | the Go coordinator claiming executable vertices |
+| `work_queue` | `vertex_id`, `ready_at`, `claimed_by`; claimed with `FOR UPDATE SKIP LOCKED` | the Distributed Transaction Coordinator claiming executable vertices |
 
 The partial index on `txn_bracket` matters operationally: open brackets are a small hot set while closed ones are cold history, so the sweep's cost stays independent of total log size. It is also the crash-recovery mechanism — the coordinator holds no timers in memory, it re-reads open brackets by deadline on restart.
 
@@ -88,7 +88,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | Discipline | Database mechanism |
 |---|---|
 | Append-only (§3.3 inv. 1) | Application roles have no `UPDATE`/`DELETE` grant on `event_log`; controlled security-definer append functions are their only write path |
-| Event ownership ([AGENTS.md](../../AGENTS.md) #29) | `BEFORE INSERT` trigger checks the connection's `session_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Go coordinator cannot append `subgraph/*` |
+| Event ownership ([AGENTS.md](../../AGENTS.md) #29) | `BEFORE INSERT` trigger checks the connection's `session_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Coordinator cannot append `subgraph/*` |
 | Idempotency ([02 §2](./02-transaction-model.md)) | `UNIQUE (idempotency_key)` on `txn_bracket` — a duplicate try becomes a constraint violation instead of a duplicated side effect |
 | One pivot per scope (R3) | partial unique index on the pivot column; a second line of defence behind the freeze-time check |
 | No cancel after pivot (I3) | `BEFORE INSERT` trigger rejects a `txn/cancel` when the scope projection records `pivot-passed` |

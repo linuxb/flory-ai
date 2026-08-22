@@ -126,7 +126,7 @@ The current implementation boundary is deliberately split:
 
 1. `ToolRegistry.validate()` enforces registration obligations R4 and R6 before proposal admission.
 2. `checkSubDag(proposal, registry)` computes ancestry, descendants, scope membership, pivots, conflicting write footprints, and confirmation-barrier coverage, then enforces proposal rules R1-R3 and R5-R11.
-3. The checker only admits or rejects structure. It does not append events, schedule a ready vertex, or open and close a transaction bracket; those runtime actions belong to the engine integration and Go coordinator.
+3. The checker only admits or rejects structure. It does not append events, schedule a ready vertex, or open and close a transaction bracket; those runtime actions belong to the engine integration and Distributed Transaction Coordinator.
 
 The test suite supplies one admitted proposal plus an explicit violating fixture for every rule. Test-only e-commerce fixtures additionally prove both sides of the barrier contract: parallel conflicting writes or independent pivots are rejected without a pre-pivot confirmation barrier and admitted when the barrier dominates the pivots. These are structural tests; the runtime guarantee that a barrier waits for every branch to seal still requires the coordinator.
 
@@ -164,18 +164,20 @@ See page 1 of [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio).
 
 ### 4.1 Event brackets
 
-Runtime transaction state is expressed entirely by log brackets:
+Runtime transaction state is expressed entirely by log brackets. A successful try is **sealed and half-open**: the resource is reserved, but TCC confirm has not run.
 
 ```
 txn/scope {scope_id, member_vertices, pivot_vertex, savepoint}
   txn/try {scope_id, vertex_id, idempotency_key}
-  ... all tries close ...
+  ... every required try becomes sealed ...
   txn/pivot-passed {scope_id, pivot_vertex}
   txn/confirm {scope_id, vertex_id} ...
 txn/(committed | cancelled) {scope_id}
 ```
 
-The pivot admission condition is that every preceding try has closed successfully and has not timed out. This is a practical simplification of Atomix's frontier-confirmation idea: the pivot is Flory's commit point.
+The pivot admission condition is that every required predecessor try is sealed, none has timed out, and scope cancellation has not started. The pivot is Flory's commit point. Only after `txn/pivot-passed` is durably appended does the Coordinator run the idempotent TCC confirms.
+
+If any pre-pivot try fails, the Coordinator fences the entire scope and appends `txn/cancel` with phase `requested`. It then cancels every sealed TCC member and compensates every completed Saga member in reverse dependency order. `txn/cancel` is a scope action, never a per-try action. Its `completed` phase is appended only after the entire scope has returned to its savepoint.
 
 **Savepoint definition.** A scope's `savepoint` is the committed world state at **scope entry**. By construction it therefore lies *after* every preceding scope's pivot: a scope is entered only once its predecessors have committed. Two consequences follow, and both are load-bearing elsewhere:
 
@@ -187,7 +189,7 @@ The pivot admission condition is that every preceding try has closed successfull
 | Failure location                            | Handling                                                                                                                                                         |
 | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Before pivot; retry can resolve it          | Append `vertex/retried` and retry idempotently.                                                                                                                  |
-| Before pivot; retries exhausted             | Cancel all tried members, return the scope to its savepoint, and replan.                                                                                         |
+| Before pivot; retries exhausted             | Fence the scope, run one scope-level cancel over all sealed TCC and completed Saga members, return to the savepoint, and replan.                                  |
 | Pivot execution failed with unknown outcome | Reconcile using the pivot's required status-query interface. Treat confirmed absence as pre-pivot and confirmed success as post-pivot.                           |
 | After pivot                                 | Forward recovery only: retry suffix nodes idempotently; if this cannot succeed, suspend and require human intervention. Never automatically compensate backward. |
 
@@ -210,7 +212,7 @@ See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Para
 
 ### 4.4 Orphan try detection
 
-**In a live run**, scan for `txn/try` events with no matching confirm or cancel after `try_timeout_s` and append an idempotent `cancel`. Crash recovery uses the same sweep — it needs no marker of its own, because a resumed run re-projects its own log and every bracket in it belongs to that run ([01 §5.1](./01-jit-dag-and-event-log.md)).
+**In a live run**, scan for sealed `txn/try` events with no later scope confirm or completed scope cancel after `try_timeout_s`. Request one idempotent cancellation for the owning scope. Crash recovery uses the same sweep — it needs no marker of its own, because a resumed run re-projects its own log and every bracket in it belongs to that run ([01 §5.1](./01-jit-dag-and-event-log.md)).
 
 **In a fork**, the sweep is inverted into a prohibition. Every `txn/try` inherited before `run/end-seed` belongs to a live parent run, so the fork must **never** cancel or confirm it: doing so would release a real hold out from under a real order. This is the actual purpose of the end-seed marker — it separates "inherited, read-only" from "mine" ([01 §5.2](./01-jit-dag-and-event-log.md)). A fork that finds an inherited open bracket at its boundary must refuse the boundary rather than clear it.
 
@@ -227,4 +229,4 @@ See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Para
 - A fallback for channel APIs that cannot reserve resources, such as locally recording a simulated try and delaying execution.
 - The reconciliation fallback protocol when a pivot status-query interface is unavailable.
 - **Check-rule completeness.** R1–R11 were derived by hand, so the rule set has no completeness argument: a plan admitted by all eleven may still reach a dead state. [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) attacks this from two directions — modeling the planner as an adversary bounded only by check-rules, so any invariant violation names a missing rule, and a bounded Alloy search for admissible-but-dead DAG shapes.
-- **Unreachability of the parallel-pivot dead state (§4.3).** The argument is currently prose. [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) specifies it as invariant I1 with an unbounded guarantee over arbitrary branch counts, since scenario tests can only sample interleavings.
+- **Parameter-general proof of parallel-pivot safety (§4.3).** Stage S2 checks invariant I1 inductively for explicit two- and three-branch configurations, removing the execution-length bound for those finite parameter sets. A proof quantified over arbitrary branch counts remains open; scenario and model checks must not be reported as that stronger result.

@@ -6,12 +6,12 @@ The system is designed for the difficult boundary between probabilistic LLM plan
 
 ## Status
 
-This repository contains the architecture and design baseline plus an executable TypeScript/PostgreSQL core: immutable event storage, canonical projections, offline forks, deterministic Doc 02 check-rules R1-R11, and T-A harness tests. Test-only inventory, payment, logistics, and channel actors exercise complex e-commerce DAG admission and barrier placement. The Go coordinator, runtime barrier scheduler, fault injector, and full business-execution sandbox are not implemented yet.
+This repository contains the architecture and design baseline plus an executable TypeScript/PostgreSQL core: immutable event storage, canonical projections, offline forks, deterministic Doc 02 check-rules R1-R11, and T-A harness tests. Test-only inventory, payment, logistics, and channel actors exercise complex e-commerce DAG admission and barrier placement. The Distributed Transaction Coordinator is implemented in Go 1.25; production business adapters remain out of scope.
 
 ## Architecture at a glance
 
 - **TypeScript engine:** owns the planner loop, canonical context-projection pipeline, check rules, prompt assembly, refine loop, model adapters, and replay testing.
-- **Go coordinator:** owns transaction brackets, timeout handling, tool execution, and adapters that operate within existing Go infrastructure.
+- **Distributed Transaction Coordinator:** owns transaction scopes, runtime barriers, timeout handling, tool execution, and business-adapter orchestration. Its current implementation uses Go 1.25.
 - **PostgreSQL:** stores the append-only event log and metadata-only harness state, and allocates the write-order sequence.
 - **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own.
 
@@ -26,7 +26,10 @@ docker compose ps
 npm ci
 npm run db:migrate
 npm run verify
+go -C coordinator test ./...
 ```
+
+For an end-to-end local execution, start the deterministic adapter sandbox with `npm run sandbox`, then run the Coordinator with `go -C coordinator run ./cmd/coordinator`. Its health endpoints default to `127.0.0.1:8091`; production business adapters are intentionally not included.
 
 The default connection string is `postgresql://flory:flory-dev-password@127.0.0.1:5432/flory`. Confirm access with:
 
@@ -57,10 +60,10 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Refine and harness state](doc/design/04-refine-and-harness-state.md)                               | Structured refinement, metadata-only state, and memory hints.                |
 | [Context aggregation and offline evaluation](doc/design/05-context-aggregation-and-offline-evaluation.md) | Canonical projections, semantic folds, replay, and historical evaluation. |
 | [Validation harness](doc/design/06-validation-harness.md)                                           | Sandbox contract, fault injection, scenario matrix, and correctness oracles. |
-| [Go Coordinator Architecture](doc/design/07-go-coordinator.md)                                      | Go Coordinator responsibilities, event log interactions, and execution modules. |
+| [Distributed Transaction Coordinator](doc/design/07-distributed-transaction-coordinator.md)         | Scope lifecycle, event-log interactions, barriers, execution, and recovery.      |
 | [Database schema and storage model](doc/design/08-database-schema.md)                               | Event log immutability, sequence allocation, and synchronous projections.   |
 
-Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/): an interactive [architecture overview](doc/design/diagrams/architecture.html) and editable Draw.io diagrams for [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Go/TypeScript interaction](doc/design/diagrams/go-ts-interaction.drawio).
+Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/): an interactive [architecture overview](doc/design/diagrams/architecture.html) and editable Draw.io diagrams for [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Coordinator/Engine interaction](doc/design/diagrams/coordinator-engine-interaction.drawio).
 
 ## Repository layout
 
@@ -69,7 +72,7 @@ Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagram
 ├── .github/               # Repository automation and CI workflows
 ├── .env.example           # Overrideable local PostgreSQL development settings
 ├── AGENTS.md              # Design invariants and contributor review checklist
-├── coordinator/           # Generated Go event-contract model; no coordinator service yet
+├── coordinator/           # Go 1.25 Distributed Transaction Coordinator service
 ├── compose.yml            # Local PostgreSQL development service
 ├── db/                    # PostgreSQL migrations and local migration utilities
 ├── doc/

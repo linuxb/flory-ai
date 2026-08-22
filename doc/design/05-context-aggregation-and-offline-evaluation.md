@@ -32,11 +32,11 @@ Building a prompt is not "query and concatenate." It is a layered pipeline of pu
 - Every layer must be able to **dump its intermediate output**. Multi-layer pure pipelines are cheap to reason about and expensive to debug blind; when a prompt looks wrong, an operator must be able to ask which layer distorted it.
 - Layers may be replaced individually, but replacement bumps `projector_version` (see §4.2).
 
-### 2.2 Semantic fold: the e-commerce-specific layer
+### 2.2 Semantic fold: framework mechanism, domain-owned meaning
 
-This is the layer most likely to be skipped and the one with the highest payoff.
+This is the layer most likely to be skipped and the one with the highest payoff. The engine provides the pure, versioned reducer registry and deterministic dispatch. The current inventory reducer is an in-process validation mock, so its reducer, view type, and business oracle live under `test/mocks/`; the engine may not import a SKU, carrier, payment, or any other business concept.
 
-A planner deciding a shipping strategy should not read the raw JSON of 12 inventory queries. It needs a folded business view:
+For example, the e-commerce test sandbox registers an inventory reducer. A planner deciding a shipping strategy should not read the raw JSON of 12 inventory queries. It receives the mock world's folded business view instead:
 
 ```jsonc
 // fold registry entry
@@ -54,7 +54,7 @@ Benefits, in order of importance:
 2. **Cost.** Thousands of tokens of raw tool output become tens of tokens of state.
 3. **Testability.** A reducer is a pure function over a typed event stream, so it is exhaustively unit-testable.
 
-Registry discipline: a view declares its source event types and a versioned `reducer_ref`; reducers may not call tools, read the clock, or perform I/O. `fold://inventory@v3` is part of `projector_version`.
+Registry discipline: a view declares its source event types and a versioned `reducer_ref`; reducers may not call tools, read the clock, or perform I/O. `fold://inventory@v3` is part of `projector_version`. The reducer lives with the e-commerce test mock, not in the engine framework or a production domain package; this is enforced by the framework-boundary rule in [`AGENTS.md`](../../AGENTS.md).
 
 ### 2.3 Shadowed events: pruned for visibility, retained as evidence
 

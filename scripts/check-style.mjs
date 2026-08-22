@@ -1,0 +1,31 @@
+import {readdir, readFile} from 'node:fs/promises';
+import {join} from 'node:path';
+
+const MAX_LINE_LENGTH = 200;
+const SOURCE_DIRECTORIES = ['db', 'engine', 'scripts', 'test'];
+const TYPE_SCRIPT_EXTENSIONS = new Set(['.cts', '.mts', '.ts', '.mjs']);
+
+async function listSourceFiles(directory) {
+    const entries = await readdir(directory, {withFileTypes: true});
+    const paths = await Promise.all(
+        entries.map((entry) => {
+            const path = join(directory, entry.name);
+            if (entry.isDirectory()) {
+                return listSourceFiles(path);
+            }
+            return TYPE_SCRIPT_EXTENSIONS.has(path.slice(path.lastIndexOf('.'))) ? [path] : [];
+        }),
+    );
+    return paths.flat();
+}
+
+async function findLongLines(path) {
+    const lines = (await readFile(path, 'utf8')).split('\n');
+    return lines.flatMap((line, index) => (line.length > MAX_LINE_LENGTH ? [`${path}:${index + 1}: ${line.length} columns`] : []));
+}
+
+const sourceFiles = (await Promise.all(SOURCE_DIRECTORIES.map(listSourceFiles))).flat();
+const violations = (await Promise.all(sourceFiles.map(findLongLines))).flat();
+if (violations.length > 0) {
+    throw new Error(`TypeScript and JavaScript lines must be at most ${MAX_LINE_LENGTH} columns:\n` + violations.join('\n'));
+}

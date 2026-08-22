@@ -46,6 +46,7 @@ CREATE TABLE event_log (
   planner_id   UUID,                       -- planner that generated this vertex
   scope_id     UUID,                       -- promoted from payload so it can be indexed
   pin_version  TEXT,                       -- pinned external contract; a fork substitutes this (§5.3)
+  ignorable    BOOLEAN NOT NULL DEFAULT false, -- explicit opt-in for forward-compatible events
   payload      JSONB   NOT NULL,           -- role, tool, params, txn attrs, result summary, blob refs
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (run_id, stream_seq)
@@ -55,7 +56,7 @@ CREATE TABLE event_log (
 A run owns exactly one stream, so `run_id` identifies the stream and `stream_seq` is the position within it. `stream_seq` is allocated from a counter column on the run row, inside the appending transaction:
 
 ```sql
-UPDATE run SET next_seq = next_seq + 1 WHERE run_id = $1 RETURNING next_seq;
+UPDATE run SET next_seq = next_seq + 1 WHERE run_id = $1 RETURNING next_seq - 1;
 ```
 
 That single statement buys three properties a sequence cannot provide. The row lock **serializes appends within one stream**, so `stream_seq` is strictly and contiguously increasing within it — the only ordering guarantee the design relies on. The counter lives in a row, so an aborted transaction **un-increments it** — no gaps from rollback, which `BIGSERIAL` explicitly does not offer. And because the lock is per-`run_id`, **different runs never contend**.
@@ -86,11 +87,11 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 
 | Discipline | Database mechanism |
 |---|---|
-| Append-only (§3.3 inv. 1) | The application role receives `INSERT, SELECT` on `event_log` and no `UPDATE`/`DELETE` grant at all |
-| Event ownership ([AGENTS.md](../../AGENTS.md) #29) | `BEFORE INSERT` trigger checking `current_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Go coordinator cannot append `subgraph/*` |
+| Append-only (§3.3 inv. 1) | Application roles have no `UPDATE`/`DELETE` grant on `event_log`; controlled security-definer append functions are their only write path |
+| Event ownership ([AGENTS.md](../../AGENTS.md) #29) | `BEFORE INSERT` trigger checks the connection's `session_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Go coordinator cannot append `subgraph/*` |
 | Idempotency ([02 §2](./02-transaction-model.md)) | `UNIQUE (idempotency_key)` on `txn_bracket` — a duplicate try becomes a constraint violation instead of a duplicated side effect |
 | One pivot per scope (R3) | partial unique index on the pivot column; a second line of defence behind the freeze-time check |
-| No cancel after pivot (I3) | `BEFORE UPDATE` trigger validating the `txn_bracket` state-transition graph |
+| No cancel after pivot (I3) | `BEFORE INSERT` trigger rejects a `txn/cancel` when the scope projection records `pivot-passed` |
 
 `event_log` has no `shadowed_by` column. Shadowing is declared only by `subgraph/shadowed` events; a materialized shadow flag may exist inside a projection table, where the projector owns it.
 

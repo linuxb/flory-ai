@@ -6,7 +6,7 @@ The system is designed for the difficult boundary between probabilistic LLM plan
 
 ## Status
 
-This repository currently contains the architecture and design baseline. Implementation scaffolding has not yet been added.
+This repository contains the architecture and design baseline plus an executable event-log storage core: PostgreSQL migrations, TypeScript canonical projections, offline forks, and a T-A validation harness. The Go coordinator and full business-execution sandbox are not implemented yet.
 
 ## Architecture at a glance
 
@@ -14,6 +14,27 @@ This repository currently contains the architecture and design baseline. Impleme
 - **Go coordinator:** owns transaction brackets, timeout handling, tool execution, and adapters that operate within existing Go infrastructure.
 - **PostgreSQL:** stores the append-only event log and metadata-only harness state, and allocates the write-order sequence.
 - **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own.
+
+## Local development
+
+Docker Compose provides a local PostgreSQL 17 service. It stores its data in the `postgres_data` named volume and exposes PostgreSQL only on `127.0.0.1`.
+
+```sh
+cp .env.example .env  # optional: change the local development credentials or port
+docker compose up -d postgres
+docker compose ps
+npm ci
+npm run db:migrate
+npm run verify
+```
+
+The default connection string is `postgresql://flory:flory-dev-password@127.0.0.1:5432/flory`. Confirm access with:
+
+```sh
+docker compose exec postgres psql -U flory -d flory -c 'SELECT version();'
+```
+
+Stop the service with `docker compose down`. This preserves the named volume. To remove the local database as well, run `docker compose down -v`.
 
 ## Design guarantees
 
@@ -46,13 +67,21 @@ Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagram
 ```text
 .
 ├── .github/               # Repository automation and CI workflows
+├── .env.example           # Overrideable local PostgreSQL development settings
 ├── AGENTS.md              # Design invariants and contributor review checklist
+├── coordinator/           # Generated Go event-contract model; no coordinator service yet
+├── compose.yml            # Local PostgreSQL development service
+├── db/                    # PostgreSQL migrations and local migration utilities
 ├── doc/
 │   ├── design/            # Architecture and mechanism specifications
 │   │   ├── adr/           # Architecture decision records
 │   │   └── diagrams/      # HTML and Draw.io diagrams
 │   └── plan/              # Implementation and rollout plans
 ├── spec/                  # TLA+ transaction-protocol model and TLC configurations
+├── engine/                # TypeScript event store, projections, forks, and harness
+├── idl/                   # Versioned event-log schema, shared by TypeScript and Go
+├── package.json           # Node 22 scripts and dependencies
+├── test/                  # Test-only mocks, domain fixtures, and validation helpers
 ├── .editorconfig          # Shared editor behavior
 └── .gitignore             # Go and TypeScript generated artifacts
 ```

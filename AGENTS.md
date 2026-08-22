@@ -103,6 +103,15 @@ Reject a change that does any of the following:
 - Adds a metric as new telemetry rather than as a log projection.
 - Changes a projection layer without bumping `projector_version` or adding a replay test.
 
+## TypeScript and JavaScript Style
+
+- Hand-written TypeScript and JavaScript must follow the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html). Generated sources are exempt except for identifiers that are consumed by hand-written code.
+- Use UTF-8, LF line endings, four spaces for indentation, single-quoted strings, trailing commas, and no trailing whitespace. Apply the repository Prettier configuration; do not hand-format around it.
+- The project line limit is **200 columns**. Wrap expressions, parameter lists, object literals, and test fixtures so every TypeScript or JavaScript line stays within this limit. An unbreakable external URL or required wire literal is the only exception and must be documented locally.
+- Use lowerCamelCase for TypeScript identifiers and UpperCamelCase for types. Preserve snake_case only for externally defined protocol, JSON, SQL, or generated field names.
+- Use `import type` and `export type` for type-only references. Document every top-level export in non-generated source with JSDoc; also document any property or method whose purpose is not immediately obvious from its name and type.
+- Run `npm run format:check` before review. It checks both Prettier conformance and the 200-column limit.
+
 ## Stack and Language Boundary
 
 Two services, one database. Rationale and rejected alternatives: [ADR-001](doc/design/adr/adr-001-engine-language-split.md).
@@ -123,6 +132,7 @@ The two services never call each other's internals. They communicate only by app
 
 29. **Enforce event ownership at the append boundary** in both services. A service appending an event type it does not own is a bug, not a shortcut.
 30. **Canonical projections have exactly one implementation, in TypeScript.** `surface`, `slice`, `fold`, `linearize`, and `assemble` may never be reimplemented in Go. Reason: a second implementation of the projection semantics produces the worst available bug class — two projectors that disagree on an edge case — and it makes discipline 3 (identical recomputation) and discipline 24 (`projector_version` attribution) unverifiable.
+30a. **The engine is domain-neutral, and mocks are test-only.** The canonical pipeline owns generic reducer registration, deterministic dispatch, and projection mechanics only. A mock business world, mock reducer, mock view, or mock oracle belongs under `test/mocks/`, not under `engine/` or a production `domain/` package. Reason: importing a SKU, carrier, payment, or any other business concept into the engine turns a reusable safety boundary into an e-commerce-specific implementation; promoting a verification fake to `domain/` makes tests look like production business behavior.
 31. **Operational projections may live in either service.** Narrow, local folds that serve execution or operations — unmatched `txn/try` scanning, timeout sweeps, executor readiness checks — are not canonical projections. They do not feed a prompt, do not participate in attribution, and are independently testable. Discipline 30 restricts planner-context projection, not log reading in general; the Go coordinator is expected to read the log.
 32. **Replay testing lives wherever the projector lives**, i.e. in TypeScript, because it must exercise the same code as production. Batch historical recomputation is also driven by the canonical projector: scale it by sharding on `run_id` across worker processes, or push a fold down into SQL. Never by porting the projector.
 33. **The event schema is a shared, versioned artifact** — a schema-first IDL in the repository with generated types for both languages. A field change means editing the schema and regenerating, never editing one side's types.
@@ -132,5 +142,6 @@ Add to the review checklist:
 
 - Appends an event type owned by the other service.
 - Reimplements a canonical projection layer outside TypeScript.
+- Imports a business semantic into the engine framework, or places a mock business semantic outside `test/mocks/`.
 - Changes the event schema in one language's types instead of in the shared IDL.
 - Adds log-reading semantics shared by both services without a conformance fixture.

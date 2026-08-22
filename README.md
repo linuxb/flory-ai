@@ -6,7 +6,7 @@ The system is designed for the difficult boundary between probabilistic LLM plan
 
 ## Status
 
-This repository contains the architecture and design baseline plus an executable event-log storage core: PostgreSQL migrations, TypeScript canonical projections, offline forks, and a T-A validation harness. The Go coordinator and full business-execution sandbox are not implemented yet.
+This repository contains the architecture and design baseline plus an executable TypeScript/PostgreSQL core: immutable event storage, canonical projections, offline forks, deterministic Doc 02 check-rules R1-R11, and T-A harness tests. Test-only inventory, payment, logistics, and channel actors exercise complex e-commerce DAG admission and barrier placement. The Go coordinator, runtime barrier scheduler, fault injector, and full business-execution sandbox are not implemented yet.
 
 ## Architecture at a glance
 

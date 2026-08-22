@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'engine/**'
+      - 'test/**'
       - 'db/**'
       - 'idl/**'
       - 'coordinator/internal/eventlog/generated/**'
@@ -14,6 +15,7 @@ on:
   push:
     paths:
       - 'engine/**'
+      - 'test/**'
       - 'db/**'
       - 'idl/**'
       - 'coordinator/internal/eventlog/generated/**'

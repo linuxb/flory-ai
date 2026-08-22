@@ -106,7 +106,7 @@ When extension is impossible, the remedy is not a dead end: if the scope has no 
 
 ### 3.4 Deterministic check-rules
 
-The rules run before a DAG is frozen. **Any violation produces `subgraph/rejected` with details, and the planner must regenerate.**
+The rules run before a DAG is frozen. **Any violation produces a closed-vocabulary result that the future planner integration records as `subgraph/rejected`; the planner must regenerate rather than bypass the result.** The executable TypeScript implementation is `engine/src/check-rules.ts`. It accepts only a proposal and an immutable tool registry, performs no I/O, and returns `{accepted, violations}` with stable R1-R11 rule codes and implicated vertex IDs.
 
 | # | Rule | Reason |
 |---|---|---|
@@ -122,7 +122,13 @@ The rules run before a DAG is frozen. **Any violation produces `subgraph/rejecte
 | R10 | Every node with `effect_class ≠ none` must belong to a declared scope. | Without it, every scope-level rule is escapable by not declaring: a bare `logistics.book` with no scope passes R1–R9 because each of them constrains *in-scope* nodes. |
 | R11 | A declared scope must contain at least the engine-computed minimum for its pivot (§3.1). Wider is legal; narrower is rejected. | Closes the narrowing escape in §3.2. R10 forces membership to exist; R11 forces it to be sufficient. |
 
-`check(sub_dag_proposal, tool_registry) → pass | violations[]` is a pure function and can be exhaustively unit tested.
+The current implementation boundary is deliberately split:
+
+1. `ToolRegistry.validate()` enforces registration obligations R4 and R6 before proposal admission.
+2. `checkSubDag(proposal, registry)` computes ancestry, descendants, scope membership, pivots, conflicting write footprints, and confirmation-barrier coverage, then enforces proposal rules R1-R3 and R5-R11.
+3. The checker only admits or rejects structure. It does not append events, schedule a ready vertex, or open and close a transaction bracket; those runtime actions belong to the engine integration and Go coordinator.
+
+The test suite supplies one admitted proposal plus an explicit violating fixture for every rule. Test-only e-commerce fixtures additionally prove both sides of the barrier contract: parallel conflicting writes or independent pivots are rejected without a pre-pivot confirmation barrier and admitted when the barrier dominates the pivots. These are structural tests; the runtime guarantee that a barrier waits for every branch to seal still requires the coordinator.
 
 ### 3.5 Why R3 permits at most one pivot
 

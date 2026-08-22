@@ -1,6 +1,6 @@
 # Validation Harness: Sandbox, Scenarios, and Oracles (06)
 
-> Status: Draft v0.1 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [03](./03-replan-and-recovery.md), [05](./05-context-aggregation-and-offline-evaluation.md)
+> Status: Phase 0 implemented; Phase 1 partial | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [03](./03-replan-and-recovery.md), [05](./05-context-aggregation-and-offline-evaluation.md)
 
 ## 1. What This Document Decides
 
@@ -94,14 +94,14 @@ The sandbox provides exactly three irreversible operations, one per realistic fa
 
 ### 3.5 Phase 1 implementation form
 
-Phase 1 implements the sandbox as an **in-process TypeScript fake** with an in-memory ledger. It is the fastest path to green assertions and keeps every oracle synchronous.
+The delivered Phase 1 slice is an **in-process TypeScript mock world** under `test/mocks/`, never production engine code. Inventory, payment, logistics, and sales-channel actors provide deterministic state and oracle-visible ledgers. Their registry metadata and scripted DAGs exercise multi-service scope boundaries, sequential pivots, parallel branches, and confirmation-barrier admission. This slice validates static structure and deterministic actor semantics; it is not a substitute for a coordinator.
 
-Two constraints keep the Phase 2 upgrade (§10) honest rather than a rewrite:
+The remaining Phase 1 work is the scripted executor, event-owning actor adapter, deterministic fault injector, and the complete O1-O5/S1-S14 scenario set. Two constraints govern that implementation:
 
 1. **Event ownership is enforced even in-process.** The scripted executor stands in for the Go coordinator and may append only coordinator-owned event types (discipline 29). An in-process harness that lets one component append everything would validate a system that does not exist.
 2. **Every tool call crosses a serialization boundary.** Arguments and results are encoded and decoded even though no socket is involved, so no test accidentally depends on shared object identity.
 
-Crash and duplicate-delivery scenarios (S11–S12) are the ones an in-process fake cannot honestly cover; they are deferred to Phase 2 and marked as such in the matrix.
+Crash and duplicate-delivery scenarios (S11-S12), plus the temporal assertion that a runtime barrier waits until every participating try is sealed, cannot be honestly claimed by the current static harness. They require the coordinator and real PostgreSQL work handoff, are deferred to Phase 2, and remain marked as such in the matrix.
 
 ## 4. Fault Injector
 
@@ -318,13 +318,13 @@ Every T-C fork records source scenario and position, substitutions, `fold_mode`,
 
 ## 10. Phased Rollout
 
-| Phase | Scope | Exit criterion |
-|---|---|---|
-| **0** | T-A only: table-driven check-rule tests, projection purity tests, replay diff. No sandbox, no key. | every rule R1–R11 has ≥ 1 passing and ≥ 1 violating fixture; every projection layer dumps its intermediate output |
-| **1** | In-process TS sandbox, scripted planner, fault injector, oracles O1–O5, scenarios S1–S10 plus S2b, S2c, S3b, S3c, S5b, S11 (partial), S11b, S11c, S13, S14 | all green with `E = 2` for S3c; S11 partial; the four mechanism questions in §1 answered without an API key |
-| **2** | Sandbox promoted to an out-of-process service; Go coordinator on real Postgres | S11 and S12 green; cross-language conformance fixtures pass (discipline 34) |
-| **3** | Historical fork evaluation (§8): greedy versus wider and JIT versus up-front on a versioned corpus, at declared `fold_mode`s | complete case reports, explicit unverified writes, and any candidate rule linked to its supporting and contradicting evidence |
-| **4** | T-C live-model sandbox qualification on the fixed scenario corpus | all hard oracles pass; scenario-level quality and cost evidence is published with complete fork provenance; an operator makes the production decision |
+| Phase | Delivery status | Scope | Exit criterion |
+|---|---|---|---|
+| **0** | Implemented | T-A table-driven R1-R11 checks, projection purity, event-store and fork replay tests; no sandbox or key | every R1-R11 code has an admitted baseline and an explicit violating fixture; projection and replay suites are green |
+| **1** | Partial | Test-only in-process inventory, payment, logistics, and channel actors plus complex DAG and static barrier fixtures are delivered; scripted execution, fault injection, O1-O5, and the remaining scenario corpus are pending | all S1-S10 variants and partial S11 scenarios are green; the four mechanism questions in §1 are answered without an API key |
+| **2** | Not started | Sandbox promoted to an out-of-process service; Go coordinator on real PostgreSQL | temporal barrier behavior, S11, and S12 are green; cross-language conformance fixtures pass (discipline 34) |
+| **3** | Not started | Historical fork evaluation (§8): greedy versus wider and JIT versus up-front on a versioned corpus, at declared `fold_mode`s | complete case reports, explicit unverified writes, and any candidate rule linked to its supporting and contradicting evidence |
+| **4** | Not started | T-C live-model sandbox qualification on the fixed scenario corpus | all hard oracles pass; scenario-level quality and cost evidence is published with complete fork provenance; an operator makes the production decision |
 
 Phases 0 through 2 require no API key and no model access, which is the point: regression testing must not depend on a model provider (discipline 28). Phases 3 and 4 may need model calls and live reads but never writes, so policy evaluation remains isolated from production business effects.
 

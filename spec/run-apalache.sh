@@ -8,7 +8,7 @@ readonly model="CoordinatorS2"
 run_check() {
     local config="$1"
     shift
-    docker run --rm --platform=linux/amd64 --tmpfs /var/apalache/tmp:rw,mode=1777 -v "${root}/spec:/var/apalache" -w /var/apalache "${image}" check --config="${config}" "$@" "${model}.tla"
+    docker run --rm --platform=linux/amd64 --tmpfs /var/apalache/tmp:rw,mode=1777 --tmpfs /var/apalache/_apalache-out:rw,mode=1777 -v "${root}/spec:/var/apalache" -w /var/apalache "${image}" check --config="${config}" "$@" "${model}.tla"
 }
 
 for config in CoordinatorS2Small.cfg CoordinatorS2.cfg; do

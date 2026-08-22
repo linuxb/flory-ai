@@ -31,6 +31,8 @@ The role split is a **permission split**. Planners may append sub-DAG proposals;
 
 The log is named `event_log` rather than `vertex_log` because its rows are not only DAG-vertex transitions. Externally imposed events land in the same stream — a human-triggered refine, an operator what-if request, a reconciliation outcome — and they belong there for exactly the reason vertex events do: they change the context that later decisions fold from. "Stream" names the ordering, "event" names the row; both terms are needed and neither substitutes for the other.
 
+This section defines the logical model. The physical PostgreSQL schema, indexes, triggers, and work-queue tables are specified in [08](./08-database-schema.md).
+
 It carries **two sequence numbers with different guarantees**, and confusing them is the most consequential mistake available in this schema (see §3.3 invariant 3).
 
 ```sql

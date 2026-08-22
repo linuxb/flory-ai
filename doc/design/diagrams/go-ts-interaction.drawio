@@ -1,0 +1,80 @@
+<mxfile host="65bd71144e">
+    <diagram id="interaction_diagram" name="Go-TS Event Log Interaction">
+        <mxGraphModel dx="1490" dy="797" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="850" background="none" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="diagram_title" value="Go Coordinator and TypeScript Engine Interaction" style="text;html=1;align=center;verticalAlign=middle;fontSize=20;fontStyle=1;fontFamily=HanWangKanTan;fontColor=#6741D9;" parent="1" vertex="1">
+                    <mxGeometry x="50" y="20" width="1010" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="ts_engine_group" value="TS Engine (Brain)" style="swimlane;fontFamily=LXGW WenKai TC;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;rounded=1;shadow=1;startSize=40" parent="1" vertex="1">
+                    <mxGeometry x="50" y="80" width="260" height="340" as="geometry"/>
+                </mxCell>
+                <mxCell id="ts_planner" value="Planner Loop" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=LXGW WenKai TC;fillColor=#E5DBFF;strokeColor=#6741D9;fontColor=#6741D9" parent="ts_engine_group" vertex="1">
+                    <mxGeometry x="30" y="60" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="ts_projection" value="Context Projection" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=LXGW WenKai TC;fillColor=#E5DBFF;strokeColor=#6741D9;fontColor=#6741D9" parent="ts_engine_group" vertex="1">
+                    <mxGeometry x="30" y="150" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="ts_replan" value="Replan / Rollback" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=LXGW WenKai TC;fillColor=#E5DBFF;strokeColor=#6741D9;fontColor=#6741D9" parent="ts_engine_group" vertex="1">
+                    <mxGeometry x="30" y="240" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="pg_db_group" value="PostgreSQL Event Log&lt;br&gt;(The Boundary)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontFamily=LXGW WenKai TC;fillColor=#FFE8CC;strokeColor=#E8590C;fontColor=#E8590C" parent="1" vertex="1">
+                    <mxGeometry x="450" y="140" width="220" height="220" as="geometry"/>
+                </mxCell>
+                <mxCell id="go_coord_group" value="Go Coordinator (Hands)" style="swimlane;fontFamily=LXGW WenKai TC;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;rounded=1;shadow=1;startSize=40" parent="1" vertex="1">
+                    <mxGeometry x="800" y="80" width="260" height="340" as="geometry"/>
+                </mxCell>
+                <mxCell id="go_reader" value="Log Reader &amp; Sweeper" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=LXGW WenKai TC;fillColor=#C5F6FA;strokeColor=#0C8599;fontColor=#0C8599" parent="go_coord_group" vertex="1">
+                    <mxGeometry x="30" y="60" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="go_txn" value="Transaction Lifecycle Mgr" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=LXGW WenKai TC;fillColor=#C5F6FA;strokeColor=#0C8599;fontColor=#0C8599" parent="go_coord_group" vertex="1">
+                    <mxGeometry x="30" y="150" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="go_exec" value="Tool Executor" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=LXGW WenKai TC;fillColor=#C5F6FA;strokeColor=#0C8599;fontColor=#0C8599" parent="go_coord_group" vertex="1">
+                    <mxGeometry x="30" y="240" width="200" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="ext_sys" value="External Business Systems&lt;br&gt;(Inventory, Payment, Logistics)" style="rounded=1;whiteSpace=wrap;html=1;fontFamily=LXGW WenKai TC;fillColor=#FFD8A8;strokeColor=#E8590C;fontColor=#E8590C" parent="1" vertex="1">
+                    <mxGeometry x="800" y="500" width="260" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="edge_ts_pg" value="Append: vertex/created,&lt;br&gt;replan/boundary, run/start" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;fontFamily=LXGW WenKai TC;strokeColor=#6741D9;fontColor=#6741D9;labelBackgroundColor=none" parent="1" source="ts_engine_group" target="pg_db_group" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="380" y="200"/>
+                            <mxPoint x="380" y="200"/>
+                        </Array>
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="edge_pg_ts" value="Read (Projection Pipeline)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;fontFamily=LXGW WenKai TC;strokeColor=#6741D9;fontColor=#6741D9;labelBackgroundColor=none" parent="1" source="pg_db_group" target="ts_engine_group" edge="1">
+                    <mxGeometry y="20" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="380" y="300"/>
+                            <mxPoint x="380" y="300"/>
+                        </Array>
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="edge_pg_go" value="LISTEN/NOTIFY or&lt;br&gt;SKIP LOCKED" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;fontFamily=LXGW WenKai TC;strokeColor=#0C8599;fontColor=#0C8599;labelBackgroundColor=none" parent="1" source="pg_db_group" target="go_coord_group" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="730" y="200"/>
+                            <mxPoint x="730" y="200"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="edge_go_pg" value="Append: vertex/started,&lt;br&gt;txn/try, txn/confirm" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;fontFamily=LXGW WenKai TC;strokeColor=#0C8599;fontColor=#0C8599;labelBackgroundColor=none" parent="1" source="go_coord_group" target="pg_db_group" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="730" y="300"/>
+                            <mxPoint x="730" y="300"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="edge_go_ext" value="Tool Execution / Saga Compensate" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=open;fontFamily=LXGW WenKai TC;strokeColor=#E8590C;fontColor=#E8590C;labelBackgroundColor=none" parent="1" source="go_coord_group" target="ext_sys" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

@@ -94,19 +94,7 @@ flowchart TB
 - **prime-agent (PrimeIntellect):** Continual Harness's two-stage refine process (low-cost review gate followed by structured JSON edits), per-edit before/after snapshots, reverse-edit rollback, and local/global scopes. Flory adopts the mechanism but restricts state to metadata and replaces raw-memory injection with mem-hints.
 - **Atomix / SagaLLM (research):** transactional LLM tool use has precedent. Flory adopts Atomix's three effect classes (bufferable, reversible, irreversible) as the basis for node transaction attributes, while SagaLLM validates the value of combining Saga with independent validation.
 
-## 6. Series Index
-
-| Document | Contents |
-|---|---|
-| [01-jit-dag-and-event-log](./01-jit-dag-and-event-log.md) | DAG model, node roles, event-log schema, surface projection, in-place replan, and fork semantics: branch, `pin_version` substitution, tail merge, and the `fold_mode` ladder. |
-| [02-transaction-model](./02-transaction-model.md) | Node transaction attributes, TCC plus pivot-saga, transaction boundaries, and check-rules. |
-| [03-replan-and-recovery](./03-replan-and-recovery.md) | Greedy replanning, the recovery escalation ladder, replan/transaction interaction, and token budgets. |
-| [04-refine-and-harness-state](./04-refine-and-harness-state.md) | Refine triggers and flow, metadata-only state schema, pure-function assembly, and mem-hints. |
-| [05-context-aggregation-and-offline-evaluation](./05-context-aggregation-and-offline-evaluation.md) | Why the log exists, the projection pipeline and layer contracts, semantic fold, and case-specific historical evaluation. |
-| [06-validation-harness](./06-validation-harness.md) | Three-tier validation strategy, the e-commerce sandbox contract, the deterministic fault injector, the scenario matrix, five oracle classes, and policy validation of greedy-versus-wider and JIT-versus-up-front. |
-| [adr/](./adr/) | Architecture decision records: [ADR-001](./adr/adr-001-engine-language-split.md) TypeScript/Go language split, [ADR-002](./adr/adr-002-in-place-replan-and-dry-run-forks.md) in-place replan and offline-only forks, [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) formal verification of the transaction protocol, and [ADR-004](./adr/adr-004-case-specific-offline-fork-evaluation.md) case-specific historical evaluation. |
-
-## 7. References
+## 6. References
 
 - deepseek-ai/deepseek-harness — https://github.com/deepseek-ai/deepseek-harness
 - PrimeIntellect-ai/prime-agent — https://github.com/PrimeIntellect-ai/prime-agent

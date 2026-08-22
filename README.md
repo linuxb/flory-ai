@@ -36,8 +36,10 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Refine and harness state](doc/design/04-refine-and-harness-state.md)                               | Structured refinement, metadata-only state, and memory hints.                |
 | [Context aggregation and offline evaluation](doc/design/05-context-aggregation-and-offline-evaluation.md) | Canonical projections, semantic folds, replay, and historical evaluation. |
 | [Validation harness](doc/design/06-validation-harness.md)                                           | Sandbox contract, fault injection, scenario matrix, and correctness oracles. |
+| [Go Coordinator Architecture](doc/design/07-go-coordinator.md)                                      | Go Coordinator responsibilities, event log interactions, and execution modules. |
+| [Database schema and storage model](doc/design/08-database-schema.md)                               | Event log immutability, sequence allocation, and synchronous projections.   |
 
-Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/): an interactive [architecture overview](doc/design/diagrams/architecture.html) and editable Draw.io diagrams for transaction boundaries, replanning, and projections.
+Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/): an interactive [architecture overview](doc/design/diagrams/architecture.html) and editable Draw.io diagrams for [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Go/TypeScript interaction](doc/design/diagrams/go-ts-interaction.drawio).
 
 ## Repository layout
 

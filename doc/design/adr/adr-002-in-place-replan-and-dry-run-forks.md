@@ -53,5 +53,5 @@ Dry runs remain valuable precisely because they are isolated. A forked child can
 
 - [JIT-DAG and event log](../01-jit-dag-and-event-log.md) §5
 - [Replanning and recovery](../03-replan-and-recovery.md) §2
-- [Context aggregation and experimentation](../05-context-aggregation-and-offline-evaluation.md) §3
+- [Context aggregation and offline evaluation](../05-context-aggregation-and-offline-evaluation.md) §3
 - [Validation harness](../06-validation-harness.md) scenarios S2c and S11b

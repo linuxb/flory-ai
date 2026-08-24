@@ -28,7 +28,7 @@ The lifecycle manager owns scope states `open`, `cancelling`, `pivot-inflight`, 
 
 ### 3.3 Tool Executor
 
-The executor calls adapters with a frozen idempotency key and deterministic retry policy. An unknown pivot outcome is resolved only through the pivot's registered status-query operation. After a pivot, retries are forward-only; exhausting the frozen policy suspends the scope for human intervention.
+The executor calls an adapter with a frozen idempotency key and deterministic retry policy. An unknown pivot outcome is resolved only through the pivot's registered status-query operation. After a pivot, retries are forward-only; exhausting the frozen policy suspends the scope for human intervention. The proposed `gatewayd` adapter additionally carries the frozen tool-view digest and exact tool version; it routes one attempt but never decides or hides a retry.
 
 ### 3.4 Orphan Sweeper
 
@@ -36,9 +36,11 @@ The sweeper finds sealed brackets past their deadline and requests cancellation 
 
 ## 4. Adapter Boundary
 
-Adapters implement one JSON operation contract over HTTP. Requests carry the run, vertex, attempt number, tool reference, idempotency key, and immutable input. Responses are one of `succeeded`, `retryable-failure`, `permanent-failure`, or `unknown`. Production adapters may use any downstream protocol behind that boundary.
+The current adapter contract carries the run, vertex, attempt number, tool reference, idempotency key, and immutable input over HTTP. Responses are one of `succeeded`, `retryable-failure`, `permanent-failure`, or `unknown`.
 
-The test sandbox is an out-of-process adapter service with deterministic fault injection keyed by `(seed, tool, attempt_no)`. It exposes reset and oracle snapshots only in tests.
+The proposed [gatewayd Tool Registry Gateway](./09-tool-registry-gateway.md) extends that request with the exact tool version, tool-view digest, and deadline, exposes it through MCP `tools/call`, and routes one attempt to an HTTP, gRPC, or other upstream adapter. This changes discovery and routing, not ownership: the coordinator still decides retries, appends all `vertex/*` and `txn/*` events, and enforces TCC and pivot recovery.
+
+The test sandbox is an out-of-process adapter service with deterministic fault injection keyed by `(seed, tool, attempt_no)`. It can be reached through the direct adapter or a gateway-compatible stand-in and exposes reset and oracle snapshots only in tests.
 
 ## 5. Interaction with the Engine
 

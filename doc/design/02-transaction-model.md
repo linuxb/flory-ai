@@ -36,7 +36,7 @@ Each tool-caller vertex includes the following `vertex/created` payload:
 }
 ```
 
-All of it comes from tool-registration metadata. Each tool statically declares its effect class, TCC interfaces, compensation tool, idempotency-key convention, and resource footprint. A planner may reference those declarations but may never invent them.
+All of it comes from the immutable tool view resolved before planning. Each registered contract defines its effect class, TCC interfaces, compensation tool, idempotency-key convention, and resource footprint. The planner may reference those declarations but may never invent or override them. The proposed production publication path is specified in [09 — gatewayd Tool Registry Gateway](./09-tool-registry-gateway.md#3-registration-and-tool-view-contract).
 
 ### 2.1 Derived attributes are never declared
 
@@ -47,9 +47,7 @@ is_pivot  ≡  effect_class = "irreversible"
 undoable  ≡  mode = "tcc"  ∨  compensate_tool ≠ null
 ```
 
-Earlier drafts carried `is_pivot` and `compensable` as independent payload fields alongside `effect_class`. That allowed three fields to disagree — a node could be declared `irreversible` and `is_pivot: false` at the same time — and it invited a whole class of confusion in which "non-compensable node" and "pivot" were discussed as if they were different things. **They are the same predicate**: an effect with no undo path is irreversible, and an irreversible effect may only be a pivot (§1).
-
-Making them derived removes the disagreement by construction, which is stronger than adding a rule to detect it. The registry-time obligation that remains is: **a tool with no undo path must be registered `irreversible`.** Mislabelling there is a registry defect that no check-rule can catch, which is why registration itself is under test ([06 §3.3](./06-validation-harness.md)).
+`is_pivot` and `compensable` must not appear as independent registration or vertex fields because they could disagree with `effect_class` and the registered undo path. A non-compensable effect is irreversible, and an irreversible effect may only be a pivot (§1). The registry-time obligation is therefore: **a tool with no undo path must be registered `irreversible`.** Mislabelling there is a registry defect that no downstream check-rule can infer, which is why registration itself is under test ([06 §3.3](./06-validation-harness.md)).
 
 The three legal shapes of an undoable node are therefore:
 
@@ -98,7 +96,7 @@ Extension is safe because of the shape the rules take:
 | **Prohibition** — X must not exist | **Yes.** Monotone: a violation appears at the moment of addition and cannot be repaired by later additions | R1, R2, R3, R7, R10 |
 | **Obligation** — Y must exist | Not from graph structure alone | R6 (a try needs exits), R5/R9 (a barrier must be inserted) |
 
-The obligations are nonetheless decidable at each freeze, because they are satisfied by **registry attributes rather than future vertices**: a try's cancel exit is `mode: tcc` or `compensate_tool`, not a planned node, and a barrier only has to precede the pivot, so it is inserted in whichever freeze introduces the pivot.
+The obligations are nonetheless decidable at each freeze, because they are satisfied by **frozen tool-view attributes rather than future vertices**: a try's cancel exit is `mode: tcc` or `compensate_tool`, not a planned node, and a barrier only has to precede the pivot, so it is inserted in whichever freeze introduces the pivot.
 
 > **Meta-rule for rule authors.** New check-rules should be written in prohibition form. An obligation that can only be discharged by a vertex in some *later* subgraph would make incremental extension undecidable, and would force scopes to be planned in one shot — surrendering progressive disclosure for no invariant gain.
 
@@ -106,7 +104,7 @@ When extension is impossible, the remedy is not a dead end: if the scope has no 
 
 ### 3.4 Deterministic check-rules
 
-The rules run before a DAG is frozen. **Any violation produces a closed-vocabulary result that the future planner integration records as `subgraph/rejected`; the planner must regenerate rather than bypass the result.** The executable TypeScript implementation is `engine/src/check-rules.ts`. It accepts only a proposal and an immutable tool registry, performs no I/O, and returns `{accepted, violations}` with stable R1-R11 rule codes and implicated vertex IDs.
+The rules run before a DAG is frozen. **Any violation produces a closed-vocabulary result recorded as `subgraph/rejected`; the planner must regenerate rather than bypass the result.** The executable TypeScript implementation is `engine/src/check-rules.ts`. It accepts only a proposal and an immutable tool-view snapshot, performs no I/O, and returns `{accepted, violations}` with stable R1-R11 rule codes and implicated vertex IDs. Dynamic discovery through `gatewayd` happens before this call and never inside the checker.
 
 | # | Rule | Reason |
 |---|---|---|
@@ -124,8 +122,8 @@ The rules run before a DAG is frozen. **Any violation produces a closed-vocabula
 
 The current implementation boundary is deliberately split:
 
-1. `ToolRegistry.validate()` enforces registration obligations R4 and R6 before proposal admission.
-2. `checkSubDag(proposal, registry)` computes ancestry, descendants, scope membership, pivots, conflicting write footprints, and confirmation-barrier coverage, then enforces proposal rules R1-R3 and R5-R11.
+1. `ToolRegistry.validate()` validates the immutable tool view and enforces registration obligations R4 and R6 before proposal admission.
+2. `checkSubDag(proposal, toolView)` computes ancestry, descendants, scope membership, pivots, conflicting write footprints, and confirmation-barrier coverage, then enforces proposal rules R1-R3 and R5-R11.
 3. The checker only admits or rejects structure. It does not append events, schedule a ready vertex, or open and close a transaction bracket; those runtime actions belong to the engine integration and Distributed Transaction Coordinator.
 
 The test suite supplies one admitted proposal plus an explicit violating fixture for every rule. Test-only e-commerce fixtures additionally prove both sides of the barrier contract: parallel conflicting writes or independent pivots are rejected without a pre-pivot confirmation barrier and admitted when the barrier dominates the pivots. These are structural tests; the runtime guarantee that a barrier waits for every branch to seal still requires the coordinator.

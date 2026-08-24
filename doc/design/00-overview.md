@@ -23,6 +23,7 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 | pivot | An irreversible and uncompensable node in a transaction scope, such as a committed inventory decrement or logistics booking; at most one is allowed per scope. | [02](./02-transaction-model.md) |
 | pivot-saga + TCC | The distributed-transaction model for business side effects: compensable before the pivot (Saga/TCC try), forward recovery only after it. | [02](./02-transaction-model.md) |
 | check-rules | Deterministic static validation of transaction properties before a DAG is frozen, such as requiring idempotent retry after a pivot. | [02](./02-transaction-model.md) |
+| `gatewayd` Tool Registry Gateway | The proposed MCP boundary that publishes immutable tool views and routes one execution attempt without owning transaction policy. | [09](./09-tool-registry-gateway.md) |
 | savepoint | The committed world state at scope entry; by construction it lies after every preceding pivot, so returning to it never crosses one. | [02](./02-transaction-model.md) |
 | replan | After a tool-call failure, greedily backtrack to the nearest **legal replan boundary** and regenerate the subgraph **in place**, in the same run. No fork. | [03](./03-replan-and-recovery.md) |
 | legal replan boundary | A succeeded planner outside every open transaction bracket and at or after the most recent `txn/pivot-passed`. | [03](./03-replan-and-recovery.md) |
@@ -42,43 +43,9 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 
 ## 3. Overall Architecture
 
-The interactive architecture diagram is [diagrams/architecture.html](./diagrams/architecture.html). It adapts to light and dark themes and provides a Light/Dark/Auto control. Focused mechanism diagrams are available as editable Draw.io files: [transaction boundaries](./diagrams/txn-boundary.drawio), [replanning flow](./diagrams/replan-flow.drawio), and [projection and offline evaluation](./diagrams/projection.drawio).
+The current deployment view is [diagrams/deployment-architecture.html](./diagrams/deployment-architecture.html). It shows the Agent Orchestrator, Distributed Transaction Coordinator, proposed `gatewayd`, PostgreSQL event log, blob storage, and business services, including registration and execution-routing paths. The self-contained diagram adapts to light and dark themes and provides a Light/Dark/Auto control.
 
-```mermaid
-flowchart TB
-    subgraph ControlPlane["Control plane (engine metadata; DB-backed ACID)"]
-        VL[("event log<br/>append-only · stream_seq")]
-        SF["surface projection<br/>current-DAG view"]
-        CR["check-rules engine<br/>static validation before DAG freeze"]
-        HS[("harness-state<br/>metadata only")]
-        PA["prompt assembly<br/>pure function"]
-    end
-
-    subgraph AgentLoop["Agent loop"]
-        P["planner node<br/>JIT sub-DAG generation"]
-        T["tool-caller node<br/>deterministic execution"]
-        RP["replan / rollback<br/>in-place shadow + append"]
-        RF["refine<br/>gate + structured edit"]
-    end
-
-    subgraph DataPlane["Data plane (external business systems)"]
-        INV["inventory service"]
-        LOG["logistics service"]
-        CH["channel / ERP / supplier APIs"]
-    end
-
-    P -- "atomically append subgraph" --> VL
-    VL --> SF
-    SF -- "linearized context" --> P
-    P --> CR
-    CR -- "reject and regenerate" --> P
-    T -- "TCC / Saga compensation" --> INV & LOG & CH
-    T -- "result events" --> VL
-    RP -- "replan/boundary" --> VL
-    RF -- "edit + snapshot" --> HS
-    HS --> PA
-    PA -- "assemble prompt" --> P
-```
+The [conceptual architecture overview](./diagrams/architecture.html) remains a higher-level companion. Focused mechanism diagrams are editable Draw.io files: [transaction boundaries](./diagrams/txn-boundary.drawio), [replanning flow](./diagrams/replan-flow.drawio), [projection and offline evaluation](./diagrams/projection.drawio), and [Coordinator/Engine interaction](./diagrams/coordinator-engine-interaction.drawio).
 
 ## 4. Five Design Principles
 

@@ -76,9 +76,11 @@ A `release` subtracts exactly the delta its own `try` added. A sandbox that impl
 
 Value-type resources (price, listing state) follow the same rule and matter more, because snapshot restore looks natural there and is wrong (02 §4.3, D2).
 
-### 3.3 The tool registry is under test
+### 3.3 The tool-view contract is under test
 
-Check-rules read `tool_registry`, so the sandbox's registration metadata is part of the surface being validated, not scaffolding around it. Every sandbox tool declares its real `effect_class`, TCC triple, `compensate_tool`, `idempotency_key` convention, `try_timeout_s`, and resource footprint (`inventory:{sku}`, `carrier:{carrier_id}`, `payment:{order_id}`). Registration itself is validated: a tool declaring `mode: saga` without a registered idempotent `compensate_tool` fails registration (R4), and a tool with no undo path at all must be registered `irreversible` rather than `reversible` ([02 §2.1](./02-transaction-model.md)). Both are tests in their own right — a mislabelled effect class is the one defect no check-rule downstream can catch.
+Check-rules read an immutable tool view, so the sandbox's registration metadata is part of the validated surface, not scaffolding around it. The local test registry mirrors the publication and admission contract in [09 — gatewayd Tool Registry Gateway](./09-tool-registry-gateway.md#3-registration-and-tool-view-contract); it is a deterministic stand-in for gateway discovery, not a second production registry.
+
+Every sandbox tool declares its real `effect_class`, TCC triple, `compensate_tool`, idempotency-key convention, `try_timeout_s`, and resource footprint (`inventory:{sku}`, `carrier:{carrier_id}`, `payment:{order_id}`). Registration itself is validated: a tool declaring `mode: saga` without a registered idempotent `compensate_tool` fails registration (R4), and a tool with no undo path must be registered `irreversible` rather than `reversible` ([02 §2.1](./02-transaction-model.md)). Tests also assert that a canonical gateway tool view and its local snapshot produce identical admission results. A mislabelled effect class remains the one defect no downstream check-rule can infer.
 
 ### 3.4 Designated pivots
 
@@ -249,7 +251,7 @@ The permutation assertion deserves emphasis: the harness runs selected scenarios
 
 It is also the only assertion that tests **reducer commutativity over concurrent events**. Serializing appends fixes storage order but not scheduling order, so two concurrent siblings may receive `stream_seq` in either order across replays. A reducer that is order-sensitive over events with no `parent_refs` path between them breaks projection purity even with a perfect sequence ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3).
 
-### O5 — Cost-model fidelity (reads the log plus the tool registry)
+### O5 — Cost-model fidelity (reads the log plus the recorded tool view)
 
 The boundary-selection cost model ([03 §4.1](./03-replan-and-recovery.md)) prices candidates in currency, and [03 §4.2](./03-replan-and-recovery.md) requires the engine to publish `estimated_cost`. Nothing in O1–O4 checks whether those prices resemble reality, which would leave `expected_plan_tokens` an unexamined guess forever.
 

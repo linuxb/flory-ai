@@ -12,6 +12,7 @@ This repository contains the architecture and design baseline plus an executable
 
 - **TypeScript engine:** owns the planner loop, canonical context-projection pipeline, check rules, prompt assembly, refine loop, model adapters, and replay testing.
 - **Distributed Transaction Coordinator:** owns transaction scopes, runtime barriers, timeout handling, tool execution, and business-adapter orchestration. Its current implementation uses Go 1.25.
+- **`gatewayd` (proposed):** publishes immutable tool views and routes exact MCP tool calls without taking ownership of planning, retries, or transaction events.
 - **PostgreSQL:** stores the append-only event log and metadata-only harness state, and allocates the write-order sequence.
 - **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own.
 
@@ -111,8 +112,9 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Validation harness](doc/design/06-validation-harness.md)                                           | Sandbox contract, fault injection, scenario matrix, and correctness oracles. |
 | [Distributed Transaction Coordinator](doc/design/07-distributed-transaction-coordinator.md)         | Scope lifecycle, event-log interactions, barriers, execution, and recovery.      |
 | [Database schema and storage model](doc/design/08-database-schema.md)                               | Event log immutability, sequence allocation, and synchronous projections.   |
+| [`gatewayd` Tool Registry Gateway](doc/design/09-tool-registry-gateway.md)                          | Immutable tool views, dynamic registration, and one-attempt MCP routing.     |
 
-Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/): an interactive [architecture overview](doc/design/diagrams/architecture.html) and editable Draw.io diagrams for [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Coordinator/Engine interaction](doc/design/diagrams/coordinator-engine-interaction.drawio).
+Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/). The [deployment architecture](doc/design/diagrams/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/design/diagrams/architecture.html) remains a higher-level companion. Editable Draw.io diagrams cover [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Coordinator/Engine interaction](doc/design/diagrams/coordinator-engine-interaction.drawio).
 
 ## Repository layout
 

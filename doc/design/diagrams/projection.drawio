@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram id="proj-1" name="Projection and offline evaluation">
-        <mxGraphModel dx="1082" dy="696" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="2320" background="none" math="0" shadow="0">
+        <mxGraphModel dx="1490" dy="797" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="2320" background="none" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -326,9 +326,11 @@
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="e-mg2" value="s4-s6 descendants of s3: invalidated, regenerated" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=2;fontColor=#E03131;endArrow=block;fontFamily=LXGW WenKai TC;exitX=0.5;exitY=1;entryX=0.5;entryY=0;dashed=1;" parent="1" source="e-a4" target="e-b4" edge="1">
-                    <mxGeometry relative="1" as="geometry"/>
+                    <mxGeometry x="0.2941" y="51" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
                 </mxCell>
-                <mxCell id="e-sub-note" value="substitution = replace pin_version only: model://claude-sonnet-5@2026-08 on s3&#39;&lt;br&gt;descendants s4-s6 invalidated → n1, n2 regenerated (mocked, no writes)&lt;br&gt;independent w1 merged · lazy: execution stops at eval_up_to_seq = s6" style="text;html=1;align=left;verticalAlign=middle;fontColor=#E03131;fontSize=11;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-sub-note" value="substitution = replace pin_version only: model://claude-sonnet-5@2026-08 on s3&#39;&lt;br&gt;descendants s4-s6 invalidated -&amp;gt; n1, n2 regenerated (mocked, no writes)&lt;br&gt;independent w1 merged; lazy: execution stops at eval_up_to_seq = s6" style="text;html=1;align=left;verticalAlign=middle;fontColor=#E03131;fontSize=11;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="740" y="1976" width="430" height="56" as="geometry"/>
                 </mxCell>
                 <mxCell id="e-sfA" value="surface A&lt;br&gt;fold(run A, s6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">

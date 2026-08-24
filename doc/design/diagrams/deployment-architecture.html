@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flory Distributed Deployment Architecture</title>
+    <style>
+        :root {
+            --bg-color: #f8f9fa;
+            --text-color: #343a40;
+            --box-bg-control: #e7f5ff;
+            --box-border-control: #339af0;
+            --box-bg-data: #fff0f6;
+            --box-border-data: #ff8787;
+            --box-bg-domain: #ebfbee;
+            --box-border-domain: #51cf66;
+            --box-bg-proxy: #fff4e6;
+            --box-border-proxy: #ffa94d;
+            --line-color: #868e96;
+            --dimmed-opacity: 0.15;
+            --highlight-color: #f59f00;
+            --shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #212529;
+            --text-color: #f8f9fa;
+            --box-bg-control: #1864ab;
+            --box-border-control: #4dabf7;
+            --box-bg-data: #a61e4d;
+            --box-border-data: #ff8787;
+            --box-bg-domain: #277a37;
+            --box-border-domain: #69db7c;
+            --box-bg-proxy: #c2410c;
+            --box-border-proxy: #ffa94d;
+            --line-color: #adb5bd;
+            --highlight-color: #ffd43b;
+            --shadow: 0 4px 6px rgba(0,0,0,0.5);
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'LXGW WenKai TC', sans-serif;
+            margin: 0;
+            padding: 20px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(128,128,128,0.2);
+            padding: 5px;
+            border-radius: 5px;
+            z-index: 100;
+        }
+
+        button {
+            background: none;
+            border: 1px solid var(--text-color);
+            color: var(--text-color);
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: 'LXGW WenKai TC', sans-serif;
+        }
+
+        button.active {
+            background: var(--text-color);
+            color: var(--bg-color);
+        }
+
+        #diagram-container {
+            position: relative;
+            width: 1300px;
+            height: 850px;
+            margin: 40px auto;
+        }
+
+        .node {
+            position: absolute;
+            box-sizing: border-box;
+            border: 2px solid;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: transform 0.2s, opacity 0.3s;
+            z-index: 10;
+            background-color: var(--bg-color);
+        }
+
+        .node:hover {
+            transform: translateY(-2px);
+            z-index: 20;
+        }
+
+        .title {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 8px;
+        }
+
+        .desc {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        /* Groups */
+        .group {
+            position: absolute;
+            box-sizing: border-box;
+            border: 2px dashed var(--line-color);
+            border-radius: 12px;
+            z-index: 1;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .group-label {
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background-color: var(--bg-color);
+            padding: 0 10px;
+            font-weight: bold;
+            color: var(--line-color);
+        }
+
+        /* Specific Nodes */
+        .control-node {
+            background-color: var(--box-bg-control);
+            border-color: var(--box-border-control);
+            width: 220px;
+            height: 100px;
+        }
+
+        .proxy-node {
+            background-color: var(--box-bg-proxy);
+            border-color: var(--box-border-proxy);
+            width: 280px;
+            height: 120px;
+        }
+
+        .data-node {
+            background-color: var(--box-bg-data);
+            border-color: var(--box-border-data);
+            width: 200px;
+            height: 90px;
+        }
+
+        .domain-node {
+            background-color: var(--box-bg-domain);
+            border-color: var(--box-border-domain);
+            width: 220px;
+            height: 100px;
+        }
+
+        /* SVG */
+        svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 15;
+        }
+
+        .edge {
+            stroke: var(--line-color);
+            stroke-width: 2;
+            fill: none;
+            transition: stroke 0.3s, stroke-width 0.3s, opacity 0.3s;
+        }
+
+        .edge.highlighted {
+            stroke: var(--highlight-color);
+            stroke-width: 4;
+            opacity: 1 !important;
+            z-index: 30;
+        }
+
+        .arrowhead {
+            stroke: currentColor;
+            stroke-width: 2;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .edge-label {
+            position: absolute;
+            background: var(--bg-color);
+            padding: 2px 8px;
+            font-size: 0.8em;
+            color: var(--text-color);
+            border: 1px solid var(--line-color);
+            border-radius: 4px;
+            z-index: 25;
+            white-space: nowrap;
+            transform: translate(-50%, -50%);
+            transition: border-color 0.3s, color 0.3s, opacity 0.3s;
+        }
+
+        .edge-label.highlighted {
+            border-color: var(--highlight-color);
+            color: var(--highlight-color);
+            font-weight: bold;
+            opacity: 1 !important;
+            z-index: 30;
+        }
+
+        /* Hover States Dimming */
+        .diagram-hovered .node:not(.active-node):not(.connected-node) {
+            opacity: var(--dimmed-opacity);
+        }
+        .diagram-hovered .edge:not(.highlighted) {
+            opacity: var(--dimmed-opacity);
+        }
+        .diagram-hovered .edge-label:not(.highlighted) {
+            opacity: var(--dimmed-opacity);
+        }
+        .diagram-hovered .group {
+            opacity: var(--dimmed-opacity);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <button id="btn-light" onclick="setTheme('light')">Light</button>
+        <button id="btn-dark" onclick="setTheme('dark')">Dark</button>
+        <button id="btn-auto" onclick="setTheme('auto')" class="active">Auto</button>
+    </div>
+
+    <h2 style="text-align: center; margin-bottom: 0;">Flory Distributed Deployment Architecture</h2>
+
+    <div id="diagram-container">
+        <!-- Groups -->
+        <div class="group" style="left: 20px; top: 100px; width: 280px; height: 450px;">
+            <div class="group-label">Control Plane</div>
+        </div>
+
+        <div class="group" style="left: 450px; top: 200px; width: 380px; height: 220px;">
+            <div class="group-label">Gateway Layer</div>
+        </div>
+
+        <div class="group" style="left: 200px; top: 600px; width: 650px; height: 180px;">
+            <div class="group-label">Persistent Storage</div>
+        </div>
+
+        <div class="group" style="left: 950px; top: 100px; width: 320px; height: 450px;">
+            <div class="group-label">Business Domain</div>
+        </div>
+
+        <!-- Nodes -->
+        <div id="orchestrator" class="node control-node" style="left: 50px; top: 150px;">
+            <div class="title">Agent Orchestrator</div>
+            <div class="desc">Stateless Planner<br/>& Projector</div>
+        </div>
+
+        <div id="coordinator" class="node control-node" style="left: 50px; top: 400px;">
+            <div class="title">Distributed Txn<br/>Coordinator (DTC)</div>
+            <div class="desc">Stateless Workers</div>
+        </div>
+
+        <div id="gateway" class="node proxy-node" style="left: 500px; top: 250px;">
+            <div class="title">gatewayd Tool Registry Gateway</div>
+            <div class="desc">Proposed: Immutable Tool Views & One-Attempt Proxy (MCP)</div>
+        </div>
+
+        <div id="db" class="node data-node" style="left: 250px; top: 650px;">
+            <div class="title">Event Log (PostgreSQL)</div>
+            <div class="desc">Ground Truth & Queue</div>
+        </div>
+
+        <div id="blob" class="node data-node" style="left: 600px; top: 650px;">
+            <div class="title">Blob Storage / KV</div>
+            <div class="desc">Tool View Snapshots</div>
+        </div>
+
+        <div id="service-a" class="node domain-node" style="left: 1000px; top: 150px;">
+            <div class="title">Tool Service A</div>
+            <div class="desc">e.g., Inventory (gRPC)</div>
+        </div>
+
+        <div id="service-b" class="node domain-node" style="left: 1000px; top: 400px;">
+            <div class="title">Tool Service B</div>
+            <div class="desc">e.g., Payment (HTTP)</div>
+        </div>
+
+        <!-- SVG for lines -->
+        <svg>
+            <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+                    <polyline points="2,2 8,5 2,8" class="arrowhead"/>
+                </marker>
+                <marker id="arrow-highlighted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto" style="color: var(--highlight-color)">
+                    <polyline points="2,2 8,5 2,8" class="arrowhead"/>
+                </marker>
+            </defs>
+
+            <!-- Paths -->
+            <path id="path-1" data-source="orchestrator" data-target="gateway" d="M 270 200 H 380 V 280 H 500" class="edge" marker-end="url(#arrow)"/>
+            <path id="path-2" data-source="coordinator" data-target="gateway" d="M 270 450 H 380 V 340 H 500" class="edge" marker-end="url(#arrow)"/>
+            <path id="path-3" data-source="orchestrator" data-target="db" d="M 270 230 H 300 V 650" class="edge" marker-end="url(#arrow)"/>
+            <path id="path-4" data-source="coordinator" data-target="db" d="M 270 480 H 350 V 650" class="edge" marker-end="url(#arrow)"/>
+            <path id="path-5" data-source="db" data-target="blob" d="M 450 695 H 600" class="edge" stroke-dasharray="4" marker-end="url(#arrow)"/>
+            <path id="path-6" data-source="gateway" data-target="blob" d="M 640 370 V 500 H 700 V 650" class="edge" marker-end="url(#arrow)"/>
+            <path id="path-7" data-source="gateway" data-target="service-a" d="M 780 280 H 880 V 180 H 1000" class="edge" marker-end="url(#arrow)"/>
+            <path id="path-8" data-source="service-a" data-target="gateway" d="M 1000 220 H 900 V 300 H 780" class="edge" stroke-dasharray="4" marker-end="url(#arrow)"/>
+            <path id="path-9" data-source="gateway" data-target="service-b" d="M 780 320 H 880 V 430 H 1000" class="edge" marker-end="url(#arrow)"/>
+            <path id="path-10" data-source="service-b" data-target="gateway" d="M 1000 470 H 900 V 340 H 780" class="edge" stroke-dasharray="4" marker-end="url(#arrow)"/>
+        </svg>
+
+        <!-- Edge Labels -->
+        <div id="label-1" class="edge-label" style="left: 380px; top: 240px;">Resolve Tool View (MCP)</div>
+        <div id="label-2" class="edge-label" style="left: 380px; top: 395px;">Route One Attempt (MCP)</div>
+        <div id="label-3" class="edge-label" style="left: 300px; top: 560px;">Append DAG + View Ref</div>
+        <div id="label-4" class="edge-label" style="left: 350px; top: 580px;">Claim Work + Append Events</div>
+        <div id="label-5" class="edge-label" style="left: 525px; top: 695px;">Blob Ref</div>
+        <div id="label-6" class="edge-label" style="left: 700px; top: 550px;">Publish Tool View</div>
+        <div id="label-7" class="edge-label" style="left: 880px; top: 230px;">Route One Attempt</div>
+        <div id="label-8" class="edge-label" style="left: 900px; top: 260px;">Register Contract</div>
+        <div id="label-9" class="edge-label" style="left: 880px; top: 375px;">Route One Attempt</div>
+        <div id="label-10" class="edge-label" style="left: 900px; top: 405px;">Register Contract</div>
+    </div>
+
+    <script>
+        // Theme Management
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function setTheme(theme) {
+            document.querySelectorAll('.controls button').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('btn-' + theme).classList.add('active');
+
+            if (theme === 'auto') {
+                if (prefersDark.matches) {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.removeAttribute('data-theme');
+                }
+            } else {
+                document.documentElement.setAttribute('data-theme', theme);
+            }
+        }
+
+        function updateAutoTheme(e) {
+            if (document.getElementById('btn-auto').classList.contains('active')) {
+                if (e.matches) {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.removeAttribute('data-theme');
+                }
+            }
+        }
+        prefersDark.addEventListener('change', updateAutoTheme);
+        if (prefersDark.matches && document.getElementById('btn-auto').classList.contains('active')) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+
+        // Hover Interaction Logic
+        const container = document.getElementById('diagram-container');
+        const nodes = document.querySelectorAll('.node');
+        const paths = document.querySelectorAll('.edge');
+
+        nodes.forEach(node => {
+            node.addEventListener('mouseenter', () => {
+                const nodeId = node.id;
+                container.classList.add('diagram-hovered');
+                node.classList.add('active-node');
+
+                paths.forEach((path, index) => {
+                    const source = path.getAttribute('data-source');
+                    const target = path.getAttribute('data-target');
+                    const label = document.getElementById(`label-${index + 1}`);
+
+                    if (source === nodeId || target === nodeId) {
+                        path.classList.add('highlighted');
+                        path.setAttribute('marker-end', 'url(#arrow-highlighted)');
+                        if (label) label.classList.add('highlighted');
+
+                        // Highlight the connected nodes
+                        if (source === nodeId && target) {
+                            document.getElementById(target).classList.add('connected-node');
+                        }
+                        if (target === nodeId && source) {
+                            document.getElementById(source).classList.add('connected-node');
+                        }
+                    }
+                });
+            });
+
+            node.addEventListener('mouseleave', () => {
+                container.classList.remove('diagram-hovered');
+                document.querySelectorAll('.active-node').forEach(el => el.classList.remove('active-node'));
+                document.querySelectorAll('.connected-node').forEach(el => el.classList.remove('connected-node'));
+
+                paths.forEach((path, index) => {
+                    path.classList.remove('highlighted');
+                    path.setAttribute('marker-end', 'url(#arrow)');
+                    const label = document.getElementById(`label-${index + 1}`);
+                    if (label) label.classList.remove('highlighted');
+                });
+            });
+        });
+    </script>
+</body>
+</html>

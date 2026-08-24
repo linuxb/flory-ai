@@ -100,7 +100,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | Event type | Meaning | Permitted writer |
 |---|---|---|
 | `run/start`, `run/end` | Run lifecycle | engine |
-| `subgraph/proposed` | Complete planner sub-DAG proposal in payload | planner |
+| `subgraph/proposed` | Complete planner sub-DAG proposal; the proposed gateway contract adds the immutable `tool_view_ref` and `tool_view_digest` used for admission ([09 §3](./09-tool-registry-gateway.md)) | engine (planner output) |
 | `subgraph/frozen` | Check-rules passed; all vertex rows are atomically appended | engine |
 | `subgraph/rejected` | Check-rules rejection and reasons | engine |
 | `vertex/created` | Vertex definition: role, tool, parameters, and transaction attributes | engine during freeze |

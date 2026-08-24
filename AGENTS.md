@@ -118,7 +118,7 @@ Two authoritative services, one proposed stateless gateway, one database. The la
 
 - **TypeScript** — engine service: planner loop, event vocabulary as discriminated unions, the canonical projection pipeline, check-rules, prompt assembly, refine loop, model adapters, and replay testing.
 - **Go 1.25** — implementation language for the Distributed Transaction Coordinator: transaction scopes, timeout sweeping, orphan-try detection, the tool executor, and adapters that must live inside existing Go infrastructure.
-- **`gatewayd` (proposed)** — dynamic tool registration, immutable tool-view publication, and one-attempt MCP routing. It is not a planner, transaction coordinator, retry owner, event writer, or projection implementation. Its implementation language remains undecided until the proposal is accepted and planned.
+- **`gatewayd` (proposed, Go 1.25 planned)** — dynamic tool registration, immutable tool-view publication, and one-attempt MCP routing. It is not a planner, transaction coordinator, retry owner, event writer, or projection implementation. Sharing Go with the Coordinator does not permit either component to import the other's internals; their public boundaries remain MCP and the event log.
 - **PostgreSQL** — the event log and harness-state. It allocates `seq`, so the two services need no coordination protocol. Work handoff uses `SELECT … FOR UPDATE SKIP LOCKED` or `LISTEN/NOTIFY`; do not introduce a message broker before there is load that requires one.
 - No third language in the engine without a new ADR.
 

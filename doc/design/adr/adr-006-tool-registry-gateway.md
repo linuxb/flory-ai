@@ -17,6 +17,8 @@ Introduce `gatewayd` as a proposed standalone deployment boundary with two MCP s
 - `tools/list` publishes canonical, content-addressed tool views built from admitted registrations.
 - `tools/call` resolves an exact frozen tool version and routes one requested execution attempt to its upstream service.
 
+Implement `gatewayd` in Go 1.25 as an independently deployable service. The shared language and toolchain may reduce operational and library duplication, but they do not permit `gatewayd` and the Distributed Transaction Coordinator to call or import each other's internals.
+
 `gatewayd` stores each canonical tool view in blob storage and publishes its content-addressed reference and digest. The Agent Orchestrator resolves that view before planning, records its identity in `subgraph/proposed`, and passes the immutable snapshot to the pure rule engine. The Distributed Transaction Coordinator supplies the same digest and pinned tool version when executing a frozen vertex.
 
 `gatewayd` validates registrations and performs routing, but it does not plan, retry side-effecting calls, append events, decide compensation, or implement projection semantics. Existing in-process registry and direct-adapter paths remain as migration and test implementations of the same contracts.
@@ -24,6 +26,7 @@ Introduce `gatewayd` as a proposed standalone deployment boundary with two MCP s
 ## Consequences
 
 - Planning and execution share one immutable tool-contract identity.
+- `gatewayd` and the Distributed Transaction Coordinator share the repository's Go 1.25 toolchain while retaining separate deployable and ownership boundaries.
 - Services can register dynamically without introducing I/O into deterministic check-rules or replay.
 - Historical replay remains independent of current gateway state because the tool view is recorded by reference and digest.
 - The gateway becomes an availability dependency for new discovery and routed execution, so callers must fail closed and preserve recorded history during outages.

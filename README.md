@@ -12,7 +12,7 @@ This repository contains the architecture and design baseline plus an executable
 
 - **TypeScript engine:** owns the planner loop, canonical context-projection pipeline, check rules, prompt assembly, refine loop, model adapters, and replay testing.
 - **Distributed Transaction Coordinator:** owns transaction scopes, runtime barriers, timeout handling, tool execution, and business-adapter orchestration. Its current implementation uses Go 1.25.
-- **`gatewayd` (proposed):** publishes immutable tool views and routes exact MCP tool calls without taking ownership of planning, retries, or transaction events.
+- **`gatewayd` (proposed, Go 1.25 planned):** publishes immutable tool views and routes exact MCP tool calls without taking ownership of planning, retries, or transaction events.
 - **PostgreSQL:** stores the append-only event log and metadata-only harness state, and allocates the write-order sequence.
 - **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own.
 

@@ -3,10 +3,13 @@
 > Status: Proposed
 > Depends on: [02 — Transaction Model](./02-transaction-model.md), [05 — Context Aggregation and Offline Evaluation](./05-context-aggregation-and-offline-evaluation.md), [07 — Distributed Transaction Coordinator](./07-distributed-transaction-coordinator.md)
 > Decision record: [ADR-006 — Introduce gatewayd as the Tool Registry and Execution Gateway](./adr/adr-006-tool-registry-gateway.md)
+> Planned implementation: Go 1.25
 
 ## 1. Purpose and Boundary
 
 `gatewayd` is the proposed deployment boundary for dynamic tool registration, immutable tool-view publication, and one-attempt execution routing. It exposes the MCP `tools/list` and `tools/call` surfaces so the Agent Orchestrator and Distributed Transaction Coordinator consume the same versioned tool contracts.
+
+The planned implementation uses Go 1.25 as a standalone service. Sharing an implementation language with the Distributed Transaction Coordinator does not create an internal API boundary: `gatewayd` remains independently deployable and communicates only through its MCP contract and storage interfaces.
 
 `gatewayd` does not own planning, transaction admission, retries, event appends, compensation policy, or projection semantics. Those responsibilities remain with the Agent Orchestrator and the Distributed Transaction Coordinator. The gateway validates registrations and routes exactly one requested attempt to an upstream tool service.
 
@@ -45,6 +48,36 @@ Registration admission applies the same structural rules required by transaction
 - compensation schemas must identify the delta owned by the corresponding try;
 - referenced companion tools must exist in the same published tool view;
 - a published `(tool_id, tool_version)` is immutable.
+
+### 3.1 Dependency Resolution and Pending State
+
+Because microservices register asynchronously on startup, a tool service might register a `mode: saga` tool before the service hosting its `compensate_tool` is ready. To prevent exposing incomplete compensation chains to the Agent Orchestrator:
+
+- `gatewayd` places new registrations into a `Pending` state.
+- A tool remains `Pending` until all its transactional dependencies (e.g., `compensate_tool` for Saga, `confirm`/`cancel` endpoints for TCC) are successfully registered, healthy, and proven idempotent.
+- Only when the entire transactional cluster is resolved does `gatewayd` publish them into the globally visible, content-addressed `tool view`.
+
+### 3.2 MCP Protocol Extension
+
+To carry these strict transaction semantics over standard MCP without breaking protocol compliance, the SDK injects Flory-specific transaction properties into the tool's `metadata` field.
+
+The Orchestrator parses this extension to perform its deterministic `checkSubDag` admission:
+
+```json
+{
+  "name": "inventory.try_reserve",
+  "description": "Reserve inventory for an order",
+  "inputSchema": { ... },
+  "metadata": {
+    "flory_transaction": {
+      "effect_class": "reversible",
+      "mode": "tcc",
+      "idempotency_key_path": "$.order_id"
+    }
+  }
+}
+```
+*(Note: `is_pivot` is absent because it is derived statically from `effect_class: irreversible` rather than declared.)*
 
 A tool view is a canonical, content-addressed document. Its digest covers every semantic field that can affect admission, execution, compensation, or replay, including the logical route identifier but not transient endpoint membership or health. The `subgraph/proposed` payload records `tool_view_ref` and `tool_view_digest`; each vertex's `pin_version` continues to identify its exact tool contract.
 

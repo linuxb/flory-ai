@@ -19,7 +19,7 @@ export interface EventDraft {
     payload: JsonObject;
 }
 
-/** A persisted event with database-assigned identifiers and timestamps. */
+/** A persisted event with database-assigned identifiers, provenance, and timestamps. */
 export interface StoredEvent extends Required<Omit<EventDraft, 'vertex_id' | 'planner_id' | 'scope_id' | 'pin_version'>> {
     run_id: string;
     stream_seq: number;
@@ -28,6 +28,8 @@ export interface StoredEvent extends Required<Omit<EventDraft, 'vertex_id' | 'pl
     planner_id: string | null;
     scope_id: string | null;
     pin_version: string | null;
+    /** True when the row is a read-only copy inherited from a fork's source stream. */
+    inherited: boolean;
     created_at: string;
 }
 

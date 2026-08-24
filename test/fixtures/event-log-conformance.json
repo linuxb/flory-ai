@@ -35,6 +35,41 @@
             ]
         },
         {
+            "name": "fork must not mutate an inherited transaction bracket",
+            "valid": false,
+            "expected_scope_state": "open",
+            "events": [
+                {"stream_seq": 1, "event_type": "txn/scope", "scope_id": "00000000-0000-4000-8000-000000000300", "inherited": true, "payload": {"state": "open"}},
+                {
+                    "stream_seq": 2,
+                    "event_type": "txn/try",
+                    "vertex_id": "00000000-0000-4000-8000-000000000301",
+                    "scope_id": "00000000-0000-4000-8000-000000000300",
+                    "inherited": true,
+                    "payload": {"idempotency_key": "scope-300:hold", "deadline_at": "2026-08-23T00:00:00Z"}
+                },
+                {"stream_seq": 4, "event_type": "run/end-seed", "payload": {"eval_up_to_seq": 3}},
+                {"stream_seq": 5, "event_type": "txn/cancel", "scope_id": "00000000-0000-4000-8000-000000000300", "payload": {"idempotency_key": "scope-300:cancel", "phase": "requested"}}
+            ]
+        },
+        {
+            "name": "lazily merged inherited bracket history stays read-only and valid",
+            "valid": true,
+            "expected_scope_state": "open",
+            "events": [
+                {"stream_seq": 1, "event_type": "txn/scope", "scope_id": "00000000-0000-4000-8000-000000000400", "inherited": true, "payload": {"state": "open"}},
+                {"stream_seq": 4, "event_type": "run/end-seed", "payload": {"eval_up_to_seq": 3}},
+                {
+                    "stream_seq": 3,
+                    "event_type": "txn/try",
+                    "vertex_id": "00000000-0000-4000-8000-000000000401",
+                    "scope_id": "00000000-0000-4000-8000-000000000400",
+                    "inherited": true,
+                    "payload": {"idempotency_key": "scope-400:hold", "deadline_at": "2026-08-23T00:00:00Z"}
+                }
+            ]
+        },
+        {
             "name": "unknown event fails closed",
             "valid": false,
             "expected_scope_state": "open",

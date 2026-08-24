@@ -12,6 +12,7 @@ type Event struct {
 	EventType string         `json:"event_type"`
 	ScopeID   string         `json:"scope_id,omitempty"`
 	Ignorable bool           `json:"ignorable,omitempty"`
+	Inherited bool           `json:"inherited,omitempty"`
 	Payload   map[string]any `json:"payload"`
 }
 
@@ -27,7 +28,6 @@ func Validate(events []Event) error {
 	sort.Slice(ordered, func(first, second int) bool { return ordered[first].StreamSeq < ordered[second].StreamSeq })
 	pivoted := map[string]bool{}
 	inheritedTryScopes := map[string]bool{}
-	seedSeen := false
 	bracketTerminal := map[string]string{}
 	for _, event := range ordered {
 		if _, known := knownEvents[event.EventType]; !known {
@@ -36,15 +36,11 @@ func Validate(events []Event) error {
 			}
 			return fmt.Errorf("unknown non-ignorable event type %q at stream_seq %d", event.EventType, event.StreamSeq)
 		}
-		if event.EventType == "run/end-seed" {
-			seedSeen = true
-			continue
-		}
-		if event.EventType == "txn/try" && !seedSeen {
+		if event.EventType == "txn/try" && event.Inherited {
 			inheritedTryScopes[event.ScopeID] = true
 		}
-		if seedSeen && inheritedTryScopes[event.ScopeID] && (event.EventType == "txn/confirm" || event.EventType == "txn/cancel") {
-			return fmt.Errorf("I7: inherited scope %s mutated after run/end-seed", event.ScopeID)
+		if !event.Inherited && inheritedTryScopes[event.ScopeID] && (event.EventType == "txn/confirm" || event.EventType == "txn/cancel") {
+			return fmt.Errorf("I7: inherited bracket for scope %s mutated by the fork", event.ScopeID)
 		}
 		switch event.EventType {
 		case "txn/pivot-passed":

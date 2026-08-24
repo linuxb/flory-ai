@@ -84,25 +84,74 @@ describe('PostgreSQL event store', () => {
         await Promise.all([first.end(), second.end()]);
     });
 
-    it('forks an immutable snapshot and preserves a no-substitution surface', async () => {
+    it('forks lazily, numbers own events above eval_up_to_seq, and reproduces a no-substitution surface after merge', async () => {
         const run = await plannerRun();
         const result = await engine.fork({
             source_run_id: run,
-            at_stream_seq: 3,
+            at_vertex_id: plannerId,
             substitutions: [],
+            eval_up_to_seq: 3,
             fold_mode: 'recorded',
             evaluator_pin: 'eval://identity@v1',
             projector_version: 'projector@v1',
             harness_state_version: 'harness@v1',
         });
+        expect(result.end_seed_seq).toBe(4);
+        expect(result.seed_event_count).toBe(2);
+        expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([3]);
+        expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([]);
         const source = await engine.readStream(run);
         const child = await engine.readStream(result.child_run_id);
-        expect(result.end_seed_seq).toBe(4);
         expect(replayIdentity(source, child).passed).toBe(true);
-        expect(child.filter((event) => event.event_type === 'run/end-seed')).toHaveLength(1);
+        expect(child.map((event) => event.stream_seq)).toEqual([1, 2, 3, 4]);
+        expect(child.every((event) => (event.event_type === 'run/end-seed' ? !event.inherited : event.inherited))).toBe(true);
     });
 
-    it('applies substitutions only in the child and prevents inherited bracket mutation', async () => {
+    it('substitutes pins only in the child and invalidates the causal descendants of the divergence vertex', async () => {
+        const run = await plannerRun();
+        const toolVertex = randomUUID();
+        const independentVertex = randomUUID();
+        await engine.appendEvents(run, [
+            {
+                event_type: 'vertex/created',
+                vertex_id: toolVertex,
+                parent_refs: [plannerId],
+                pin_version: 'tool://inventory.check@v1',
+                payload: {
+                    role: 'tool',
+                    tool: 'inventory.check',
+                    input: {sku: 'SKU-1'},
+                    retry_policy: {max_attempts: 1, initial_backoff_ms: 0, multiplier: 1, max_backoff_ms: 0},
+                    txn: {effect_class: 'none', mode: 'plain'},
+                },
+            },
+            {event_type: 'vertex/created', vertex_id: independentVertex, payload: {role: 'planner'}},
+        ]);
+        await coordinator.appendEvents(run, [
+            {event_type: 'vertex/succeeded', vertex_id: toolVertex, payload: {result: {stock: 3}}},
+            {event_type: 'vertex/succeeded', vertex_id: independentVertex, payload: {result: {}}},
+        ]);
+        const result = await engine.fork({
+            source_run_id: run,
+            at_vertex_id: plannerId,
+            substitutions: [{stream_seq: 2, pin_version: 'model://planner@v2'}],
+            eval_up_to_seq: 7,
+            fold_mode: 'recorded',
+            evaluator_pin: 'eval://identity@v1',
+            projector_version: 'projector@v1',
+            harness_state_version: 'harness@v1',
+        });
+        expect((await engine.readStream(run)).find((event) => event.stream_seq === 2)?.pin_version).toBe('model://planner@v1');
+        expect(result.end_seed_seq).toBe(8);
+        expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([5, 7]);
+        const child = await engine.readStream(result.child_run_id);
+        expect(child.find((event) => event.stream_seq === 2)?.pin_version).toBe('model://planner@v2');
+        expect(child.map((event) => event.stream_seq)).toEqual([1, 2, 5, 7, 8]);
+        expect(child.some((event) => event.vertex_id === toolVertex)).toBe(false);
+        expect(child.some((event) => event.event_type === 'vertex/succeeded' && event.vertex_id === plannerId)).toBe(false);
+    });
+
+    it('prevents fork-authored mutation of inherited brackets, wherever the inherited copy sits', async () => {
         const run = await plannerRun();
         const openScope = randomUUID();
         const key = `inherited-${run}`;
@@ -112,21 +161,21 @@ describe('PostgreSQL event store', () => {
         ]);
         const result = await engine.fork({
             source_run_id: run,
-            at_stream_seq: 3,
-            substitutions: [{stream_seq: 2, pin_version: 'model://planner@v2'}],
+            at_vertex_id: plannerId,
+            substitutions: [],
+            eval_up_to_seq: 5,
             fold_mode: 'recorded',
             evaluator_pin: 'eval://identity@v1',
             projector_version: 'projector@v1',
             harness_state_version: 'harness@v1',
         });
-        expect((await engine.readStream(run)).find((event) => event.stream_seq === 2)?.pin_version).toBe('model://planner@v1');
-        expect((await engine.readStream(result.child_run_id)).find((event) => event.stream_seq === 2)?.pin_version).toBe('model://planner@v2');
+        expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([3, 4, 5]);
         await expect(coordinator.appendEvents(result.child_run_id, [{event_type: 'txn/cancel', scope_id: openScope, payload: {idempotency_key: `scope-${key}`, phase: 'requested'}}])).rejects.toThrow(
             'inherited transaction bracket',
         );
     });
 
-    it('rejects fork boundaries in an open bracket or below the current pivot floor', async () => {
+    it('forks at any vertex: inside an open bracket and below the pivot floor', async () => {
         const openRun = await plannerRun();
         const openScope = randomUUID();
         const laterPlanner = randomUUID();
@@ -136,17 +185,17 @@ describe('PostgreSQL event store', () => {
         ]);
         await engine.appendEvents(openRun, [{event_type: 'vertex/created', vertex_id: laterPlanner, payload: {role: 'planner'}}]);
         await coordinator.appendEvents(openRun, [{event_type: 'vertex/succeeded', vertex_id: laterPlanner, payload: {result: {}}}]);
-        await expect(
-            engine.fork({
-                source_run_id: openRun,
-                at_stream_seq: 7,
-                substitutions: [],
-                fold_mode: 'recorded',
-                evaluator_pin: 'eval://identity@v1',
-                projector_version: 'projector@v1',
-                harness_state_version: 'harness@v1',
-            }),
-        ).rejects.toThrow('open transaction bracket');
+        const midBracket = await engine.fork({
+            source_run_id: openRun,
+            at_vertex_id: laterPlanner,
+            substitutions: [],
+            eval_up_to_seq: 7,
+            fold_mode: 'recorded',
+            evaluator_pin: 'eval://identity@v1',
+            projector_version: 'projector@v1',
+            harness_state_version: 'harness@v1',
+        });
+        expect(midBracket.end_seed_seq).toBe(8);
 
         const pivotRun = await plannerRun();
         const pivotScope = randomUUID();
@@ -157,16 +206,16 @@ describe('PostgreSQL event store', () => {
         expect((await client.query<{admit_pivot: boolean}>('SELECT admit_pivot($1, $2, $3)', [pivotRun, pivotScope, pivotVertex])).rows[0]?.admit_pivot).toBe(true);
         await client.end();
         await coordinator.appendEvents(pivotRun, [{event_type: 'txn/pivot-passed', scope_id: pivotScope, vertex_id: pivotVertex, payload: {}}]);
-        await expect(
-            engine.fork({
-                source_run_id: pivotRun,
-                at_stream_seq: 3,
-                substitutions: [],
-                fold_mode: 'recorded',
-                evaluator_pin: 'eval://identity@v1',
-                projector_version: 'projector@v1',
-                harness_state_version: 'harness@v1',
-            }),
-        ).rejects.toThrow('below the pivot floor');
+        const belowFloor = await engine.fork({
+            source_run_id: pivotRun,
+            at_vertex_id: plannerId,
+            substitutions: [],
+            eval_up_to_seq: 3,
+            fold_mode: 'recorded',
+            evaluator_pin: 'eval://identity@v1',
+            projector_version: 'projector@v1',
+            harness_state_version: 'harness@v1',
+        });
+        expect(belowFloor.end_seed_seq).toBe(4);
     });
 });

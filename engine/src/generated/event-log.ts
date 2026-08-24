@@ -54,8 +54,9 @@ export interface ForkSubstitution {
 }
 export interface ForkRequest {
     source_run_id: string;
-    at_stream_seq: number;
+    at_vertex_id: string;
     substitutions: ForkSubstitution[];
+    eval_up_to_seq: number;
     fold_mode: FoldMode;
     evaluator_pin: string;
     projector_version: string;

@@ -145,10 +145,11 @@
         },
         "forkRequest": {
             "type": "object",
-            "required": ["source_run_id", "at_stream_seq", "substitutions", "fold_mode", "evaluator_pin", "projector_version", "harness_state_version"],
+            "required": ["source_run_id", "at_vertex_id", "substitutions", "eval_up_to_seq", "fold_mode", "evaluator_pin", "projector_version", "harness_state_version"],
             "properties": {
                 "source_run_id": {"type": "string", "format": "uuid"},
-                "at_stream_seq": {"type": "integer", "minimum": 1},
+                "at_vertex_id": {"type": "string", "format": "uuid"},
+                "eval_up_to_seq": {"type": "integer", "minimum": 1},
                 "substitutions": {
                     "type": "array",
                     "items": {

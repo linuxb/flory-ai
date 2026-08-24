@@ -57,8 +57,9 @@ type ForkSubstitution struct {
 
 type ForkRequest struct {
 	SourceRunID         string             `json:"source_run_id"`
-	AtStreamSeq         int64              `json:"at_stream_seq"`
+	AtVertexID          string             `json:"at_vertex_id"`
 	Substitutions       []ForkSubstitution `json:"substitutions"`
+	EvalUpToSeq         int64              `json:"eval_up_to_seq"`
 	FoldMode            FoldMode           `json:"fold_mode"`
 	EvaluatorPin        string             `json:"evaluator_pin"`
 	ProjectorVersion    string             `json:"projector_version"`

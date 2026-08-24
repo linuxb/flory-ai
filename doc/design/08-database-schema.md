@@ -10,7 +10,7 @@ PostgreSQL has three development roles. `flory` owns migrations. `engine_role` c
 
 ## 2. Ground-Truth Tables
 
-`run(run_id, next_seq, created_at)` is the per-stream sequence allocator. `event_log` is hash partitioned by `run_id`, with `(run_id, stream_seq)` as its primary key and a non-foldable generated `global_seq` for operations only. Each row contains the event type, causal and scope columns, `pin_version`, explicit `ignorable`, JSON payload, and creation time.
+`run(run_id, next_seq, seed_floor, created_at)` is the per-stream sequence allocator; `seed_floor` is non-null only for fork runs, where it equals `eval_up_to_seq` and pins own-event numbering above it. `event_log` is hash partitioned by `run_id`, with `(run_id, stream_seq)` as its primary key and a non-foldable generated `global_seq` for operations only. Each row contains the event type, causal and scope columns, `pin_version`, explicit `ignorable`, an `inherited` provenance marker (true only on read-only copies from a fork's source stream), JSON payload, and creation time.
 
 `append_events(run_id, events)` locks the run row, increments `next_seq`, and inserts every supplied event inside the caller's transaction. A failed batch rolls back the counter and every row, so `stream_seq` stays contiguous and commit ordered within one stream. `global_seq` remains intentionally gappy and must never drive a fold.
 
@@ -29,7 +29,7 @@ No application role receives `UPDATE` or `DELETE` access to `event_log`. Shadowi
 
 Before an event is inserted, ownership validation rejects an engine attempt to append coordinator events, a coordinator attempt to append engine events, and an unknown event without `ignorable: true`. The inherited-copy function is engine-only and sets a transaction-local marker solely while reproducing a source stream into a fork; it is not a general ownership bypass.
 
-An insert trigger locks the scope and rejects `txn/cancel` after pivot admission or pivot passage. It also rejects a child `txn/confirm` or `txn/cancel` when the scope's `txn/try` was inherited before `run/end-seed`. After-insert triggers update `txn_scope` and `txn_bracket` in the same transaction, so the database state used for transaction safety cannot lag the log.
+An insert trigger locks the scope and rejects `txn/cancel` after pivot admission or pivot passage. It also rejects a `txn/confirm` or `txn/cancel` whenever the scope's `txn/try` carries the `inherited` provenance marker — the check keys on provenance, not position, so a bracket merged lazily after `run/end-seed` is protected identically to one copied in the seed. Reproducing inherited history through the copy function is exempt: an inherited copy of a historical cancel is not a fork-authored mutation. After-insert triggers update `txn_scope` and `txn_bracket` in the same transaction, so the database state used for transaction safety cannot lag the log.
 
 `admit_pivot` locks an open scope, verifies that every required try is sealed, moves the scope to `pivot-inflight`, and appends `vertex/started` atomically. `resolve_pivot_absent` is the only transition back to `open`, and is called only after an adapter status query proves that the irreversible effect did not happen. Once `txn/pivot-passed` is appended, only forward confirmation and retry remain.
 
@@ -37,14 +37,15 @@ Scope cancellation uses two `txn/cancel` phases. `requested` fences the whole sc
 
 ## 4. Fork Storage Transaction
 
-> **Design lag.** This section documents the **implemented** eager-copy fork, which predates the lazy causal fork semantics adopted in [01 §5.2](./01-jit-dag-and-event-log.md) ([ADR-005](./adr/adr-005-lazy-causal-fork-semantics.md)): any-vertex divergence, causal-descendant invalidation, and lazy merge up to `eval_up_to_seq`. The storage migration — a causal-slice seed instead of the frozen-tail copy below, and provenance-based inherited-try locking instead of the position-based `run/end-seed` check in §3 — is pending.
+The TypeScript engine implements the lazy causal fork of [ADR-005](./adr/adr-005-lazy-causal-fork-semantics.md) and [01 §5.2](./01-jit-dag-and-event-log.md) — `fork(source_stream, at_vertex_id, substitutions[], eval_up_to_seq)` — in one database transaction:
 
-The TypeScript engine performs a fork in one database transaction:
+1. Lock the source `run` row and validate that `eval_up_to_seq` names a recorded source position.
+2. Resolve the divergence vertex `at_vertex_id` — **any** vertex, with no planner, bracket, or pivot-floor restriction — and validate that every substitution names one of its pinned events.
+3. Compute the causal slice. With substitutions present, every causal descendant of the divergence vertex (derived via `parent_refs`) and the divergence vertex's own execution events are invalidated: their cause changed, so they are never copied and the fork regenerates that chain. With no substitutions nothing is invalidated and everything merges, which is what lets a no-substitution fork reproduce the source surface exactly.
+4. Create the child run with its counter preset to `eval_up_to_seq + 1` and `seed_floor = eval_up_to_seq`, append source-side `fork/created` provenance, then copy the seed — the inherited events at or before the divergence vertex — **preserving each source `stream_seq`** and marking every row `inherited`. A substitution changes only the named copy's `pin_version`.
+5. Append `run/end-seed` at `eval_up_to_seq + 1` as the child's first own event, carrying the fork provenance (`source_run_id`, `at_vertex_id`, `eval_up_to_seq`, substitutions) that later merges re-derive.
 
-1. Lock the source `run` row and record its terminal sequence as `source_tail_end_seq`.
-2. Validate that the requested boundary is a succeeded planner, outside an open bracket, and not below a prior pivot.
-3. Create the child, append source-side `fork/created` provenance, then copy source events through the frozen tail in source sequence order. A substitution changes only the named copied event's `pin_version`.
-4. Append `run/end-seed` as the child's first own event. Everything preceding it is inherited and read-only.
+Causally independent events after the divergence vertex are not copied eagerly. `mergeIndependentEvents(child_run_id, through_seq)` merges them lazily — re-deriving the same causal slice from the `run/end-seed` provenance, skipping sequences already present, and never merging past `eval_up_to_seq`. Merged rows are inherited copies like the seed: they keep their source `stream_seq` (always at or below `seed_floor`, so an inherited and an own sequence can never collide) and carry the `inherited` marker the §3 guard keys on. Inherited copies also never materialize live state: the transaction projections and the work queue skip them, so a fork can neither operate an inherited bracket nor schedule inherited vertices as coordinator work.
 
 The fork copies recorded semantics only. It does not call a tool or replay an external effect. The accepted modes are `recorded`, `model-live`, and `reads-live`; `writes-live` is not a fork API mode.
 

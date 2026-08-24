@@ -13,10 +13,15 @@ func TestValidateRejectsDuplicatePivotAndInheritedMutation(t *testing.T) {
 		{StreamSeq: 2, EventType: "txn/pivot-passed", ScopeID: "s", Payload: map[string]any{}}}); err == nil {
 		t.Fatal("expected duplicate pivot rejection")
 	}
-	if err := Validate([]Event{{StreamSeq: 1, EventType: "txn/try", ScopeID: "s", Payload: map[string]any{}},
-		{StreamSeq: 2, EventType: "run/end-seed", Payload: map[string]any{}},
-		{StreamSeq: 3, EventType: "txn/cancel", ScopeID: "s", Payload: map[string]any{"phase": "requested"}}}); err == nil {
+	if err := Validate([]Event{{StreamSeq: 1, EventType: "txn/try", ScopeID: "s", Inherited: true, Payload: map[string]any{}},
+		{StreamSeq: 4, EventType: "run/end-seed", Payload: map[string]any{}},
+		{StreamSeq: 5, EventType: "txn/cancel", ScopeID: "s", Payload: map[string]any{"phase": "requested"}}}); err == nil {
 		t.Fatal("expected inherited mutation rejection")
+	}
+	if err := Validate([]Event{{StreamSeq: 1, EventType: "txn/try", ScopeID: "s", Inherited: true, Payload: map[string]any{}},
+		{StreamSeq: 4, EventType: "run/end-seed", Payload: map[string]any{}},
+		{StreamSeq: 2, EventType: "txn/cancel", ScopeID: "s", Inherited: true, Payload: map[string]any{"phase": "requested"}}}); err != nil {
+		t.Fatalf("inherited copies of source history must stay valid: %v", err)
 	}
 }
 

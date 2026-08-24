@@ -16,6 +16,7 @@ function event(stream_seq: number, delta: number): StoredEvent {
         scope_id: null,
         pin_version: null,
         ignorable: false,
+        inherited: false,
         payload: {result: {inventory_delta: {sku: 'SKU-1', delta}}},
         created_at: '2026-01-01T00:00:00.000Z',
     };

@@ -15,6 +15,7 @@ function event(stream_seq: number, event_type: string, options: Partial<StoredEv
         scope_id: null,
         pin_version: null,
         ignorable: false,
+        inherited: false,
         payload: {},
         created_at: '2026-01-01T00:00:00.000Z',
         ...options,

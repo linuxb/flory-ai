@@ -7,19 +7,16 @@ export interface OracleResult {
     passed: boolean;
     detail?: string;
 }
-/** Detects mutations of transaction brackets inherited by a fork. */
+/** Detects fork-authored mutations of inherited transaction brackets, keyed on provenance rather than position. */
 export function noInheritedMutation(events: StoredEvent[]): OracleResult {
-    const seed = events.find((event) => event.event_type === 'run/end-seed');
-    if (!seed) return {name: 'O2.no_inherited_mutation', passed: true};
     const inheritedScopes = new Set(
         events
-            .filter((event) => event.event_type === 'txn/try' && event.stream_seq < seed.stream_seq)
+            .filter((event) => event.event_type === 'txn/try' && event.inherited)
             .map((event) => event.scope_id)
             .filter((id): id is string => Boolean(id)),
     );
-    const violation = events.find(
-        (event) => event.stream_seq > seed.stream_seq && (event.event_type === 'txn/cancel' || event.event_type === 'txn/confirm') && event.scope_id && inheritedScopes.has(event.scope_id),
-    );
+    if (!inheritedScopes.size) return {name: 'O2.no_inherited_mutation', passed: true};
+    const violation = events.find((event) => !event.inherited && (event.event_type === 'txn/cancel' || event.event_type === 'txn/confirm') && event.scope_id && inheritedScopes.has(event.scope_id));
     return violation ? {name: 'O2.no_inherited_mutation', passed: false, detail: `mutation at stream_seq ${violation.stream_seq}`} : {name: 'O2.no_inherited_mutation', passed: true};
 }
 /** Checks that a no-substitution fork reproduces its source surface. */

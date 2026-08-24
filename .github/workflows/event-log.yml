@@ -55,7 +55,7 @@ jobs:
           go-version: '1.25.x'
           cache-dependency-path: coordinator/go.sum
       - run: npm ci
-      - run: npm run db:migrate
+      - run: npm run db:setup
       - run: npm run verify
       - name: Verify the Distributed Transaction Coordinator
         working-directory: coordinator

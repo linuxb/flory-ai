@@ -1,24 +1,25 @@
 import {readdir, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {Client} from 'pg';
+import {databaseUrl, ownerTarget} from './config.js';
 
-const adminUrl = process.env.DATABASE_URL ?? 'postgresql://flory:flory-dev-password@127.0.0.1:5432/flory';
-const enginePassword = process.env.ENGINE_DB_PASSWORD ?? 'engine-dev-password';
-const coordinatorPassword = process.env.COORDINATOR_DB_PASSWORD ?? 'coordinator-dev-password';
-
-function sqlLiteral(value: string): string {
-    return `'${value.replaceAll("'", "''")}'`;
-}
-
-const client = new Client({connectionString: adminUrl});
-await client.connect();
+/**
+ * Applies pending migrations as the database owner. Roles and the database itself are cluster-level
+ * objects provisioned by `npm run db:bootstrap`, so this step needs no administrative privilege and
+ * writes only inside the configured database.
+ */
+const owner = ownerTarget();
+const client = new Client({connectionString: databaseUrl});
 try {
-    for (const [role, password] of [
-        ['engine_role', enginePassword],
-        ['coordinator_role', coordinatorPassword],
-    ] as const) {
+    await client.connect();
+} catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`cannot connect to ${owner.database} at ${owner.host}:${owner.port} as ${owner.role} (${detail}). Run \`npm run db:bootstrap\` first if the role or database does not exist yet.`);
+}
+try {
+    for (const role of ['engine_role', 'coordinator_role']) {
         const exists = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [role]);
-        if (exists.rowCount === 0) await client.query(`CREATE ROLE ${role} LOGIN PASSWORD ${sqlLiteral(password)}`);
+        if (exists.rowCount === 0) throw new Error(`application role ${role} does not exist; run \`npm run db:bootstrap\` to provision the Flory roles`);
     }
     await client.query('CREATE TABLE IF NOT EXISTS schema_migration (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())');
     const applied = new Set((await client.query<{version: string}>('SELECT version FROM schema_migration')).rows.map((row) => row.version));
@@ -29,6 +30,7 @@ try {
             await client.query(await readFile(join(process.cwd(), 'db/migrations', file), 'utf8'));
             await client.query('INSERT INTO schema_migration(version) VALUES ($1)', [file]);
             await client.query('COMMIT');
+            console.log(`applied ${file}`);
         } catch (error) {
             await client.query('ROLLBACK');
             throw error;

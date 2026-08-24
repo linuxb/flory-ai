@@ -17,16 +17,67 @@ This repository contains the architecture and design baseline plus an executable
 
 ## Local development
 
-Docker Compose provides a local PostgreSQL 17 service. It stores its data in the `postgres_data` named volume and exposes PostgreSQL only on `127.0.0.1`.
+Flory needs one PostgreSQL 16-or-newer server and does not care where it comes from. All connections
+are derived from `DATABASE_URL`, so choose whichever path matches your machine; the remaining steps
+are identical.
+
+### Using a PostgreSQL server you already run
+
+`npm run db:bootstrap` provisions the Flory roles and database inside an existing server, which keeps
+a server shared with other projects untouched apart from those roles and that database. It needs
+administrative credentials once: either the standard `PGUSER`/`PGPASSWORD` environment, or an
+explicit `FLORY_ADMIN_DATABASE_URL`.
 
 ```sh
-cp .env.example .env  # optional: change the local development credentials or port
-docker compose up -d postgres
-docker compose ps
+cp .env.example .env   # set DATABASE_URL if your server is not on 127.0.0.1:5432
 npm ci
-npm run db:migrate
+FLORY_ADMIN_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run db:setup
+```
+
+`db:setup` runs `db:bootstrap` and then `db:migrate`. Both are idempotent. Only `db:bootstrap` uses
+the administrative connection, because roles and databases are cluster-level objects; migrations run
+as the owner role from `DATABASE_URL` and write only inside the Flory database.
+
+### Using the optional container
+
+Contributors without a local server can start one from [`docker/compose.yml`](docker/compose.yml).
+The container creates the database and owner role itself, and because that owner is a superuser,
+`db:setup` needs no administrative credentials here. Data lives in the `postgres_data` named volume,
+and PostgreSQL is published only on `127.0.0.1`.
+
+```sh
+cp docker/.env.example docker/.env   # optional: change the container credentials or port
+npm ci
+npm run db:up
+npm run db:setup
+```
+
+Stop it with `npm run db:down`, which preserves the volume. To discard the local data as well, run
+`docker compose -f docker/compose.yml down -v`.
+
+### Verifying
+
+```sh
 npm run verify
 go -C coordinator test ./...
+```
+
+`npm run verify` reads `.env` automatically. Go does not, so export the two service connections when
+running the Coordinator integration tests:
+
+```sh
+FLORY_INTEGRATION=1 ENGINE_DATABASE_URL=postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory COORDINATOR_DATABASE_URL=postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory go -C coordinator test ./...
+```
+
+Both integration suites claim from the same work queue — which is global by design, because one
+worker pool serves every run — and both leave unfinished work behind. Each therefore expects an
+empty database and fails after the other has run, or after a second consecutive run of itself. CI
+never notices, because every job gets a fresh container. On a persistent local server, run
+`npm run db:refresh` before each integration suite to drop and re-migrate the Flory schema:
+
+```sh
+npm run db:refresh && npm run verify
+npm run db:refresh && go -C coordinator test ./...   # with the two URLs exported as above
 ```
 
 For an end-to-end local execution, start the deterministic adapter sandbox with `npm run sandbox`, then run the Coordinator with `go -C coordinator run ./cmd/coordinator`. Its health endpoints default to `127.0.0.1:8091`; production business adapters are intentionally not included.
@@ -34,10 +85,8 @@ For an end-to-end local execution, start the deterministic adapter sandbox with 
 The default connection string is `postgresql://flory:flory-dev-password@127.0.0.1:5432/flory`. Confirm access with:
 
 ```sh
-docker compose exec postgres psql -U flory -d flory -c 'SELECT version();'
+psql postgresql://flory:flory-dev-password@127.0.0.1:5432/flory -c 'SELECT version();'
 ```
-
-Stop the service with `docker compose down`. This preserves the named volume. To remove the local database as well, run `docker compose down -v`.
 
 ## Design guarantees
 
@@ -70,11 +119,11 @@ Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagram
 ```text
 .
 ├── .github/               # Repository automation and CI workflows
-├── .env.example           # Overrideable local PostgreSQL development settings
+├── .env.example           # Overrideable local connection and service settings
 ├── AGENTS.md              # Design invariants and contributor review checklist
 ├── coordinator/           # Go 1.25 Distributed Transaction Coordinator service
-├── compose.yml            # Local PostgreSQL development service
-├── db/                    # PostgreSQL migrations and local migration utilities
+├── db/                    # PostgreSQL migrations, bootstrap, and migration utilities
+├── docker/                # Optional containerized PostgreSQL for local development
 ├── doc/
 │   ├── design/            # Architecture and mechanism specifications
 │   │   ├── adr/           # Architecture decision records

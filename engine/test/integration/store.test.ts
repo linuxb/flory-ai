@@ -1,11 +1,12 @@
 import {randomUUID} from 'node:crypto';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {Client} from 'pg';
+import {coordinatorDatabaseUrl, engineDatabaseUrl} from '../../../db/config.js';
 import {EventStore} from '../../src/store.js';
 import {replayIdentity} from '../../src/harness/oracles.js';
 
-const engineUrl = process.env.ENGINE_DATABASE_URL ?? 'postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory';
-const coordinatorUrl = process.env.COORDINATOR_DATABASE_URL ?? 'postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory';
+const engineUrl = engineDatabaseUrl;
+const coordinatorUrl = coordinatorDatabaseUrl;
 const engine = new EventStore({connectionString: engineUrl, actor: 'engine'});
 const coordinator = new EventStore({connectionString: coordinatorUrl, actor: 'coordinator'});
 const plannerId = '00000000-0000-4000-8000-000000000101';

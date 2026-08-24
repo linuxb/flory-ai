@@ -1,3 +1,7 @@
+# Optional local PostgreSQL for contributors without an existing server.
+# Run it from the repository root with `npm run db:up`; settings come from `docker/.env`.
+# If you already run PostgreSQL 16 or newer locally, skip this file entirely and use
+# `npm run db:setup` against that server instead.
 name: flory
 
 services:

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-20
 - **Deciders:** Flory engine team
-- **Related:** [ADR-001](./adr-001-engine-language-split.md) (the Go coordinator is the component specified here), [ADR-004](./adr-004-case-specific-offline-fork-evaluation.md) (replan and offline-fork isolation enter the model)
+- **Related:** [ADR-001](./adr-001-engine-language-split.md) (the Go coordinator is the component specified here), [ADR-005](./adr-005-lazy-causal-fork-semantics.md) (replan and offline-fork isolation enter the model)
 - **Implemented by:** [Plan 001](../../plan/plan-001-tla-plus-specification.md), which stages this scope and holds the preconditions
 
 ## Context

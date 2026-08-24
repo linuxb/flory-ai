@@ -214,7 +214,7 @@ See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Para
 
 **In a live run**, scan for sealed `txn/try` events with no later scope confirm or completed scope cancel after `try_timeout_s`. Request one idempotent cancellation for the owning scope. Crash recovery uses the same sweep — it needs no marker of its own, because a resumed run re-projects its own log and every bracket in it belongs to that run ([01 §5.1](./01-jit-dag-and-event-log.md)).
 
-**In a fork**, the sweep is inverted into a prohibition. Every `txn/try` inherited before `run/end-seed` belongs to a live parent run, so the fork must **never** cancel or confirm it: doing so would release a real hold out from under a real order. This is the actual purpose of the end-seed marker — it separates "inherited, read-only" from "mine" ([01 §5.2](./01-jit-dag-and-event-log.md)). A fork that finds an inherited open bracket at its boundary must refuse the boundary rather than clear it.
+**In a fork**, the sweep is inverted into a prohibition. Every inherited `txn/try` — copied in the seed before `run/end-seed` or merged later as a causally independent event — belongs to a live parent run, so the fork must **never** cancel or confirm it: doing so would release a real hold out from under a real order. Inherited copies are read-only wherever they sit; `run/end-seed` merely closes the initial seed ([01 §5.2](./01-jit-dag-and-event-log.md)). A fork that inherits an open bracket neither clears it nor needs to avoid it — divergence may sit anywhere — it evaluates around the bracket with mocked responses or terminates lazily ([03 §2.4](./03-replan-and-recovery.md)).
 
 ## 5. Relation to Existing Work
 

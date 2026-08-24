@@ -136,7 +136,7 @@
                 <mxCell id="c-l1b" value="Assert byte-identical surfaces&#xa;Proves: projection and pin completeness&#xa;No model calls /  no tool calls&#xa;Use: replay CI and prompt diffs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B2F2BB;fontSize=11;strokeWidth=2;fontFamily=LXGW WenKai TC;strokeColor=#2F9E44;fontColor=#2F9E44;" parent="1" vertex="1">
                     <mxGeometry x="70" y="950" width="420" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="c-l2a" value="fork(stream_seq) + pin substitutions, fold_mode: model-live" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;strokeColor=#1971C2;fontColor=#1971C2;" parent="1" vertex="1">
+                <mxCell id="c-l2a" value="fork(at_vertex_id, eval_up_to_seq) + pin substitutions, fold_mode: model-live" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;strokeColor=#1971C2;fontColor=#1971C2;" parent="1" vertex="1">
                     <mxGeometry x="590" y="860" width="420" height="55" as="geometry"/>
                 </mxCell>
                 <mxCell id="c-l2b" value="Compare plans for this history&#xa;Measures: check-rule verdict, plan size, model cost, judge score&#xa;Recorded tool observations stay fixed&#xa;Every side-effecting node is skipped" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#A5D8FF;fontSize=11;strokeWidth=2;fontFamily=LXGW WenKai TC;strokeColor=#1971C2;fontColor=#1971C2;" parent="1" vertex="1">
@@ -157,7 +157,7 @@
                 <mxCell id="ec3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;strokeColor=#F08C00;" parent="1" source="c-l3a" target="c-l3b" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="an-triple" value="Complete provenance belongs in fork/created: source run + at_stream_seq + substitutions + fold_mode + evaluator pin + projector_version + harness_state_version.&amp;nbsp;&lt;div&gt;Missing any versioned dependency makes the historical result impossible to reproduce.&lt;/div&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;fontColor=#E8590C;" parent="1" vertex="1">
+                <mxCell id="an-triple" value="Complete provenance belongs in fork/created: source run + at_vertex_id + eval_up_to_seq + substitutions + fold_mode + evaluator pin + projector_version + harness_state_version.&amp;nbsp;&lt;div&gt;Missing any versioned dependency makes the historical result impossible to reproduce.&lt;/div&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;fontColor=#E8590C;" parent="1" vertex="1">
                     <mxGeometry x="40" y="1100" width="1520" height="50" as="geometry"/>
                 </mxCell>
                 <mxCell id="t-d" value="D. One example, three views - the same log projected to a DAG and then to planner context. Note that completion order (seq) and context order (vertex_id) deliberately disagree." style="text;html=1;align=left;verticalAlign=middle;fontSize=15;fontStyle=1;fontFamily=LXGW WenKai TC;fontColor=#6741D9;" parent="1" vertex="1">
@@ -247,7 +247,7 @@
                 <mxCell id="d-note" value="Why vertex_id and never seq: v-b2 and v-b7 are parallel siblings with no dependency between them, so seq only records which HTTP response arrived first - network jitter, not business meaning.&amp;nbsp;&lt;div&gt;Ordering context by seq would make the same facts produce different prompts across runs, breaking replay determinism (a recorded log would no longer match) and destroying prompt-cache prefix stability. Lexicographic vertex_id is arbitrary but stable, which is exactly what is required.&lt;/div&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontFamily=LXGW WenKai TC;fontColor=#1971C2;" parent="1" vertex="1">
                     <mxGeometry x="40" y="1540" width="1520" height="60" as="geometry"/>
                 </mxCell>
-                <mxCell id="t-e" value="E. Fork as a counterfactual - immutable history, branch, substitute a pin, merge the tail, fold and compare" style="text;html=1;align=left;verticalAlign=middle;fontColor=#6741D9;fontSize=15;fontFamily=LXGW WenKai TC;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="t-e" value="E. Fork as a lazy causal counterfactual - immutable history, branch at any vertex, substitute a pin, invalidate causal descendants, merge independent events, fold and compare" style="text;html=1;align=left;verticalAlign=middle;fontColor=#6741D9;fontSize=15;fontFamily=LXGW WenKai TC;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="40" y="1760" width="1400" height="30" as="geometry"/>
                 </mxCell>
                 <mxCell id="e-src-lbl" value="source stream - run A (immutable)" style="text;html=1;align=left;verticalAlign=middle;fontColor=#0C8599;fontSize=13;fontFamily=LXGW WenKai TC;fontStyle=1;" parent="1" vertex="1">
@@ -286,25 +286,31 @@
                 <mxCell id="e-ea5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0C8599;strokeWidth=2;fontColor=#0C8599;endArrow=block;fontFamily=LXGW WenKai TC;" parent="1" source="e-a5" target="e-a6" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-src-note" value="pin_version on s2 = tool://carrier.quote@v4&lt;br&gt;history is never edited" style="text;html=1;align=left;verticalAlign=middle;fontColor=#0C8599;fontSize=11;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-src-note" value="pin_version on s3 = model://claude-sonnet-5@2026-06&lt;br&gt;history is never edited" style="text;html=1;align=left;verticalAlign=middle;fontColor=#0C8599;fontSize=11;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="740" y="1846" width="420" height="40" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-fork-lbl" value="fork at stream_seq = s3 to run B" style="text;html=1;align=left;verticalAlign=middle;fontColor=#6741D9;fontSize=13;fontFamily=LXGW WenKai TC;fontStyle=1;" parent="1" vertex="1">
+                <mxCell id="e-aw1" value="w1&lt;br&gt;webhook" style="ellipse;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                    <mxGeometry x="190" y="1896" width="38" height="38" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-ew1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#0C8599;strokeWidth=1.5;endArrow=block;fontFamily=LXGW WenKai TC;exitX=0.5;exitY=1;entryX=0;entryY=0.5;" parent="1" source="e-a1" target="e-aw1" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e-fork-lbl" value="fork at vertex = s3 (lazy eval) to run B" style="text;html=1;align=left;verticalAlign=middle;fontColor=#6741D9;fontSize=13;fontFamily=LXGW WenKai TC;fontStyle=1;" parent="1" vertex="1">
                     <mxGeometry x="40" y="1946" width="340" height="24" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-b3" value="s3&lt;br&gt;inherit" style="ellipse;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-b3" value="s3&#39;&lt;br&gt;substituted" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFC9C9;strokeColor=#E03131;fontColor=#E03131;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="310" y="1986" width="38" height="38" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-b4" value="s4&#39;&lt;br&gt;substituted" style="ellipse;whiteSpace=wrap;html=1;fillColor=#FFC9C9;strokeColor=#E03131;fontColor=#E03131;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-b4" value="n1&lt;br&gt;new chain" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="430" y="1986" width="38" height="38" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-b5" value="s5&lt;br&gt;replayed" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-b5" value="w1&lt;br&gt;merged" style="ellipse;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="550" y="1986" width="38" height="38" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-b6" value="s6&lt;br&gt;replayed" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-b6" value="n2&lt;br&gt;mocked" style="ellipse;whiteSpace=wrap;html=1;fillColor=#B2F2BB;strokeColor=#2F9E44;fontColor=#2F9E44;fontSize=10;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="670" y="1986" width="38" height="38" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-brk" value="branch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;fontColor=#6741D9;endArrow=block;fontFamily=LXGW WenKai TC;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" parent="1" source="e-a3" target="e-b3" edge="1">
+                <mxCell id="e-brk" value="branch + substitute pin" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;fontColor=#6741D9;endArrow=block;fontFamily=LXGW WenKai TC;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" parent="1" source="e-a3" target="e-b3" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
                 <mxCell id="e-eb3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;fontColor=#6741D9;endArrow=block;fontFamily=LXGW WenKai TC;" parent="1" source="e-b3" target="e-b4" edge="1">
@@ -316,19 +322,19 @@
                 <mxCell id="e-eb5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=2;fontColor=#2F9E44;endArrow=block;fontFamily=LXGW WenKai TC;" parent="1" source="e-b5" target="e-b6" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-mg1" value="merge tail: effects replay under the new pin" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=2;fontColor=#2F9E44;endArrow=block;fontFamily=LXGW WenKai TC;exitX=0.5;exitY=1;entryX=0.5;entryY=0;dashed=1;" parent="1" source="e-a5" target="e-b5" edge="1">
+                <mxCell id="e-mg1" value="merge: causally independent" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6741D9;strokeWidth=2;fontColor=#6741D9;endArrow=block;fontFamily=LXGW WenKai TC;exitX=1;exitY=0.5;entryX=0.5;entryY=0;dashed=1;" parent="1" source="e-aw1" target="e-b5" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-mg2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#2F9E44;strokeWidth=2;fontColor=#2F9E44;endArrow=block;fontFamily=LXGW WenKai TC;exitX=0.5;exitY=1;entryX=0.5;entryY=0;dashed=1;" parent="1" source="e-a6" target="e-b6" edge="1">
+                <mxCell id="e-mg2" value="s4-s6 descendants of s3: invalidated, regenerated" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E03131;strokeWidth=2;fontColor=#E03131;endArrow=block;fontFamily=LXGW WenKai TC;exitX=0.5;exitY=1;entryX=0.5;entryY=0;dashed=1;" parent="1" source="e-a4" target="e-b4" edge="1">
                     <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-sub-note" value="substitution = replace pin_version only&lt;br&gt;tool://carrier.quote@v5&lt;br&gt;everything else about the event is inherited" style="text;html=1;align=left;verticalAlign=middle;fontColor=#E03131;fontSize=11;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-sub-note" value="substitution = replace pin_version only: model://claude-sonnet-5@2026-08 on s3&#39;&lt;br&gt;descendants s4-s6 invalidated → n1, n2 regenerated (mocked, no writes)&lt;br&gt;independent w1 merged · lazy: execution stops at eval_up_to_seq = s6" style="text;html=1;align=left;verticalAlign=middle;fontColor=#E03131;fontSize=11;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="740" y="1976" width="430" height="56" as="geometry"/>
                 </mxCell>
                 <mxCell id="e-sfA" value="surface A&lt;br&gt;fold(run A, s6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#99E9F2;strokeColor=#0C8599;fontColor=#0C8599;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="180" y="2078" width="200" height="50" as="geometry"/>
                 </mxCell>
-                <mxCell id="e-sfB" value="surface B&lt;br&gt;fold(run B, s6&#39;)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-sfB" value="surface B&lt;br&gt;fold(run B, eval_up_to_seq = s6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;strokeColor=#6741D9;fontColor=#6741D9;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="430" y="2078" width="200" height="50" as="geometry"/>
                 </mxCell>
                 <mxCell id="e-eval" value="evaluator&lt;br&gt;eval://plan-admissibility@v2&lt;br&gt;(scenario-specific, versioned)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;strokeColor=#F08C00;fontColor=#F08C00;fontSize=12;strokeWidth=2;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
@@ -392,7 +398,7 @@
                         <mxPoint as="offset"/>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="e-foot" value="A fork is a paired counterfactual on one history. Report that case, its substitutions, unverified writes, and limitations; unrelated ToB runs are not parallel comparison units.&amp;nbsp;&lt;div&gt;A fork with no substitutions must reproduce the source surface exactly; any difference means an unpinned dependency leaked into the pipeline.&lt;/div&gt;" style="text;html=1;align=left;verticalAlign=middle;fontColor=#1971C2;fontSize=12;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
+                <mxCell id="e-foot" value="A fork is a paired counterfactual on one history. Report that case, its substitutions, unverified writes, and limitations; unrelated ToB runs are not parallel comparison units.&amp;nbsp;&lt;div&gt;A fork with no substitutions must reproduce the source surface exactly; any difference means an unpinned dependency leaked into the pipeline.&lt;/div&gt;&lt;div&gt;Forks are causal and lazy: descendants are invalidated, independent events merge, eval blocks at target seq.&lt;/div&gt;" style="text;html=1;align=left;verticalAlign=middle;fontColor=#1971C2;fontSize=12;fontFamily=LXGW WenKai TC;" parent="1" vertex="1">
                     <mxGeometry x="40" y="2320" width="1400" height="50" as="geometry"/>
                 </mxCell>
             </root>

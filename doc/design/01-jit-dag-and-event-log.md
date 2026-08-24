@@ -15,7 +15,7 @@
 - Calls a model with linearized execution context, the task goal, and a prompt assembled from harness-state (see [04](./04-refine-and-harness-state.md)).
 - Produces a **sub-DAG proposal**: tool-caller nodes, zero or more downstream planner nodes (decision points), and declared transaction-scope boundaries and attributes (see [02](./02-transaction-model.md)).
 - A proposal must pass check-rules before it is frozen for execution. Rejection returns the violations to the planner for regeneration.
-- The planner is a **replan anchor**: a fork boundary may only be placed at a closed planner vertex.
+- The planner is an **online replan anchor**: a replan boundary may only be placed at a closed planner vertex. Offline forks, however, are not bound by this and may occur at any vertex.
 
 ### 2.2 Tool-caller node
 
@@ -67,7 +67,7 @@ Not stored here: raw model input and output, which live in blob storage referenc
 
 **Every intra-run reference uses `stream_seq`** — `replan/boundary.boundary_seq`, `subgraph/shadowed` ranges, `fork/created.boundary_seq`. Cross-run references, such as `evidence_seqs` in harness-state ([04](./04-refine-and-harness-state.md)), must be `(run_id, stream_seq)` pairs; a bare number is ambiguous.
 
-A fork (§5.2) inherits the prefix with the source stream's `stream_seq` values unchanged and continues numbering after `seed_length`. `PRIMARY KEY (run_id, stream_seq)` stays satisfied because `run_id` differs.
+A fork (§5.2) copies inherited events — the divergence vertex's causal ancestors, plus lazily merged causally independent events — with the source stream's `stream_seq` values unchanged, and numbers its own events above `eval_up_to_seq` so an inherited seq and an own seq can never collide. `PRIMARY KEY (run_id, stream_seq)` stays satisfied because `run_id` differs.
 
 ### 3.1.1 Projections and their indexes
 
@@ -108,8 +108,8 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | `vertex/retried` | Idempotent retry number and backoff | executor |
 | `subgraph/shadowed` | Replan shadowed a failed subtree; payload names affected seqs | engine |
 | `replan/boundary` | In-place replan: selected `boundary_seq`, planner vertex, reason, cancelled scopes. No new run is created (§5.1) | engine |
-| `fork/created` | **Offline evaluation only** (§5.2): source run, `at_stream_seq`, seed length, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` | engine |
-| `run/end-seed` | First own event of a fork; everything before it is inherited and read-only (§5.2) | engine |
+| `fork/created` | **Offline evaluation only** (§5.2): source run, `at_vertex_id`, `eval_up_to_seq`, seed length, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` | engine |
+| `run/end-seed` | First own event of a fork, closing its inherited seed; every inherited copy — in the seed or merged later — is read-only (§5.2) | engine |
 | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | engine/executor |
 | `budget/charged` | Token and cost accounting | engine |
 
@@ -163,7 +163,7 @@ The function is pure. The same log prefix and harness-state version produce the 
 
 ## 5. Replanning In Place, and Forking for Offline Evaluation
 
-Flory deliberately **splits** what dsh unifies. dsh makes resume, fork, and replay one primitive because a session is a cheap local object whose identity carries no external meaning. A Flory run is a **business process** — one order, one replenishment — so run identity has business meaning, and the mechanisms must be kept apart. The current decision and rejected alternatives are recorded in [ADR-004](./adr/adr-004-case-specific-offline-fork-evaluation.md), which supersedes ADR-002.
+Flory deliberately **splits** what dsh unifies. dsh makes resume, fork, and replay one primitive because a session is a cheap local object whose identity carries no external meaning. A Flory run is a **business process** — one order, one replenishment — so run identity has business meaning, and the mechanisms must be kept apart. The current decision and rejected alternatives are recorded in [ADR-005](./adr/adr-005-lazy-causal-fork-semantics.md).
 
 Three mechanisms, three purposes:
 
@@ -184,26 +184,29 @@ Creating a child run online would buy nothing and cost two real things:
 
 Crash recovery is likewise **not** a fork: it is a resume, achieved by re-projecting the same stream.
 
-### 5.2 Fork is a counterfactual on an immutable history
+### 5.2 Fork is a lazy causal counterfactual on an immutable history
 
-The event log is **immutable history**. Its purpose is that the context state at any moment can be folded from it, so the natural way to ask a counterfactual question is not to mutate history but to branch it — the same shape as a version-control graph.
+The event log is **immutable history**. Its purpose is that the context state at any moment can be folded from it. To ask a counterfactual question, we do not mutate history; we branch it into a new run. 
+
+Because forks are strictly for **offline evaluation**, they are completely decoupled from online transaction constraints. A fork is **not** bound by pivot floors, nor is it restricted to planner vertices. It can occur at *any* vertex to evaluate any counterfactual—whether swapping a model in a planner, changing a tool version at a tool-caller node, or injecting a mock response for dry-run simulation.
 
 ```
-fork(source_stream, at_stream_seq, substitutions[]) → new run
+fork(source_stream, at_vertex_id, substitutions[], eval_up_to_seq) → new run
 ```
 
-The mechanics, in order:
+The mechanics of a fork operate on the principle of **Causal Chain Evaluation**:
 
-1. **Branch.** A new run is created, inheriting the source stream's events up to `at_stream_seq` unchanged.
-2. **Substitute.** One or more inherited events have their **`pin_version` replaced** (§5.3). Nothing else about an event can be edited: history is immutable, and a substitution is expressed as a different pinned version of the same event, in the new run.
-3. **Merge the tail.** The source stream's events *after* `at_stream_seq` are merged into the new run and **their effects are replayed there**. This is the step that makes the result a counterfactual rather than a truncation: the question being asked is "given that everything else that happened still happened, what changes if this one event had been pinned differently?"
-4. **Fold and compare.** Any `stream_seq` of any stream can be folded into a surface (§4). An evaluation compares two surfaces — one from the source stream, one from the fork.
+1. **Branch at any vertex.** A new run is created. The targeted node `at_vertex_id` becomes the divergence point. 
+2. **Substitute and Invalidate Causality.** One or more events at or after the divergence point have their **`pin_version` replaced** (e.g., tool version, model endpoint). By changing the divergence vertex, **all its causal descendants (derived via `parent_refs`) are strictly invalidated**. They will not be inherited because the cause has changed, so the new run must generate a new resulting sub-DAG, new tool calls, and new transaction events to replace them.
+3. **Merge Causally Independent Events.** Not all events after the divergence point are causal descendants. Events that have no causal link to the forked vertex (e.g., sibling parallel branches, external user inputs, out-of-band webhook events) are still valid. These causally independent events are merged and replayed onto the new run up to the requested evaluation sequence.
+4. **Lazy Evaluation.** A fork is **lazy**. It does not automatically run to completion. Evaluation happens by specifying a target `seq` from the source run (`eval_up_to_seq`), and the engine only executes the new causal chain and replays independent events up to that sequence. This produces a comparable fold.
+5. **Mocking and Blocked Folds.** Because different fork strategies require different levels of execution, `fold_mode` determines how far execution proceeds. A strategy might dictate "no live LLM calls." In this case, the fold executes only up to context assembly and blocks, producing just the context prompt (ideal for prompt diff evaluation). For deeper simulations, the system can inject **mocked tool responses** to continue dry-running the new causal chain without hitting real endpoints.
 
-See region E of [diagrams/projection.drawio](./diagrams/projection.drawio) for the branch-and-merge graph.
+Inherited events are **read-only copies** wherever they sit: in particular a fork never cancels or confirms an inherited `txn/try`, because that hold belongs to a live source run — an inherited open bracket is history to mock around or terminate lazily at, never to mutate ([02 §4.4](./02-transaction-model.md), [03 §2.4](./03-replan-and-recovery.md)).
 
-Boundary rules are unchanged from a replan boundary ([03 §2.1](./03-replan-and-recovery.md)): the fork point must be a succeeded planner vertex outside every open transaction bracket and at or after the most recent `txn/pivot-passed`. An illegal point is rejected, never silently trimmed.
+See region E of [diagrams/projection.drawio](./diagrams/projection.drawio) for the causal branch-and-merge graph.
 
-Two properties of the fork are preserved from the earlier design and remain load-bearing. The child's first own event is `run/end-seed`, and **everything before it is inherited and read-only** — in particular the child must never cancel or confirm an inherited `txn/try`, because that hold belongs to a real order still in flight ([02 §4.4](./02-transaction-model.md)). And **forking never replays the external world**: inventory holds and logistics bookings are untouched in either direction, which is what makes the whole mechanism safe to run against production history.
+This architecture ensures that forks perfectly isolate the causal impact of a single counterfactual change, without being artificially constrained by production recovery boundaries like pivots.
 
 ### 5.3 `pin_version`: what a substitution actually changes
 

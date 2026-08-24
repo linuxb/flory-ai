@@ -26,7 +26,7 @@ Model calls are non-deterministic, so any assertion that depends on a live model
 | Tier | Planner | Assertion strength | Covers | Needs API key |
 |---|---|---|---|---|
 | **T-A pure function** | none | exact equality | check-rules R1–R11, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff (discipline 28) | no |
-| **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, in-place replan and fork/substitute/merge semantics, orphan-try sweep, crash recovery | no |
+| **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, in-place replan and lazy causal fork semantics, orphan-try sweep, crash recovery | no |
 | **T-C live planner** | real model | statistical thresholds + guardrails | JIT planning quality, plan admissibility rate, token economics | yes |
 
 ### 2.1 T-B is the primary tier
@@ -170,7 +170,7 @@ Each row exists to kill one specific accident. A scenario that cannot fail if a 
 | S9 | compensation registered as snapshot restore | rejected at tool registration, before any run starts | O1 | T-A |
 | S10 | `inventory.commit` returns `unknown_outcome`, no status query exists | L4 suspension plus a reconciliation task; no guess, no automatic compensation | O2, O3 | T-B |
 | S11 | crash between `vertex/created` and effect, then restart | orphan `txn/try` detected by the unmatched-try sweep after `try_timeout_s` (02 §4.4) and idempotently cancelled | O1, O2 | T-B (partial in Phase 1, full in Phase 2) |
-| S11b | **fork** at a boundary that inherits a half-open `txn/try` from a live parent | **negative test**: the child identifies the inherited try relative to `run/end-seed` and **must not** cancel or confirm it — that hold belongs to a real in-flight order. The child refuses the boundary instead. A cancel here is a data-plane incident, not a test failure only (01 §5.2, 02 §4.4) | O1, O2.no_inherited_mutation | T-B |
+| S11b | **fork** whose divergence vertex sits inside an open txn bracket, inheriting a half-open `txn/try` from a live parent | **negative test**: the divergence is legal, but the inherited try is read-only — the child appends no `txn/confirm` or `txn/cancel` for it, evaluating around the bracket with mocked responses or terminating lazily at `eval_up_to_seq`. A cancel here is a data-plane incident, not a test failure only (01 §5.2, 02 §4.4) | O1, O2.no_inherited_mutation | T-B |
 | S11c | fork evaluated at `fold_mode: reads-live` whose plan contains `logistics.book` (`irreversible`) and `logistics.quote` (`none`) | the quote **is** executed and priced into the returned plan; the booking is skipped and recorded as an unverified estimate. Ledger unchanged; evaluation budget charged for the quote only (05 §3.2) | O1, O2 | T-B |
 | S12 | `duplicate_delivery` on `payment.charge` | exactly one charge in the ledger | O1 | T-B (Phase 2) |
 | S13 | **information dependence**: the same `goal_prompt` scenario run twice, differing only in an injected fact — `inventory.check` returns 20 units in variant 1 and 0 units in variant 2 | the sub-DAGs frozen **after** the planner that consumes that fact must **differ** (variant 2 must source or substitute). Identical plans prove the graph was pre-baked rather than JIT, which the depth assertion alone cannot detect | O4.info_dependence | T-B, promoted to T-C |
@@ -197,13 +197,14 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 |---|---|
 | every `txn/try` has exactly one matching `txn/confirm` or `txn/cancel` | 02 §4.1 |
 | no `txn/cancel` appears after `txn/pivot-passed` in the same scope | 15 |
-| every `replan/boundary` and every `fork/created` boundary sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)) | 16 |
-| no such boundary precedes the most recent `txn/pivot-passed` (**floor condition**, 03 §2.1 (ii)) | 15 |
+| every `replan/boundary` sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)); offline forks are exempt (01 §5.2) | 16 |
+| no `replan/boundary` precedes the most recent `txn/pivot-passed` (**floor condition**, 03 §2.1 (ii)); forks are likewise exempt | 15 |
 | **witness completeness**: every ancestor planner of the failed vertex, enumerated by `parent_refs` traversal, appears in the `replan/boundary` candidate list with either a published cost or a closed-vocabulary rejection reason | 03 §4.2 |
 | **witness minimality**: the selected boundary has the lowest **published** cost among candidates not marked rejected; the oracle never recalculates the cost | 03 §4.2 |
 | **witness honesty**: each rejection reason is factually true of the log — `open_bracket` requires an unmatched `txn/try` before that vertex, `below_floor` requires a later `txn/pivot-passed`, `savepoint_precedes` requires the cancelled scope's savepoint to precede the candidate | 03 §4.2 |
 | **no online fork**: an online replan appends `replan/boundary` in the same stream; `fork/created` appears only for offline evaluation (01 §5) | 1, 2 |
-| **no inherited mutation**: a fork appends no `txn/*` event referencing a scope opened before its `run/end-seed` | 02 §4.4 |
+| **no inherited mutation**: a fork appends no `txn/*` event referencing an inherited scope — one whose `txn/try` is a copy from the source stream | 02 §4.4 |
+| **causal inheritance**: a fork inherits no causal descendant (via `parent_refs`) of its divergence vertex, and every merged event is causally independent of it | 01 §5.2 |
 | a fork evaluation invokes no tool above its declared `fold_mode`, and never a write | 01 §5.4, discipline 7e |
 | a no-substitution fork reproduces the source surface exactly | discipline 7d |
 | no row is ever updated or deleted; shadowing is an event | 1, 2 |
@@ -288,7 +289,7 @@ S13 proves planning *is* JIT; it does not show JIT helped a particular run. Fork
 
 ### 8.3 Corpus reporting
 
-A corpus is a versioned list of explicit `(run_id, at_stream_seq)` pairs with documented inclusion criteria. Fold each source and fork independently, then publish the case table and descriptive groupings by task type, SKU-count bucket, pivot presence, and `error_class`. Never hide contradictory cases behind one aggregate number, and never use a corpus result as automatic production authorization.
+A corpus is a versioned list of explicit `(run_id, at_vertex_id, eval_up_to_seq)` tuples with documented inclusion criteria. Fold each source and fork independently, then publish the case table and descriptive groupings by task type, SKU-count bucket, pivot presence, and `error_class`. Never hide contradictory cases behind one aggregate number, and never use a corpus result as automatic production authorization.
 
 ## 9. Live-Model Qualification Tier (T-C)
 

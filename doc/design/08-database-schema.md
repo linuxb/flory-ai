@@ -37,6 +37,8 @@ Scope cancellation uses two `txn/cancel` phases. `requested` fences the whole sc
 
 ## 4. Fork Storage Transaction
 
+> **Design lag.** This section documents the **implemented** eager-copy fork, which predates the lazy causal fork semantics adopted in [01 §5.2](./01-jit-dag-and-event-log.md) ([ADR-005](./adr/adr-005-lazy-causal-fork-semantics.md)): any-vertex divergence, causal-descendant invalidation, and lazy merge up to `eval_up_to_seq`. The storage migration — a causal-slice seed instead of the frozen-tail copy below, and provenance-based inherited-try locking instead of the position-based `run/end-seed` check in §3 — is pending.
+
 The TypeScript engine performs a fork in one database transaction:
 
 1. Lock the source `run` row and record its terminal sequence as `source_tail_end_seq`.

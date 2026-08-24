@@ -108,7 +108,7 @@ Validation rejects global-scope overreach because global is read-only during loc
 prime-agent's `expectedOutcome` is free text and is not verified. Flory replaces it with a reproducible offline gate:
 
 - Every refine creates `harness_state@vN`; evaluation substitutes that version into forks of selected historical runs while keeping every other inherited event unchanged.
-- `expected_outcome` is a measurable structure, for example `{evaluator_ref, metrics, acceptance_rules, corpus_ref}`. `corpus_ref` resolves to explicit `(run_id, at_stream_seq)` pairs rather than an undifferentiated traffic window.
+- `expected_outcome` is a measurable structure, for example `{evaluator_ref, metrics, acceptance_rules, corpus_ref}`. `corpus_ref` resolves to explicit `(run_id, at_vertex_id, eval_up_to_seq)` tuples rather than an undifferentiated traffic window.
 - Each source/fork pair is evaluated independently at a declared `fold_mode`. Exact prompt diffs and deterministic invariant checks are hard gates; model and live-read scores are recorded with their evaluator pins and limitations.
 - A refine that fails any hard gate is rejected before promotion. Passing cases produce a reviewable recommendation, not automatic production authorization, because unrelated ToB histories are not parallel samples.
 - Rollback remains mechanical: replay the stored inverse edits and record a new versioned refinement event. In production it is triggered by an absolute safety guardrail or an operator decision, never by a cross-case comparative estimate.

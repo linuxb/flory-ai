@@ -1,6 +1,6 @@
 # Plan 002: Event Log Storage and Fork API Implementation
 
-> Status: Implemented storage-core v0.1 | Implements: [ADR-004](../design/adr/adr-004-case-specific-offline-fork-evaluation.md) | Specifications: [01](../design/01-jit-dag-and-event-log.md), [05](../design/05-context-aggregation-and-offline-evaluation.md), [06](../design/06-validation-harness.md), [08](../design/08-database-schema.md)
+> Status: Implemented storage-core v0.1 | Implements: [ADR-005](../design/adr/adr-005-lazy-causal-fork-semantics.md) (storage-core v0.1 predates its lazy causal mechanics; see [08 §4](../design/08-database-schema.md)) | Specifications: [01](../design/01-jit-dag-and-event-log.md), [05](../design/05-context-aggregation-and-offline-evaluation.md), [06](../design/06-validation-harness.md), [08](../design/08-database-schema.md)
 
 ## Delivered Scope
 

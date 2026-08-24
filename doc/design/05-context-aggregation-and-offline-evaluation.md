@@ -82,14 +82,15 @@ Because the log is immutable and any `stream_seq` folds into a surface, an evalu
 ```
 evaluate({
   source_stream:  run_id,
-  at_stream_seq:  4172,                       // legal fork point (03 §2.1 boundary rules)
+  at_vertex_id:   "v-4109",                   // divergence point — any vertex (01 §5.2)
   substitutions:  [{ stream_seq: 4109, pin_version: "model://claude-sonnet-5@2026-08" }],
+  eval_up_to_seq: 4172,                       // lazy: execute and merge no further than this
   fold_mode:      "model-live",               // 01 §5.4 ladder
   evaluator:      "eval://plan-admissibility@v2"
 }) → evaluation_result
 ```
 
-The engine forks, substitutes the pins, merges and replays the source tail, then hands the evaluator **two surfaces** — one folded from the source stream, one from the fork — at comparable positions. The evaluator is scenario-specific and owns the entire notion of "better":
+The engine forks at the divergence vertex, substitutes the pins, invalidates the vertex's causal descendants, regenerates that chain while lazily merging causally independent events up to `eval_up_to_seq`, then hands the evaluator **two surfaces** — one folded from the source stream, one from the fork — at comparable positions. The evaluator is scenario-specific and owns the entire notion of "better":
 
 | Evaluator | Compares | Typical use |
 |---|---|---|
@@ -98,7 +99,7 @@ The engine forks, substitutes the pins, merges and replays the source tail, then
 | `boundary-choice` | `replan/boundary` candidate witnesses | would a different policy have picked a different boundary ([03 §4.2](./03-replan-and-recovery.md)) |
 | `surface-identity` | the two surfaces byte-for-byte | regression: a fork with no substitutions must produce an identical surface |
 
-The engine supplies surfaces and never opinions. Keeping the comparison logic in a named, versioned evaluator is what allows a result to be re-derived later. `fork/created` records `(source_stream, at_stream_seq, substitutions, fold_mode, evaluator, projector_version, harness_state_version)`.
+The engine supplies surfaces and never opinions. Keeping the comparison logic in a named, versioned evaluator is what allows a result to be re-derived later. `fork/created` records `(source_stream, at_vertex_id, eval_up_to_seq, substitutions, fold_mode, evaluator, projector_version, harness_state_version)`.
 
 ### 3.2 Fold modes govern the cost and the risk
 

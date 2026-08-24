@@ -20,7 +20,7 @@ L4 suspend + human action (the only exit when post-pivot forward recovery cannot
 
 ### 2.1 Legal replan boundaries and the backtrack floor
 
-Replanning happens **in place, in the same run**: the failed subtree is shadowed and the chosen planner is called again ([01 §5.1](./01-jit-dag-and-event-log.md)). Selecting *where* to resume planning is therefore a choice of boundary, not the creation of a branch. The same boundary rules also govern offline forks ([01 §5.2](./01-jit-dag-and-event-log.md)), so they are stated once here.
+Replanning happens **in place, in the same run**: the failed subtree is shadowed and the chosen planner is called again ([01 §5.1](./01-jit-dag-and-event-log.md)). Selecting *where* to resume planning is therefore a choice of boundary, not the creation of a branch. (Note: Offline forks are completely decoupled from these online recovery constraints; see [01 §5.2](./01-jit-dag-and-event-log.md) for fork mechanics).
 
 A **legal replan boundary** is a succeeded planner vertex satisfying both conditions:
 
@@ -64,7 +64,7 @@ This controls replan input cost and clearly identifies paths already disproven.
 
 ### 2.4 Three hard rules for replanning and transactions
 
-1. **Cancel before replan.** Planning never resumes across an active `try`; compensation precedes backtracking. The rule applies identically to a fork boundary, with one inversion: a fork must never cancel an inherited try, because that hold belongs to the live source run ([01 §5.2](./01-jit-dag-and-event-log.md)). Live runs cancel to make a boundary legal; forks must instead refuse the boundary.
+1. **Cancel before replan.** Planning never resumes across an active `try`; compensation precedes backtracking. (Note: Offline forks, due to their causal evaluation nature, are exempt from this online constraint. They handle active tries via mock injection or lazy termination rather than cancellation). Live runs cancel to make a boundary legal.
 2. **The pivot is a one-way gate.** Once `txn/pivot-passed` is appended, that seq becomes the backtrack floor (§2.1): no replan boundary may be selected below it, for the remainder of the run. Within the pivot's own scope, a subsequent failure may only retry the suffix idempotently (L0) or reach human intervention (L4). The prohibition is on *planner position*, not on business action — a refund issued from a boundary above the floor is a new forward action and is permitted ([02 §3.3](./02-transaction-model.md)). R1 guarantees that every forward-path node is safely idempotent.
 3. **Shadowing does not delete.** A replan-rejected subtree remains in the log for auditability and as evidence that prevents repeating the same failed approach.
 
@@ -130,10 +130,10 @@ dsh unifies resume, fork, and replay into one primitive because a session is a c
 | dsh | Flory |
 |---|---|
 | `session fork(boundary_seq)` for continuing work | **In-place replan**: `replan/boundary` + `subgraph/shadowed`, same `run_id`, no prefix copy (§2.3). |
-| `session fork(boundary_seq)` for branching | **Offline fork only**: branch, substitute a `pin_version`, merge the source tail, compare folded surfaces; never executes writes ([01 §5.2](./01-jit-dag-and-event-log.md)). |
-| Reject fork in an open turn. | Reject a boundary in an open transaction bracket, or below the backtrack floor (§2.1). |
+| `session fork(boundary_seq)` for branching | **Offline fork only**: branch at any vertex, substitute a `pin_version`, invalidate causal descendants, lazily merge independent events, compare folded surfaces; never executes writes ([01 §5.2](./01-jit-dag-and-event-log.md)). |
+| Reject fork in an open turn. | Reject a **replan** boundary in an open transaction bracket, or below the backtrack floor (§2.1). (Forks are exempt from this and may occur anywhere). |
 | Resume equals fork. | **Resume is not a fork**: crash recovery re-projects the same stream. |
-| `session/end-seed` marks an inherited prefix. | `run/end-seed` marks a fork's inherited, read-only prefix. Live-run orphan-try detection uses timeouts and unmatched brackets instead ([02 §4.4](./02-transaction-model.md)). |
+| `session/end-seed` marks an inherited prefix. | `run/end-seed` closes a fork's inherited seed; every inherited copy is read-only. Live-run orphan-try detection uses timeouts and unmatched brackets instead ([02 §4.4](./02-transaction-model.md)). |
 | Replay is a pure-function fold. | Replay is a fork with no substitutions in `fold_mode: recorded`, and must reproduce the source surface exactly ([01 §6](./01-jit-dag-and-event-log.md)). |
 | Fork does not handle external effects. | Cancel-before-replan explicitly handles side effects; forks are barred from touching them at all, and the `fold_mode` gate enforces it ([01 §5.4](./01-jit-dag-and-event-log.md)). |
 

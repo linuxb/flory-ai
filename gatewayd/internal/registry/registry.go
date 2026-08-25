@@ -136,7 +136,7 @@ func (registry *Registry) Register(ctx context.Context, contracts []*gatewayv1.T
 			}
 			continue
 		}
-		if violation := validateStructure(tool); violation != nil {
+		if violation := ValidateStructure(tool); violation != nil {
 			registry.records[key] = &record{tool: tool, canonical: canonical, state: gatewayv1.ToolState_TOOL_STATE_REJECTED, code: violation.Code, detail: violation.Detail}
 			continue
 		}

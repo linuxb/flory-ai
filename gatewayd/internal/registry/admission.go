@@ -59,13 +59,18 @@ func CompileSchema(name, text string) (*jsonschema.Schema, error) {
 	return compiled, nil
 }
 
-// validateStructure applies the registration rules decidable from one contract
+// ValidateStructure applies the registration rules decidable from one contract
 // alone: G1, G4, G5, and the declared half of G2 and G3.
 //
 // Rules that depend on other registrations -- whether a named companion exists
-// and is itself retry-safe -- are G6 and are resolved in resolve.go, because a
-// tool service may legitimately start before the service hosting its compensator.
-func validateStructure(tool toolview.Tool) *Violation {
+// and is itself retry-safe -- are G6, and are resolved once the whole registry
+// is known, because a tool service may legitimately start before the service
+// hosting its compensator.
+//
+// It is exported so the SDK can run the same rules at service startup. A second
+// implementation of them would let a service pass its own check and then be
+// refused by the gateway, which is the worst place to discover a bad contract.
+func ValidateStructure(tool toolview.Tool) *Violation {
 	if violation := validateIdentity(tool); violation != nil {
 		return violation
 	}

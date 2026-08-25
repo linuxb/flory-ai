@@ -1,0 +1,15 @@
+# The standard gRPC health-checking protocol, vendored for TypeScript only.
+#
+# gatewayd probes every instance with grpc.health.v1.Health/Check, so a tool
+# service in any language has to serve it. Go gets this service from grpc-go;
+# TypeScript has no equivalent, so the stubs are generated here. It is a separate
+# buf module precisely so the Go plugin never runs over it and produces a second,
+# conflicting definition of a type grpc-go already owns.
+version: v2
+modules:
+  - path: .
+lint:
+  use:
+    - STANDARD
+  ignore:
+    - grpc

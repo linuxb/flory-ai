@@ -6,7 +6,7 @@ const SOURCE_DIRECTORIES = ['db', 'engine', 'scripts', 'sdk', 'test'];
 const STYLE_FILES = ['idl/event-log.schema.json'];
 const TYPE_SCRIPT_EXTENSIONS = new Set(['.cts', '.mts', '.ts', '.mjs']);
 // Generated protobuf stubs are exempt: protoc-gen-es owns their layout.
-const EXCLUDED_DIRECTORIES = new Set(['sdk/typescript/gen']);
+const EXCLUDED_DIRECTORIES = new Set(['sdk/typescript/gen', 'sdk/typescript/gen-health']);
 
 async function listSourceFiles(directory) {
     const entries = await readdir(directory, {withFileTypes: true});

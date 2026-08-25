@@ -114,35 +114,48 @@ Reject a change that does any of the following:
 
 ## Stack and Language Boundary
 
-Two authoritative services, one proposed stateless gateway, one database. The language split is recorded in [ADR-001](doc/design/adr/adr-001-engine-language-split.md); the gateway boundary is proposed in [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) and specified in [design doc 09](doc/design/09-tool-registry-gateway.md).
+Two authoritative services, one stateless gateway, one database. The language split is recorded in [ADR-001](doc/design/adr/adr-001-engine-language-split.md); the gateway boundary is recorded in [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) and specified in [design doc 09](doc/design/09-tool-registry-gateway.md).
 
-- **TypeScript** — engine service: planner loop, event vocabulary as discriminated unions, the canonical projection pipeline, check-rules, prompt assembly, refine loop, model adapters, and replay testing.
+- **TypeScript** — engine service: planner loop, event vocabulary as discriminated unions, the canonical projection pipeline, check-rules, prompt assembly, refine loop, model adapters, replay testing, and execution of the read-only vertices it owns (discipline 29).
 - **Go 1.25** — implementation language for the Distributed Transaction Coordinator: transaction scopes, timeout sweeping, orphan-try detection, the tool executor, and adapters that must live inside existing Go infrastructure.
-- **`gatewayd` (proposed, Go 1.25 planned)** — dynamic tool registration, immutable tool-view publication, and one-attempt MCP routing. It is not a planner, transaction coordinator, retry owner, event writer, or projection implementation. Sharing Go with the Coordinator does not permit either component to import the other's internals; their public boundaries remain MCP and the event log.
+- **`gatewayd` (Go 1.25)** — dynamic tool registration, immutable tool-view publication, and one-attempt routing. Its north side is MCP `tools/list` and `tools/call`, which both executors consume; its south side is gRPC, which tool services reach through the SDK. It is not a planner, transaction coordinator, retry owner, event writer, or projection implementation. Sharing Go with the Coordinator does not permit either component to import the other's internals: they are separate modules, and their public boundaries remain MCP and the event log.
+- **The tool-service SDK** — `gatewayd/sdk` for Go and `sdk/typescript` for TypeScript, both generated from `idl/proto/`. A tool service declares its contracts and serves execution; it never implements the gateway protocol itself.
 - **PostgreSQL** — the event log and harness-state. It allocates `seq`, so the two services need no coordination protocol. Work handoff uses `SELECT … FOR UPDATE SKIP LOCKED` or `LISTEN/NOTIFY`; do not introduce a message broker before there is load that requires one.
 - No third language in the engine without a new ADR.
 
 ### The boundary is the log
 
-The two services never call each other's internals. They communicate only by appending events, and each owns an exclusive set of event types:
+The services never call each other's internals. They communicate only by appending events:
 
 | Owner | Exclusive write access |
 |---|---|
 | TS engine | `run/start`, `run/end`, `run/end-seed`, `subgraph/proposed`, `subgraph/frozen`, `subgraph/rejected`, `subgraph/shadowed`, `replan/boundary`, `fork/created`, `vertex/created`, `budget/charged` |
-| Distributed Transaction Coordinator | `vertex/started`, `vertex/succeeded`, `vertex/failed`, `vertex/retried`, `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` |
+| Distributed Transaction Coordinator | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` |
+| The vertex's executor | `vertex/started`, `vertex/succeeded`, `vertex/failed`, `vertex/retried` |
 
-29. **Enforce event ownership at the append boundary** in both services. A service appending an event type it does not own is a bug, not a shortcut.
+29. **Enforce event ownership at the append boundary** in both services, and **enforce executor authority in the database**. A service appending an event type it does not own is a bug, not a shortcut.
+
+    **Execution events belong to whichever executor owns that vertex, and the partition is by effect class.** A tool-caller vertex is Orchestrator-executed if and only if its pinned contract declares `effect_class: none` *and* it carries no `scope_id`; every other queued vertex is Coordinator-executed. Reason: a read has no bracket, no compensation, and no pivot interaction, so there is nothing for a transaction coordinator to own, and the `reads-live` fold mode (discipline 7e) already assumes the Orchestrator executes exactly that class live. R10 guarantees every side-effecting node belongs to a scope, so the two classes partition the queued vertices with no overlap and no gap — the check-rule and the constraint state one fact in two places rather than two facts that can drift.
+
+    The executor class is **derived from the vertex payload, never declared** — the same discipline as `is_pivot` — and both the work queue and the ownership trigger compute it the same way. An in-process guard in either service is advice; the database is the boundary, because a split enforced only by convention degrades into whichever worker claimed the row first.
+
+29b. **`gatewayd` writes no events at all.** It validates registrations, publishes tool views, and routes one requested attempt. It never retries a side-effecting call, never appends to the log, never decides compensation, and never selects a tool version its caller did not pin. Reason: retry legality depends on idempotency, TCC state, and pivot state owned by an executor, so a gateway that decided any of it would become a second transaction authority.
 30. **Canonical projections have exactly one implementation, in TypeScript.** `surface`, `slice`, `fold`, `linearize`, and `assemble` may never be reimplemented in Go. Reason: a second implementation of the projection semantics produces the worst available bug class — two projectors that disagree on an edge case — and it makes discipline 3 (identical recomputation) and discipline 24 (`projector_version` attribution) unverifiable.
 30a. **The engine is domain-neutral, and mocks are test-only.** The canonical pipeline owns generic reducer registration, deterministic dispatch, and projection mechanics only. A mock business world, mock reducer, mock view, or mock oracle belongs under `test/mocks/`, not under `engine/` or a production `domain/` package. Reason: importing a SKU, carrier, payment, or any other business concept into the engine turns a reusable safety boundary into an e-commerce-specific implementation; promoting a verification fake to `domain/` makes tests look like production business behavior.
 31. **Operational projections may live in either service.** Narrow, local folds that serve execution or operations — unmatched `txn/try` scanning, timeout sweeps, executor readiness checks — are not canonical projections. They do not feed a prompt, do not participate in attribution, and are independently testable. Discipline 30 restricts planner-context projection, not log reading in general; the Distributed Transaction Coordinator is expected to read the log.
 32. **Replay testing lives wherever the projector lives**, i.e. in TypeScript, because it must exercise the same code as production. Batch historical recomputation is also driven by the canonical projector: scale it by sharding on `run_id` across worker processes, or push a fold down into SQL. Never by porting the projector.
-33. **The event schema is a shared, versioned artifact** — a schema-first IDL in the repository with generated types for both languages. A field change means editing the schema and regenerating, never editing one side's types.
-34. **Cross-language conformance tests are required** for any log-reading semantics both services implement: golden log fixtures plus expected outcomes that both readers must satisfy. Fail-closed behavior on an unknown `event_type` without an `ignorable` flag is a mandatory fixture.
+33. **Every shared contract is a schema-first IDL in the repository with generated types for every language that speaks it.** The event log is JSON Schema (`idl/event-log.schema.json`); the gateway's tool-service surface is Protocol Buffers (`idl/proto/`). A field change means editing the schema and regenerating, never editing one side's types. `npm run generate:check` gates both.
+33b. **A tool service reaches `gatewayd` only through the SDK.** Registration, heartbeat, and health are what make a stateless gateway recoverable, and a service that hand-rolled any of them would look registered while being unroutable, or keep heartbeating at a gateway that has forgotten it. The Go SDK validates contracts by calling the gateway's own admission rules rather than restating them.
+34. **Cross-language conformance tests are required** for any semantics more than one language implements: golden fixtures plus expected outcomes that every implementation must satisfy. Fail-closed behavior on an unknown `event_type` without an `ignorable` flag is a mandatory fixture, and so is byte-identical canonical tool-view encoding, because a digest one side cannot reproduce makes every pinned contract unresolvable.
 
 Add to the review checklist:
 
 - Appends an event type owned by the other service.
+- Appends a `vertex/*` event for a vertex outside the writer's executor class, or executes a scoped or side-effecting vertex from the Orchestrator.
+- Declares an executor class, an `is_pivot`, or any other derived attribute instead of deriving it.
+- Lets `gatewayd` retry a side-effecting call, append an event, or resolve a tool version the caller did not pin.
+- Hand-rolls the gateway registration protocol instead of using the SDK.
 - Reimplements a canonical projection layer outside TypeScript.
 - Imports a business semantic into the engine framework, or places a mock business semantic outside `test/mocks/`.
-- Changes the event schema in one language's types instead of in the shared IDL.
+- Changes a shared contract in one language's generated types instead of in the IDL.
 - Adds log-reading semantics shared by both services without a conformance fixture.

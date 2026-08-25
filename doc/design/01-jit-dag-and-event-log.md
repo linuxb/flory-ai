@@ -104,14 +104,22 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | `subgraph/frozen` | Check-rules passed; all vertex rows are atomically appended | engine |
 | `subgraph/rejected` | Check-rules rejection and reasons | engine |
 | `vertex/created` | Vertex definition: role, tool, parameters, and transaction attributes | engine during freeze |
-| `vertex/started`, `vertex/succeeded`, `vertex/failed` | Execution state transitions | executor |
-| `vertex/retried` | Idempotent retry number and backoff | executor |
+| `vertex/started`, `vertex/succeeded`, `vertex/failed` | Execution state transitions | the vertex's executor (§3.2.1) |
+| `vertex/retried` | Idempotent retry number and backoff | the vertex's executor (§3.2.1) |
 | `subgraph/shadowed` | Replan shadowed a failed subtree; payload names affected seqs | engine |
 | `replan/boundary` | In-place replan: selected `boundary_seq`, planner vertex, reason, cancelled scopes. No new run is created (§5.1) | engine |
 | `fork/created` | **Offline evaluation only** (§5.2): source run, `at_vertex_id`, `eval_up_to_seq`, seed length, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` | engine |
 | `run/end-seed` | First own event of a fork, closing its inherited seed; every inherited copy — in the seed or merged later — is read-only (§5.2) | engine |
 | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | engine/executor |
 | `budget/charged` | Token and cost accounting | engine |
+
+### 3.2.1 Which executor owns a vertex
+
+Execution events belong to whichever executor ran the vertex, and the partition is by effect class. A tool-caller vertex is **Orchestrator-executed** if and only if its pinned contract declares `effect_class: none` *and* it carries no `scope_id`; every other queued vertex is **Coordinator-executed**.
+
+A read has no transaction bracket, no compensation, and no pivot interaction, so there is nothing for a transaction coordinator to own — and the `reads-live` fold mode ([05 §3.2](./05-context-aggregation-and-offline-evaluation.md)) already assumes the Orchestrator executes exactly that class of tool live. Check-rule R10 requires every side-effecting node to belong to a scope, so the two classes partition the queued vertices with no overlap and no gap.
+
+The class is derived from the vertex payload and never declared, exactly as `is_pivot` is derived from `effect_class`. Both the work queue and the event-log ownership trigger compute it the same way, so a service cannot append an execution event for a vertex it does not own even if its own guard is bypassed.
 
 Unknown `event_type` values are **fail-closed**: readers reject the complete log rather than silently skipping them. Extensible events require an explicit `ignorable` flag. A schema version is included in `run/start` from day one.
 

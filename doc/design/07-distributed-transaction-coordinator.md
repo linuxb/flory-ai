@@ -36,14 +36,22 @@ The sweeper finds sealed brackets past their deadline and requests cancellation 
 
 ## 4. Adapter Boundary
 
-The current adapter contract carries the run, vertex, attempt number, tool reference, idempotency key, and immutable input over HTTP. Responses are one of `succeeded`, `retryable-failure`, `permanent-failure`, or `unknown`.
+The Coordinator reaches every tool through the [gatewayd Tool Registry Gateway](./09-tool-registry-gateway.md), by MCP `tools/call`. Each request carries the run, vertex, scope, attempt number, exact tool version, tool-view digest, idempotency key, immutable input, and a deadline. Responses are one of `succeeded`, `retryable-failure`, `permanent-failure`, or `unknown`.
 
-The proposed [gatewayd Tool Registry Gateway](./09-tool-registry-gateway.md) extends that request with the exact tool version, tool-view digest, and deadline, exposes it through MCP `tools/call`, and routes one attempt to an HTTP, gRPC, or other upstream adapter. This changes discovery and routing, not ownership: the coordinator still decides retries, appends all `vertex/*` and `txn/*` events, and enforces TCC and pivot recovery.
+Routing through the gateway changes discovery and dispatch, not ownership. The Coordinator still decides every retry, appends the `vertex/*` events for the vertices it executes and all `txn/*` events, and enforces TCC and pivot recovery. The gateway routes exactly one requested attempt and never generates a second.
 
-The test sandbox is an out-of-process adapter service with deterministic fault injection keyed by `(seed, tool, attempt_no)`. It can be reached through the direct adapter or a gateway-compatible stand-in and exposes reset and oracle snapshots only in tests.
+A companion call — confirm, cancel, compensate, or a pivot status query — carries the try's `tool_view_digest` and no version of its own. The companion resolves by name inside that same frozen view, which registration admission already guarantees it belongs to.
+
+The direct HTTP adapter remains as one thing only: the control arm of the dual-path fixture that proves both routes produce identical outcomes and byte-identical upstream payloads. No scenario runs on it.
+
+The test world is a set of tool services built on the SDK, with deterministic fault injection keyed by `(seed, tool, attempt_no)`. They register with the gateway exactly as a production service does, and expose reset and oracle snapshots only in tests.
 
 ## 5. Interaction with the Engine
 
-The event log remains the only Engine/Coordinator boundary. The Coordinator owns `vertex/started`, `vertex/succeeded`, `vertex/failed`, `vertex/retried`, and `txn/*`; the Engine owns planning and structure events. The Coordinator may build operational projections for execution, but it must not implement `surface`, `slice`, `fold`, `linearize`, or `assemble`.
+The event log remains the only Engine/Coordinator boundary. The Engine owns planning and structure events; the Coordinator owns every `txn/*` event.
+
+Execution events are owned by the vertex's executor rather than by the Coordinator unconditionally ([01 §3.2.1](./01-jit-dag-and-event-log.md)). The Coordinator executes every queued vertex except those whose pinned contract declares `effect_class: none` and which carry no scope; those are the Orchestrator's, because they have no bracket, no compensation, and no pivot interaction for a transaction coordinator to own. The database enforces the partition on both the work queue and the append boundary, so neither service can execute or record a vertex belonging to the other.
+
+The Coordinator may build operational projections for execution, but it must not implement `surface`, `slice`, `fold`, `linearize`, or `assemble`.
 
 On a pre-pivot terminal failure, scope cancellation completes before the Engine may append a legal `replan/boundary`. On a post-pivot terminal failure, the Coordinator records suspension; it never compensates backward across `txn/pivot-passed`.

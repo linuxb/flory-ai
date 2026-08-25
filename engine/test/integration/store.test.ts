@@ -20,7 +20,7 @@ async function plannerRun(): Promise<string> {
         {event_type: 'run/start', payload: {schema_version: 'v1'}},
         {event_type: 'vertex/created', vertex_id: plannerId, pin_version: 'model://planner@v1', payload: {role: 'planner'}},
     ]);
-    await coordinator.appendEvents(run, [{event_type: 'vertex/succeeded', vertex_id: plannerId, payload: {result: {plan: 'ok'}}}]);
+    await engine.appendEvents(run, [{event_type: 'vertex/succeeded', vertex_id: plannerId, payload: {result: {plan: 'ok'}}}]);
     return run;
 }
 
@@ -50,6 +50,24 @@ describe('PostgreSQL event store', () => {
             {event_type: 'txn/try', scope_id: scopeId, vertex_id: tryVertex, payload: {idempotency_key: `key-${run}`, deadline_at: new Date(Date.now() + 60_000).toISOString()}},
         ]);
         const pivotVertex = randomUUID();
+        // admit_pivot appends vertex/started, and an execution event for a vertex that was never
+        // created is refused: without a vertex/created there is no payload to derive ownership from.
+        await engine.appendEvents(run, [
+            {
+                event_type: 'vertex/created',
+                vertex_id: pivotVertex,
+                scope_id: scopeId,
+                payload: {
+                    role: 'tool',
+                    tool: 'payment.charge',
+                    tool_version: '1.0.0',
+                    tool_view_digest: toolViewDigest,
+                    input: {},
+                    retry_policy: {max_attempts: 1, initial_backoff_ms: 0, multiplier: 1, max_backoff_ms: 0},
+                    txn: {effect_class: 'irreversible', mode: 'plain'},
+                },
+            },
+        ]);
         const client = new Client({connectionString: coordinatorUrl});
         await client.connect();
         expect((await client.query<{admit_pivot: boolean}>('SELECT admit_pivot($1, $2, $3)', [run, scopeId, pivotVertex])).rows[0]?.admit_pivot).toBe(true);
@@ -73,7 +91,7 @@ describe('PostgreSQL event store', () => {
                     tool_view_digest: toolViewDigest,
                     input: {sku: 'SKU-1'},
                     retry_policy: {max_attempts: 2, initial_backoff_ms: 0, multiplier: 2, max_backoff_ms: 0},
-                    txn: {effect_class: 'none', mode: 'plain'},
+                    txn: {effect_class: 'irreversible', mode: 'plain'},
                 },
             },
         ]);
@@ -84,9 +102,17 @@ describe('PostgreSQL event store', () => {
             first.query<{vertex_id: string}>('SELECT vertex_id FROM claim_ready_work($1, $2)', ['worker-a', 30]),
             second.query<{vertex_id: string}>('SELECT vertex_id FROM claim_ready_work($1, $2)', ['worker-b', 30]),
         ]);
-        expect(claims.flatMap((claim) => claim.rows.map((row) => row.vertex_id))).toEqual([vertexId]);
-        const winner = claims[0].rowCount === 1 ? 'worker-a' : 'worker-b';
-        await (winner === 'worker-a' ? first : second).query('SELECT complete_work($1, $2)', [winner, vertexId]);
+        // The property under test is exclusivity: two concurrent claims never hand out the same vertex.
+        // The queue is global by design -- one worker pool serves every run -- so asserting that it held
+        // nothing but this vertex would make the test depend on what every other fixture left behind.
+        const claimedVertices = claims.flatMap((claim) => claim.rows.map((row) => row.vertex_id));
+        expect(new Set(claimedVertices).size).toBe(claimedVertices.length);
+        expect(claimedVertices.length).toBeGreaterThan(0);
+        for (const [index, claim] of claims.entries()) {
+            const worker = index === 0 ? 'worker-a' : 'worker-b';
+            const connection = index === 0 ? first : second;
+            for (const row of claim.rows) await connection.query('SELECT complete_work($1, $2)', [worker, row.vertex_id]);
+        }
         await Promise.all([first.end(), second.end()]);
     });
 
@@ -135,7 +161,7 @@ describe('PostgreSQL event store', () => {
             },
             {event_type: 'vertex/created', vertex_id: independentVertex, payload: {role: 'planner'}},
         ]);
-        await coordinator.appendEvents(run, [
+        await engine.appendEvents(run, [
             {event_type: 'vertex/succeeded', vertex_id: toolVertex, payload: {result: {stock: 3}}},
             {event_type: 'vertex/succeeded', vertex_id: independentVertex, payload: {result: {}}},
         ]);
@@ -192,7 +218,7 @@ describe('PostgreSQL event store', () => {
             {event_type: 'txn/try', scope_id: openScope, vertex_id: randomUUID(), payload: {idempotency_key: `open-${openRun}`, deadline_at: new Date(Date.now() + 60_000).toISOString()}},
         ]);
         await engine.appendEvents(openRun, [{event_type: 'vertex/created', vertex_id: laterPlanner, payload: {role: 'planner'}}]);
-        await coordinator.appendEvents(openRun, [{event_type: 'vertex/succeeded', vertex_id: laterPlanner, payload: {result: {}}}]);
+        await engine.appendEvents(openRun, [{event_type: 'vertex/succeeded', vertex_id: laterPlanner, payload: {result: {}}}]);
         const midBracket = await engine.fork({
             source_run_id: openRun,
             at_vertex_id: laterPlanner,
@@ -209,6 +235,22 @@ describe('PostgreSQL event store', () => {
         const pivotScope = randomUUID();
         const pivotVertex = randomUUID();
         await coordinator.appendEvents(pivotRun, [{event_type: 'txn/scope', scope_id: pivotScope, payload: {state: 'open'}}]);
+        await engine.appendEvents(pivotRun, [
+            {
+                event_type: 'vertex/created',
+                vertex_id: pivotVertex,
+                scope_id: pivotScope,
+                payload: {
+                    role: 'tool',
+                    tool: 'payment.charge',
+                    tool_version: '1.0.0',
+                    tool_view_digest: toolViewDigest,
+                    input: {},
+                    retry_policy: {max_attempts: 1, initial_backoff_ms: 0, multiplier: 1, max_backoff_ms: 0},
+                    txn: {effect_class: 'irreversible', mode: 'plain'},
+                },
+            },
+        ]);
         const client = new Client({connectionString: coordinatorUrl});
         await client.connect();
         expect((await client.query<{admit_pivot: boolean}>('SELECT admit_pivot($1, $2, $3)', [pivotRun, pivotScope, pivotVertex])).rows[0]?.admit_pivot).toBe(true);

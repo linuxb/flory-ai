@@ -2,6 +2,7 @@ export * from './events.js';
 export * from './check-rules.js';
 export * from './tool-view.js';
 export * from './gateway-client.js';
+export * from './read-executor.js';
 export * from './store.js';
 export * from './projection.js';
 export * from './harness/oracles.js';

@@ -27,7 +27,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
-	adapterClient := adapter.NewHTTPClient(environment("ADAPTER_BASE_URL", "http://127.0.0.1:8090"), &http.Client{Timeout: 15 * time.Second})
+	adapterClient := selectAdapter(logger)
 	service := coordinator.New(database, adapterClient, coordinator.Config{
 		WorkerID: environment("COORDINATOR_WORKER_ID", "coordinator-local"), LeaseDuration: 30 * time.Second, PollInterval: 100 * time.Millisecond, SweepInterval: time.Second,
 	}, logger)
@@ -44,6 +44,24 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = health.Shutdown(shutdownCtx)
+}
+
+// selectAdapter chooses the execution route.
+//
+// The gateway is the default: it is the only route that resolves an exact frozen
+// contract and validates arguments against it before dispatch. The direct
+// adapter remains selectable for a gateway-less debugging session and for the
+// dual-path fixture that proves the two routes agree, but no scenario runs on it.
+func selectAdapter(logger *slog.Logger) adapter.Client {
+	transport := &http.Client{Timeout: 15 * time.Second}
+	if mode := environment("ADAPTER_MODE", "gateway"); mode == "direct" {
+		base := environment("ADAPTER_BASE_URL", "http://127.0.0.1:8090")
+		logger.Warn("routing tool calls directly, bypassing contract pinning and argument validation", "adapter", base)
+		return adapter.NewHTTPClient(base, transport)
+	}
+	base := environment("GATEWAY_BASE_URL", "http://127.0.0.1:8092")
+	logger.Info("routing tool calls through the gateway", "gateway", base)
+	return adapter.NewGatewayClient(base, transport)
 }
 
 func healthHandler() http.Handler {

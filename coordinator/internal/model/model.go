@@ -29,13 +29,31 @@ type WorkItem struct {
 	Attempt    int
 }
 
-// OperationRequest is the stable HTTP adapter request.
+// ToolPin identifies the exact frozen contract an attempt is made against.
+//
+// A companion call -- confirm, cancel, compensate, or a pivot status query --
+// carries the try's ViewDigest and no Version of its own: registration admission
+// guarantees the companion lives in that same view, so it resolves by name there.
+type ToolPin struct {
+	Version    string
+	ViewDigest string
+}
+
+// OperationRequest is the stable adapter request.
+//
+// The pin fields are omitempty, so the direct adapter's wire shape is exactly
+// what it was before the gateway existed. That is what lets the dual-path
+// fixture compare byte-identical upstream payloads across both routes.
 type OperationRequest struct {
 	RunID          string         `json:"run_id"`
 	VertexID       string         `json:"vertex_id"`
+	ScopeID        string         `json:"scope_id,omitempty"`
 	AttemptNo      int            `json:"attempt_no"`
 	Tool           string         `json:"tool"`
+	ToolVersion    string         `json:"tool_version,omitempty"`
+	ToolViewDigest string         `json:"tool_view_digest,omitempty"`
 	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	DeadlineMS     int64          `json:"deadline_ms,omitempty"`
 	Input          map[string]any `json:"input"`
 }
 

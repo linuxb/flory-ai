@@ -92,7 +92,7 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 	if err := service.store.Append(ctx, item.RunID, vertexEvent("vertex/started", item, map[string]any{"attempt": 1})); err != nil {
 		return err
 	}
-	response, attempts, err := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Tool, item.Payload.Txn.IdempotencyKey, item.Payload.Input, item.Payload.RetryPolicy)
+	response, attempts, err := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Tool, item.Payload.Txn.IdempotencyKey, item.Payload.Input, item.Payload.RetryPolicy, pinOf(item))
 	if err != nil {
 		return err
 	}
@@ -121,6 +121,7 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 			"input":           item.Payload.Input,
 			"retry_policy":    toMap(item.Payload.RetryPolicy),
 		}
+		optionalString(tryPayload, "tool_view_digest", item.Payload.ToolViewDigest)
 		optionalString(tryPayload, "confirm_tool", item.Payload.Txn.ConfirmTool)
 		optionalString(tryPayload, "cancel_tool", item.Payload.Txn.CancelTool)
 		optionalString(tryPayload, "compensate_tool", item.Payload.Txn.CompensateTool)
@@ -141,12 +142,13 @@ func (service *Service) processPivot(ctx context.Context, item *model.WorkItem) 
 	if !admitted {
 		return service.store.ReleaseWork(ctx, service.worker, item.VertexID, service.poll)
 	}
-	response, attempts, err := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Tool, item.Payload.Txn.IdempotencyKey, item.Payload.Input, item.Payload.RetryPolicy)
+	response, attempts, err := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Tool, item.Payload.Txn.IdempotencyKey, item.Payload.Input, item.Payload.RetryPolicy, pinOf(item))
 	if err != nil {
 		return err
 	}
 	if response.Outcome == model.OutcomeUnknown && item.Payload.Txn.StatusTool != "" {
-		statusResponse, _, statusErr := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Txn.StatusTool, item.Payload.Txn.IdempotencyKey, item.Payload.Input, item.Payload.RetryPolicy)
+		statusResponse, _, statusErr := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Txn.StatusTool, item.Payload.Txn.IdempotencyKey,
+			item.Payload.Input, item.Payload.RetryPolicy, companionPin(item.Payload.ToolViewDigest))
 		err = statusErr
 		if err != nil {
 			return err
@@ -220,7 +222,8 @@ func (service *Service) confirmScope(ctx context.Context, item *model.WorkItem) 
 		return false, err
 	}
 	for _, bracket := range brackets {
-		response, _, err := service.executeWithRetry(ctx, item.RunID, bracket.VertexID, bracket.ConfirmTool, bracket.IdempotencyKey, bracket.Input, bracket.RetryPolicy)
+		response, _, err := service.executeWithRetry(ctx, item.RunID, bracket.VertexID, bracket.ConfirmTool, bracket.IdempotencyKey, bracket.Input, bracket.RetryPolicy,
+			companionPin(bracket.ToolViewDigest))
 		if err != nil {
 			return false, err
 		}
@@ -244,7 +247,8 @@ func (service *Service) cancelScope(ctx context.Context, runID, scopeID, key str
 		if member == nil {
 			return service.store.CompleteScopeCancel(ctx, runID, scopeID, key)
 		}
-		response, _, err := service.executeWithRetry(ctx, runID, member.VertexID, member.InverseTool, member.IdempotencyKey, member.Input, member.RetryPolicy)
+		response, _, err := service.executeWithRetry(ctx, runID, member.VertexID, member.InverseTool, member.IdempotencyKey, member.Input, member.RetryPolicy,
+			companionPin(member.ToolViewDigest))
 		if err != nil {
 			return err
 		}
@@ -257,7 +261,7 @@ func (service *Service) cancelScope(ctx context.Context, runID, scopeID, key str
 	}
 }
 
-func (service *Service) executeWithRetry(ctx context.Context, runID, vertexID, tool, key string, input map[string]any, policy generated.RetryPolicy) (model.OperationResponse, int, error) {
+func (service *Service) executeWithRetry(ctx context.Context, runID, vertexID, tool, key string, input map[string]any, policy generated.RetryPolicy, pin model.ToolPin) (model.OperationResponse, int, error) {
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
 		if delay := model.Backoff(policy, attempt); delay > 0 {
 			timer := time.NewTimer(delay)
@@ -268,7 +272,9 @@ func (service *Service) executeWithRetry(ctx context.Context, runID, vertexID, t
 			case <-timer.C:
 			}
 		}
-		response, err := service.adapter.Execute(ctx, model.OperationRequest{RunID: runID, VertexID: vertexID, AttemptNo: attempt, Tool: tool, IdempotencyKey: key, Input: input})
+		response, err := service.adapter.Execute(ctx, model.OperationRequest{
+			RunID: runID, VertexID: vertexID, AttemptNo: attempt, Tool: tool, ToolVersion: pin.Version, ToolViewDigest: pin.ViewDigest, IdempotencyKey: key, Input: input,
+		})
 		if err != nil {
 			return model.OperationResponse{}, attempt, err
 		}
@@ -301,6 +307,22 @@ func (service *Service) Sweep(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// pinOf is the exact contract a vertex was frozen against.
+func pinOf(item *model.WorkItem) model.ToolPin {
+	return model.ToolPin{Version: item.Payload.ToolVersion, ViewDigest: item.Payload.ToolViewDigest}
+}
+
+// companionPin resolves a confirm, cancel, compensate, or status tool inside the
+// view its try was admitted against.
+//
+// It carries no version on purpose: registration admission guarantees a companion
+// exists in the same published view as the tool that named it, so the gateway
+// resolves it there by name. Threading a separate version for every companion
+// would mean recording one in the bracket projection for no added safety.
+func companionPin(viewDigest string) model.ToolPin {
+	return model.ToolPin{ViewDigest: viewDigest}
 }
 
 func vertexEvent(eventType string, item *model.WorkItem, payload map[string]any) model.EventDraft {

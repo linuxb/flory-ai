@@ -114,6 +114,9 @@ type CancelMember struct {
 	VertexID       string
 	IdempotencyKey string
 	InverseTool    string
+	// ToolViewDigest is the frozen view its try was admitted against; the inverse
+	// tool resolves by name inside that same view.
+	ToolViewDigest string
 	Input          map[string]any
 	RetryPolicy    generated.RetryPolicy
 }
@@ -123,8 +126,8 @@ func (store *PostgresStore) ClaimCancelMember(ctx context.Context, worker, runID
 	var member CancelMember
 	var raw []byte
 	var policyRaw []byte
-	err := store.pool.QueryRow(ctx, `SELECT vertex_id, idempotency_key, inverse_tool, input, retry_policy FROM claim_cancel_member($1, $2, $3, $4)`,
-		worker, runID, scopeID, max(1, int(lease/time.Second))).Scan(&member.VertexID, &member.IdempotencyKey, &member.InverseTool, &raw, &policyRaw)
+	err := store.pool.QueryRow(ctx, `SELECT vertex_id, idempotency_key, inverse_tool, input, retry_policy, COALESCE(tool_view_digest, '') FROM claim_cancel_member($1, $2, $3, $4)`,
+		worker, runID, scopeID, max(1, int(lease/time.Second))).Scan(&member.VertexID, &member.IdempotencyKey, &member.InverseTool, &raw, &policyRaw, &member.ToolViewDigest)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -157,13 +160,15 @@ type SealedBracket struct {
 	VertexID       string
 	IdempotencyKey string
 	ConfirmTool    string
+	// ToolViewDigest is the frozen view this try was admitted against.
+	ToolViewDigest string
 	Input          map[string]any
 	RetryPolicy    generated.RetryPolicy
 }
 
 // SealedBrackets returns the remaining confirm operations in stable order.
 func (store *PostgresStore) SealedBrackets(ctx context.Context, runID, scopeID string) ([]SealedBracket, error) {
-	rows, err := store.pool.Query(ctx, `SELECT try_vertex_id, idempotency_key, confirm_tool, input, retry_policy FROM txn_bracket
+	rows, err := store.pool.Query(ctx, `SELECT try_vertex_id, idempotency_key, confirm_tool, input, retry_policy, COALESCE(tool_view_digest, '') FROM txn_bracket
         WHERE run_id = $1 AND scope_id = $2 AND state = 'sealed' AND confirm_tool IS NOT NULL ORDER BY try_vertex_id`, runID, scopeID)
 	if err != nil {
 		return nil, err
@@ -174,7 +179,7 @@ func (store *PostgresStore) SealedBrackets(ctx context.Context, runID, scopeID s
 		var bracket SealedBracket
 		var raw []byte
 		var policyRaw []byte
-		if err := rows.Scan(&bracket.VertexID, &bracket.IdempotencyKey, &bracket.ConfirmTool, &raw, &policyRaw); err != nil {
+		if err := rows.Scan(&bracket.VertexID, &bracket.IdempotencyKey, &bracket.ConfirmTool, &raw, &policyRaw, &bracket.ToolViewDigest); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(raw, &bracket.Input); err != nil {

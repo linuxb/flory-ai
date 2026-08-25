@@ -208,7 +208,7 @@ func (registry *Registry) resolveAndPublish(ctx context.Context) error {
 	}
 	schemas := map[Key]*jsonschema.Schema{}
 	for _, tool := range published.Document.Tools {
-		schema, err := compileSchema(tool.ToolID+"@"+tool.ToolVersion, string(tool.InputSchema))
+		schema, err := CompileSchema(tool.ToolID+"@"+tool.ToolVersion, string(tool.InputSchema))
 		if err != nil {
 			return fmt.Errorf("registry: %w", err)
 		}

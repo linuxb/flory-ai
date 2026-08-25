@@ -36,11 +36,13 @@ func reject(code gatewayv1.AdmissionCode, format string, arguments ...any) *Viol
 	return &Violation{Code: code, Detail: fmt.Sprintf(format, arguments...)}
 }
 
-// compileSchema parses a registered JSON Schema.
+// CompileSchema parses a registered JSON Schema.
 //
 // The gateway validates call arguments against this schema before dispatch, so a
 // schema that does not compile would mean a tool whose inputs are never checked.
-func compileSchema(name, text string) (*jsonschema.Schema, error) {
+// It is exported so a historical view resolved from blob storage compiles its
+// schemas exactly as the registry compiled them when it published that view.
+func CompileSchema(name, text string) (*jsonschema.Schema, error) {
 	var document any
 	if err := json.Unmarshal([]byte(text), &document); err != nil {
 		return nil, fmt.Errorf("%s is not JSON: %w", name, err)
@@ -99,10 +101,10 @@ func validateIdentity(tool toolview.Tool) *Violation {
 	if tool.Retry.MultiplierMilli < 1000 {
 		return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, "retry_constraints.multiplier_milli must be at least 1000")
 	}
-	if _, err := compileSchema(tool.ToolID+".input", string(tool.InputSchema)); err != nil {
+	if _, err := CompileSchema(tool.ToolID+".input", string(tool.InputSchema)); err != nil {
 		return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, "%v", err)
 	}
-	if _, err := compileSchema(tool.ToolID+".output", string(tool.OutputSchema)); err != nil {
+	if _, err := CompileSchema(tool.ToolID+".output", string(tool.OutputSchema)); err != nil {
 		return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, "%v", err)
 	}
 	return nil

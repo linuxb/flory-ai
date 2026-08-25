@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	cloud.google.com/go/storage v1.65.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	google.golang.org/api v0.287.1
 	google.golang.org/grpc v1.83.1
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.2
@@ -34,7 +35,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.17 // indirect
 	github.com/googleapis/gax-go/v2 v2.23.0 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
-	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.7.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.44.0 // indirect

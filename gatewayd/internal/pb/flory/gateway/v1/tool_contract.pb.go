@@ -274,8 +274,10 @@ type TransactionSpec struct {
 	EffectClass EffectClass            `protobuf:"varint,1,opt,name=effect_class,json=effectClass,proto3,enum=flory.gateway.v1.EffectClass" json:"effect_class,omitempty"`
 	Mode        ToolMode               `protobuf:"varint,2,opt,name=mode,proto3,enum=flory.gateway.v1.ToolMode" json:"mode,omitempty"`
 	// JSONPath into the arguments that identifies the idempotency key.
-	IdempotencyKeyPath  string `protobuf:"bytes,3,opt,name=idempotency_key_path,json=idempotencyKeyPath,proto3" json:"idempotency_key_path,omitempty"`
-	IdempotentRetryable bool   `protobuf:"varint,4,opt,name=idempotent_retryable,json=idempotentRetryable,proto3" json:"idempotent_retryable,omitempty"`
+	IdempotencyKeyPath string `protobuf:"bytes,3,opt,name=idempotency_key_path,json=idempotencyKeyPath,proto3" json:"idempotency_key_path,omitempty"`
+	// Explicitly optional so an irreversible tool cannot satisfy its obligation
+	// to state retry safety by leaving a proto3 bool at its false default.
+	IdempotentRetryable *bool  `protobuf:"varint,4,opt,name=idempotent_retryable,json=idempotentRetryable,proto3,oneof" json:"idempotent_retryable,omitempty"`
 	TryTimeoutS         uint32 `protobuf:"varint,5,opt,name=try_timeout_s,json=tryTimeoutS,proto3" json:"try_timeout_s,omitempty"`
 	ConfirmTool         string `protobuf:"bytes,6,opt,name=confirm_tool,json=confirmTool,proto3" json:"confirm_tool,omitempty"`
 	CancelTool          string `protobuf:"bytes,7,opt,name=cancel_tool,json=cancelTool,proto3" json:"cancel_tool,omitempty"`
@@ -337,8 +339,8 @@ func (x *TransactionSpec) GetIdempotencyKeyPath() string {
 }
 
 func (x *TransactionSpec) GetIdempotentRetryable() bool {
-	if x != nil {
-		return x.IdempotentRetryable
+	if x != nil && x.IdempotentRetryable != nil {
+		return *x.IdempotentRetryable
 	}
 	return false
 }
@@ -595,19 +597,20 @@ const file_flory_gateway_v1_tool_contract_proto_rawDesc = "" +
 	"\fmax_attempts\x18\x01 \x01(\rR\vmaxAttempts\x12,\n" +
 	"\x12initial_backoff_ms\x18\x02 \x01(\rR\x10initialBackoffMs\x12)\n" +
 	"\x10multiplier_milli\x18\x03 \x01(\rR\x0fmultiplierMilli\x12$\n" +
-	"\x0emax_backoff_ms\x18\x04 \x01(\rR\fmaxBackoffMs\"\x9a\x03\n" +
+	"\x0emax_backoff_ms\x18\x04 \x01(\rR\fmaxBackoffMs\"\xb8\x03\n" +
 	"\x0fTransactionSpec\x12@\n" +
 	"\feffect_class\x18\x01 \x01(\x0e2\x1d.flory.gateway.v1.EffectClassR\veffectClass\x12.\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x1a.flory.gateway.v1.ToolModeR\x04mode\x120\n" +
-	"\x14idempotency_key_path\x18\x03 \x01(\tR\x12idempotencyKeyPath\x121\n" +
-	"\x14idempotent_retryable\x18\x04 \x01(\bR\x13idempotentRetryable\x12\"\n" +
+	"\x14idempotency_key_path\x18\x03 \x01(\tR\x12idempotencyKeyPath\x126\n" +
+	"\x14idempotent_retryable\x18\x04 \x01(\bH\x00R\x13idempotentRetryable\x88\x01\x01\x12\"\n" +
 	"\rtry_timeout_s\x18\x05 \x01(\rR\vtryTimeoutS\x12!\n" +
 	"\fconfirm_tool\x18\x06 \x01(\tR\vconfirmTool\x12\x1f\n" +
 	"\vcancel_tool\x18\a \x01(\tR\n" +
 	"cancelTool\x12'\n" +
 	"\x0fcompensate_tool\x18\b \x01(\tR\x0ecompensateTool\x12\x1f\n" +
 	"\vstatus_tool\x18\t \x01(\tR\n" +
-	"statusTool\"G\n" +
+	"statusToolB\x17\n" +
+	"\x15_idempotent_retryable\"G\n" +
 	"\vAdapterSpec\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x1c\n" +
 	"\toperation\x18\x02 \x01(\tR\toperation\"\xcd\x04\n" +
@@ -687,6 +690,7 @@ func file_flory_gateway_v1_tool_contract_proto_init() {
 	if File_flory_gateway_v1_tool_contract_proto != nil {
 		return
 	}
+	file_flory_gateway_v1_tool_contract_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -51,8 +51,12 @@ enum AdmissionCode {
     ADMISSION_CODE_UNRESOLVED_COMPANION = 6;
     // G7: a published (tool_id, tool_version) was re-registered with a different body.
     ADMISSION_CODE_IMMUTABLE_VERSION_CONFLICT = 7;
-    // G8: a derived attribute was declared, or an unknown field was supplied.
-    ADMISSION_CODE_DERIVED_ATTRIBUTE_DECLARED = 8;
+    // G8: a companion reference is self-referential or cyclic.
+    //
+    // There is deliberately no code for "a derived attribute was declared":
+    // is_pivot and compensable have no field in ToolContract, so the obligation
+    // is discharged by the schema rather than by a runtime check.
+    ADMISSION_CODE_INVALID_COMPANION_REFERENCE = 8;
 }
 
 enum ToolState {

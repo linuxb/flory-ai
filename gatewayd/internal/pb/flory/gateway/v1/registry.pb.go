@@ -92,8 +92,12 @@ const (
 	AdmissionCode_ADMISSION_CODE_UNRESOLVED_COMPANION AdmissionCode = 6
 	// G7: a published (tool_id, tool_version) was re-registered with a different body.
 	AdmissionCode_ADMISSION_CODE_IMMUTABLE_VERSION_CONFLICT AdmissionCode = 7
-	// G8: a derived attribute was declared, or an unknown field was supplied.
-	AdmissionCode_ADMISSION_CODE_DERIVED_ATTRIBUTE_DECLARED AdmissionCode = 8
+	// G8: a companion reference is self-referential or cyclic.
+	//
+	// There is deliberately no code for "a derived attribute was declared":
+	// is_pivot and compensable have no field in ToolContract, so the obligation
+	// is discharged by the schema rather than by a runtime check.
+	AdmissionCode_ADMISSION_CODE_INVALID_COMPANION_REFERENCE AdmissionCode = 8
 )
 
 // Enum value maps for AdmissionCode.
@@ -107,7 +111,7 @@ var (
 		5: "ADMISSION_CODE_NON_DELTA_COMPENSATION",
 		6: "ADMISSION_CODE_UNRESOLVED_COMPANION",
 		7: "ADMISSION_CODE_IMMUTABLE_VERSION_CONFLICT",
-		8: "ADMISSION_CODE_DERIVED_ATTRIBUTE_DECLARED",
+		8: "ADMISSION_CODE_INVALID_COMPANION_REFERENCE",
 	}
 	AdmissionCode_value = map[string]int32{
 		"ADMISSION_CODE_UNSPECIFIED":                  0,
@@ -118,7 +122,7 @@ var (
 		"ADMISSION_CODE_NON_DELTA_COMPENSATION":       5,
 		"ADMISSION_CODE_UNRESOLVED_COMPANION":         6,
 		"ADMISSION_CODE_IMMUTABLE_VERSION_CONFLICT":   7,
-		"ADMISSION_CODE_DERIVED_ATTRIBUTE_DECLARED":   8,
+		"ADMISSION_CODE_INVALID_COMPANION_REFERENCE":  8,
 	}
 )
 
@@ -906,7 +910,7 @@ const file_flory_gateway_v1_registry_proto_rawDesc = "" +
 	"\rServingStatus\x12\x1e\n" +
 	"\x1aSERVING_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16SERVING_STATUS_SERVING\x10\x01\x12\x1e\n" +
-	"\x1aSERVING_STATUS_NOT_SERVING\x10\x02*\x90\x03\n" +
+	"\x1aSERVING_STATUS_NOT_SERVING\x10\x02*\x91\x03\n" +
 	"\rAdmissionCode\x12\x1e\n" +
 	"\x1aADMISSION_CODE_UNSPECIFIED\x10\x00\x12%\n" +
 	"!ADMISSION_CODE_MALFORMED_CONTRACT\x10\x01\x12(\n" +
@@ -915,8 +919,8 @@ const file_flory_gateway_v1_registry_proto_rawDesc = "" +
 	"'ADMISSION_CODE_MISLABELLED_EFFECT_CLASS\x10\x04\x12)\n" +
 	"%ADMISSION_CODE_NON_DELTA_COMPENSATION\x10\x05\x12'\n" +
 	"#ADMISSION_CODE_UNRESOLVED_COMPANION\x10\x06\x12-\n" +
-	")ADMISSION_CODE_IMMUTABLE_VERSION_CONFLICT\x10\a\x12-\n" +
-	")ADMISSION_CODE_DERIVED_ATTRIBUTE_DECLARED\x10\b*q\n" +
+	")ADMISSION_CODE_IMMUTABLE_VERSION_CONFLICT\x10\a\x12.\n" +
+	"*ADMISSION_CODE_INVALID_COMPANION_REFERENCE\x10\b*q\n" +
 	"\tToolState\x12\x1a\n" +
 	"\x16TOOL_STATE_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12TOOL_STATE_PENDING\x10\x01\x12\x17\n" +

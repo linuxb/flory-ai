@@ -58,7 +58,9 @@ message TransactionSpec {
     ToolMode mode = 2;
     // JSONPath into the arguments that identifies the idempotency key.
     string idempotency_key_path = 3;
-    bool idempotent_retryable = 4;
+    // Explicitly optional so an irreversible tool cannot satisfy its obligation
+    // to state retry safety by leaving a proto3 bool at its false default.
+    optional bool idempotent_retryable = 4;
     uint32 try_timeout_s = 5;
     string confirm_tool = 6;
     string cancel_tool = 7;

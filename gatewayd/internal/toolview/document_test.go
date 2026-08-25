@@ -8,6 +8,8 @@ import (
 	gatewayv1 "github.com/linuxb/flory-ai/gatewayd/internal/pb/flory/gateway/v1"
 )
 
+func boolean(value bool) *bool { return &value }
+
 func reserveContract() *gatewayv1.ToolContract {
 	return &gatewayv1.ToolContract{
 		ToolId:       "inventory.reserve",
@@ -21,7 +23,7 @@ func reserveContract() *gatewayv1.ToolContract {
 			EffectClass:         gatewayv1.EffectClass_EFFECT_CLASS_REVERSIBLE,
 			Mode:                gatewayv1.ToolMode_TOOL_MODE_TCC,
 			IdempotencyKeyPath:  "$.order_id",
-			IdempotentRetryable: true,
+			IdempotentRetryable: boolean(true),
 			TryTimeoutS:         900,
 			ConfirmTool:         "inventory.confirm",
 			CancelTool:          "inventory.release",
@@ -43,7 +45,7 @@ func checkContract() *gatewayv1.ToolContract {
 		OutputSchema:      `{"type":"object"}`,
 		RouteId:           "inventory",
 		Adapter:           &gatewayv1.AdapterSpec{Protocol: "grpc"},
-		Txn:               &gatewayv1.TransactionSpec{EffectClass: gatewayv1.EffectClass_EFFECT_CLASS_NONE, Mode: gatewayv1.ToolMode_TOOL_MODE_PLAIN, IdempotentRetryable: true},
+		Txn:               &gatewayv1.TransactionSpec{EffectClass: gatewayv1.EffectClass_EFFECT_CLASS_NONE, Mode: gatewayv1.ToolMode_TOOL_MODE_PLAIN, IdempotentRetryable: boolean(true)},
 		CompensationStyle: gatewayv1.CompensationStyle_COMPENSATION_STYLE_NOT_COMPENSATING,
 		TimeoutMs:         5000,
 		RetryConstraints:  &gatewayv1.RetryConstraints{MaxAttempts: 3, InitialBackoffMs: 100, MultiplierMilli: 2000, MaxBackoffMs: 5000},

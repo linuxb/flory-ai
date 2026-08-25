@@ -109,7 +109,9 @@ The `fold_mode` ladder is defined in [01 §5.4](./01-jit-dag-and-event-log.md): 
 
 **What no offline mode can tell you** is whether a write would have succeeded — whether the booking API would reject the address, whether the reservation would lose a concurrency race. Offline evaluation measures plan quality and cost, never execution success rate.
 
-Two implementation constraints follow: an evaluation needs **its own budget**, since live reads cost money and consume rate limits, and its reads should prefer a cache of the source run's recent reads. The executor enforces the ladder through a **fold-mode gate** — on encountering a node above the declared mode it records an unverified estimate instead of calling the tool.
+Two implementation constraints follow: an evaluation needs **its own budget**, since live reads cost money and consume rate limits, and its reads should prefer a cache of the source run's recent reads. The ladder is enforced through a **fold-mode gate** — on encountering a node above the declared mode the executor records an unverified estimate instead of calling the tool.
+
+That gate lives in the Agent Orchestrator's read executor, which is the component that runs this class of node: a tool-caller vertex with `effect_class: none` and no scope is Orchestrator-executed ([01 §3.2.1](./01-jit-dag-and-event-log.md)). It is a second guard behind the database's, which already refuses to let the Orchestrator record an execution event for any other class of vertex. Live reads reach their tools through `gatewayd`, against the pinned contract the evaluation recorded, so a `reads-live` run calls the same version the source run did rather than whatever is current.
 
 ### 3.3 What forks are genuinely good for
 

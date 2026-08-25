@@ -8,6 +8,8 @@ on:
       - 'db/**'
       - 'idl/**'
       - 'coordinator/**'
+      - 'gatewayd/**'
+      - 'sdk/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
@@ -19,6 +21,8 @@ on:
       - 'db/**'
       - 'idl/**'
       - 'coordinator/**'
+      - 'gatewayd/**'
+      - 'sdk/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
@@ -53,10 +57,30 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
-          cache-dependency-path: coordinator/go.sum
+          cache-dependency-path: |
+            coordinator/go.sum
+            gatewayd/go.sum
+      # Started as a step rather than a service container, because the emulator needs
+      # arguments and a service container can only pass `docker create` flags.
+      # -public-host must match STORAGE_EMULATOR_HOST below: when it does not, writes
+      # land and reads resolve to nothing, which looks like an empty bucket.
+      - name: Start the storage emulator
+        run: |
+          docker run -d --rm -p 4443:4443 --name fake-gcs fsouza/fake-gcs-server:1.55.0 \
+            -scheme http -public-host localhost:4443
+          for attempt in $(seq 1 30); do
+            curl -sf http://localhost:4443/storage/v1/b >/dev/null && break
+            sleep 1
+          done
       - run: npm ci
       - run: npm run db:setup
       - run: npm run verify
+      - name: Verify the Tool Registry Gateway
+        working-directory: gatewayd
+        env:
+          STORAGE_EMULATOR_HOST: http://localhost:4443
+          GATEWAYD_BLOB_BUCKET: flory-tool-views
+        run: go vet ./... && go test -race ./...
       - name: Verify the Distributed Transaction Coordinator
         working-directory: coordinator
         env:
@@ -64,3 +88,18 @@ jobs:
           ENGINE_DATABASE_URL: postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory
           COORDINATOR_DATABASE_URL: postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory
         run: go vet ./... && go test -race ./...
+      # The end-to-end suite runs against a live topology: the gateway in front of
+      # four tool services that register themselves through the SDK.
+      - name: Verify the gateway-mediated topology
+        env:
+          STORAGE_EMULATOR_HOST: http://localhost:4443
+          GATEWAYD_BLOB_BACKEND: gcs
+          GATEWAYD_BLOB_BUCKET: flory-tool-views
+          GATEWAY_BASE_URL: http://127.0.0.1:8092
+        run: |
+          npm run e2e:up &
+          for attempt in $(seq 1 120); do
+            if curl -sf http://127.0.0.1:8092/v1/tool-view | grep -q tool_view_digest; then break; fi
+            sleep 1
+          done
+          npx vitest run test/conformance/gateway-e2e.test.ts

@@ -28,7 +28,7 @@ The lifecycle manager owns scope states `open`, `cancelling`, `pivot-inflight`, 
 
 ### 3.3 Tool Executor
 
-The executor calls an adapter with a frozen idempotency key and deterministic retry policy. An unknown pivot outcome is resolved only through the pivot's registered status-query operation. After a pivot, retries are forward-only; exhausting the frozen policy suspends the scope for human intervention. The proposed `gatewayd` adapter additionally carries the frozen tool-view digest and exact tool version; it routes one attempt but never decides or hides a retry.
+The executor calls an adapter with a frozen idempotency key and deterministic retry policy. An unknown pivot outcome is resolved only through the pivot's registered status-query operation. After a pivot, retries are forward-only; exhausting the frozen policy suspends the scope for human intervention. Every call carries the frozen tool-view digest and the exact tool version, and `gatewayd` routes one attempt without ever deciding or hiding a retry.
 
 ### 3.4 Orphan Sweeper
 

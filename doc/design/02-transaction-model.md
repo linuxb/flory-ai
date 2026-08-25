@@ -36,7 +36,7 @@ Each tool-caller vertex includes the following `vertex/created` payload:
 }
 ```
 
-All of it comes from the immutable tool view resolved before planning. Each registered contract defines its effect class, TCC interfaces, compensation tool, idempotency-key convention, and resource footprint. The planner may reference those declarations but may never invent or override them. The proposed production publication path is specified in [09 — gatewayd Tool Registry Gateway](./09-tool-registry-gateway.md#3-registration-and-tool-view-contract).
+All of it comes from the immutable tool view resolved before planning. Each registered contract defines its effect class, TCC interfaces, compensation tool, idempotency-key convention, and resource footprint. The planner may reference those declarations but may never invent or override them. The production publication path is specified in [09 — gatewayd Tool Registry Gateway](./09-tool-registry-gateway.md#3-registration-and-the-tool-view-contract).
 
 ### 2.1 Derived attributes are never declared
 
@@ -104,7 +104,7 @@ When extension is impossible, the remedy is not a dead end: if the scope has no 
 
 ### 3.4 Deterministic check-rules
 
-The rules run before a DAG is frozen. **Any violation produces a closed-vocabulary result recorded as `subgraph/rejected`; the planner must regenerate rather than bypass the result.** The executable TypeScript implementation is `engine/src/check-rules.ts`. It accepts only a proposal and an immutable tool-view snapshot, performs no I/O, and returns `{accepted, violations}` with stable R1-R11 rule codes and implicated vertex IDs. Dynamic discovery through `gatewayd` happens before this call and never inside the checker.
+The rules run before a DAG is frozen. **Any violation produces a closed-vocabulary result recorded as `subgraph/rejected`; the planner must regenerate rather than bypass the result.** The executable TypeScript implementation is `engine/src/check-rules.ts`. It accepts only a proposal and an immutable tool-view snapshot, performs no I/O, and returns `{accepted, violations}` with stable R1-R11 rule codes and implicated vertex IDs. Dynamic discovery through `gatewayd` happens before this call and never inside the checker: `loadToolRegistry` turns a published view into the snapshot the checker receives.
 
 | # | Rule | Reason |
 |---|---|---|

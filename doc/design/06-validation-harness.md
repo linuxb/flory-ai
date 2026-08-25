@@ -78,9 +78,13 @@ Value-type resources (price, listing state) follow the same rule and matter more
 
 ### 3.3 The tool-view contract is under test
 
-Check-rules read an immutable tool view, so the sandbox's registration metadata is part of the validated surface, not scaffolding around it. The local test registry mirrors the publication and admission contract in [09 — gatewayd Tool Registry Gateway](./09-tool-registry-gateway.md#3-registration-and-tool-view-contract); it is a deterministic stand-in for gateway discovery, not a second production registry.
+The mock commerce world is four tool services — inventory, payment, logistics, and channel — each built on the tool-service SDK and each declaring the tools it implements. They register with `gatewayd` exactly as a production service does, over the same gRPC surface, with the same heartbeat lease and health reporting. The sandbox itself owns only the ledgers, the fault schedule, and the oracle snapshot; it is not a tool service and contains no gateway protocol.
 
-Every sandbox tool declares its real `effect_class`, TCC triple, `compensate_tool`, idempotency-key convention, `try_timeout_s`, and resource footprint (`inventory:{sku}`, `carrier:{carrier_id}`, `payment:{order_id}`). Registration itself is validated: a tool declaring `mode: saga` without a registered idempotent `compensate_tool` fails registration (R4), and a tool with no undo path must be registered `irreversible` rather than `reversible` ([02 §2.1](./02-transaction-model.md)). Tests also assert that a canonical gateway tool view and its local snapshot produce identical admission results. A mislabelled effect class remains the one defect no downstream check-rule can infer.
+That is what makes registration part of the validated surface rather than scaffolding around it. There is no hand-written catalog anywhere: check-rule fixtures read a *recording* of the tool view the gateway published from those declarations, and the end-to-end run asserts the live digest still equals the recording. A mislabelled `effect_class` in a service's own declaration therefore reaches the check-rule tests and fails them, which is the one defect no downstream check-rule can infer.
+
+Every declaration carries its real `effect_class`, TCC triple, `compensate_tool`, idempotency-key path, `try_timeout_s`, and resource footprint (`inventory:{sku}`, `carrier:{carrier}`, `payment:{order_id}`). Admission enforces the obligations in [09 §3.1](./09-tool-registry-gateway.md#31-admission-and-pending-state): a `mode: saga` tool without a registered idempotent `compensate_tool` is refused, a tool with no undo path must be registered `irreversible` rather than `reversible` ([02 §2.1](./02-transaction-model.md)), and compensation must be delta-based — the SDK gives a service no way to spell snapshot restore at all.
+
+A separate fixture asserts that a hand-built local registry and one loaded from the published view produce identical admission results, including for a proposal that is genuinely rejected, so the equality is evidence rather than two identical blanks.
 
 ### 3.4 Designated pivots
 

@@ -23,7 +23,7 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 | pivot | An irreversible and uncompensable node in a transaction scope, such as a committed inventory decrement or logistics booking; at most one is allowed per scope. | [02](./02-transaction-model.md) |
 | pivot-saga + TCC | The distributed-transaction model for business side effects: compensable before the pivot (Saga/TCC try), forward recovery only after it. | [02](./02-transaction-model.md) |
 | check-rules | Deterministic static validation of transaction properties before a DAG is frozen, such as requiring idempotent retry after a pivot. | [02](./02-transaction-model.md) |
-| `gatewayd` Tool Registry Gateway | The proposed MCP boundary that publishes immutable tool views and routes one execution attempt without owning transaction policy. | [09](./09-tool-registry-gateway.md) |
+| `gatewayd` Tool Registry Gateway | The boundary that publishes immutable tool views and routes one execution attempt without owning transaction policy: MCP to the executors, gRPC to tool services. | [09](./09-tool-registry-gateway.md) |
 | savepoint | The committed world state at scope entry; by construction it lies after every preceding pivot, so returning to it never crosses one. | [02](./02-transaction-model.md) |
 | replan | After a tool-call failure, greedily backtrack to the nearest **legal replan boundary** and regenerate the subgraph **in place**, in the same run. No fork. | [03](./03-replan-and-recovery.md) |
 | legal replan boundary | A succeeded planner outside every open transaction bracket and at or after the most recent `txn/pivot-passed`. | [03](./03-replan-and-recovery.md) |
@@ -43,7 +43,7 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 
 ## 3. Overall Architecture
 
-The current deployment view is [diagrams/deployment-architecture.html](./diagrams/deployment-architecture.html). It shows the Agent Orchestrator, Distributed Transaction Coordinator, proposed `gatewayd`, PostgreSQL event log, blob storage, and business services, including registration and execution-routing paths. The self-contained diagram adapts to light and dark themes and provides a Light/Dark/Auto control.
+The current deployment view is [diagrams/deployment-architecture.html](./diagrams/deployment-architecture.html). It shows the Agent Orchestrator, Distributed Transaction Coordinator, `gatewayd`, PostgreSQL event log, blob storage, and business services, including registration and execution-routing paths. The self-contained diagram adapts to light and dark themes and provides a Light/Dark/Auto control.
 
 The [conceptual architecture overview](./diagrams/architecture.html) remains a higher-level companion. Focused mechanism diagrams are editable Draw.io files: [transaction boundaries](./diagrams/txn-boundary.drawio), [replanning flow](./diagrams/replan-flow.drawio), [projection and offline evaluation](./diagrams/projection.drawio), and [Coordinator/Engine interaction](./diagrams/coordinator-engine-interaction.drawio).
 

@@ -11,3 +11,4 @@ All planning documents are written in English.
 | [001](./plan-001-tla-plus-specification.md) | TLA+ specification of the transaction protocol | [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) | Active — S1 and S2 complete; S3 trigger-gated |
 | [002](./plan-002-event-log-storage-and-fork.md) | Event log storage and fork API implementation | [ADR-005](../design/adr/adr-005-lazy-causal-fork-semantics.md) | Proposed — Blocked on scaffolding |
 | [003](./plan-003-distributed-transaction-coordinator.md) | Distributed Transaction Coordinator | [ADR-001](../design/adr/adr-001-engine-language-split.md), [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) | Done |
+| [004](./plan-004-tool-registry-gateway.md) | Tool Registry Gateway | [ADR-006](../design/adr/adr-006-tool-registry-gateway.md) | Done |

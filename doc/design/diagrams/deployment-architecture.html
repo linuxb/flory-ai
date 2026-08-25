@@ -274,7 +274,7 @@
 
         <div id="gateway" class="node proxy-node" style="left: 500px; top: 250px;">
             <div class="title">gatewayd Tool Registry Gateway</div>
-            <div class="desc">Proposed: Immutable Tool Views & One-Attempt Proxy (MCP)</div>
+            <div class="desc">Immutable Tool Views & One-Attempt Routing<br>MCP north &middot; gRPC south</div>
         </div>
 
         <div id="db" class="node data-node" style="left: 250px; top: 650px;">
@@ -289,12 +289,12 @@
 
         <div id="service-a" class="node domain-node" style="left: 1000px; top: 150px;">
             <div class="title">Tool Service A</div>
-            <div class="desc">e.g., Inventory (gRPC)</div>
+            <div class="desc">e.g., Inventory &middot; embeds the SDK</div>
         </div>
 
         <div id="service-b" class="node domain-node" style="left: 1000px; top: 400px;">
             <div class="title">Tool Service B</div>
-            <div class="desc">e.g., Payment (HTTP)</div>
+            <div class="desc">e.g., Payment &middot; embeds the SDK</div>
         </div>
 
         <!-- SVG for lines -->
@@ -322,16 +322,16 @@
         </svg>
 
         <!-- Edge Labels -->
-        <div id="label-1" class="edge-label" style="left: 380px; top: 240px;">Resolve Tool View (MCP)</div>
+        <div id="label-1" class="edge-label" style="left: 380px; top: 240px;">Resolve Tool View &middot; Route Reads (MCP)</div>
         <div id="label-2" class="edge-label" style="left: 380px; top: 395px;">Route One Attempt (MCP)</div>
         <div id="label-3" class="edge-label" style="left: 300px; top: 560px;">Append DAG + View Ref</div>
         <div id="label-4" class="edge-label" style="left: 350px; top: 580px;">Claim Work + Append Events</div>
         <div id="label-5" class="edge-label" style="left: 525px; top: 695px;">Blob Ref</div>
         <div id="label-6" class="edge-label" style="left: 700px; top: 550px;">Publish Tool View</div>
-        <div id="label-7" class="edge-label" style="left: 880px; top: 230px;">Route One Attempt</div>
-        <div id="label-8" class="edge-label" style="left: 900px; top: 260px;">Register Contract</div>
-        <div id="label-9" class="edge-label" style="left: 880px; top: 375px;">Route One Attempt</div>
-        <div id="label-10" class="edge-label" style="left: 900px; top: 405px;">Register Contract</div>
+        <div id="label-7" class="edge-label" style="left: 880px; top: 230px;">Route One Attempt (gRPC)</div>
+        <div id="label-8" class="edge-label" style="left: 900px; top: 260px;">Register &middot; Heartbeat &middot; Health (SDK)</div>
+        <div id="label-9" class="edge-label" style="left: 880px; top: 375px;">Route One Attempt (gRPC)</div>
+        <div id="label-10" class="edge-label" style="left: 900px; top: 405px;">Register &middot; Heartbeat &middot; Health (SDK)</div>
     </div>
 
     <script>

@@ -6,15 +6,16 @@ The system is designed for the difficult boundary between probabilistic LLM plan
 
 ## Status
 
-This repository contains the architecture and design baseline plus an executable TypeScript/PostgreSQL core: immutable event storage, canonical projections, offline forks, deterministic Doc 02 check-rules R1-R11, and T-A harness tests. Test-only inventory, payment, logistics, and channel actors exercise complex e-commerce DAG admission and barrier placement. The Distributed Transaction Coordinator is implemented in Go 1.25; production business adapters remain out of scope.
+This repository contains the architecture and design baseline plus an executable core: immutable event storage, canonical projections, offline forks, deterministic Doc 02 check-rules R1-R11, and T-A harness tests in TypeScript on PostgreSQL; the Distributed Transaction Coordinator and the `gatewayd` Tool Registry Gateway in Go 1.25. Test-only inventory, payment, logistics, and channel tool services register with the gateway through the SDK and exercise complex e-commerce DAG admission, barrier placement, and gateway-routed execution. Production business adapters remain out of scope.
 
 ## Architecture at a glance
 
 - **TypeScript engine:** owns the planner loop, canonical context-projection pipeline, check rules, prompt assembly, refine loop, model adapters, and replay testing.
 - **Distributed Transaction Coordinator:** owns transaction scopes, runtime barriers, timeout handling, tool execution, and business-adapter orchestration. Its current implementation uses Go 1.25.
-- **`gatewayd` (proposed, Go 1.25 planned):** publishes immutable tool views and routes exact MCP tool calls without taking ownership of planning, retries, or transaction events.
+- **`gatewayd`:** publishes immutable, content-addressed tool views and routes exactly one requested tool call, without taking ownership of planning, retries, or transaction events. It speaks MCP to the executors and gRPC to tool services.
+- **Tool-service SDK:** what a tool service embeds to declare its contracts, register them, heartbeat, and serve execution. Available for Go and TypeScript from one generated contract.
 - **PostgreSQL:** stores the append-only event log and metadata-only harness state, and allocates the write-order sequence.
-- **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own.
+- **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own. Execution events belong to the vertex's executor: read-only vertices are the Orchestrator's, everything else is the Coordinator's, and the database enforces the split.
 
 ## Local development
 
@@ -61,6 +62,7 @@ Stop it with `npm run db:down`, which preserves the volume. To discard the local
 ```sh
 npm run verify
 go -C coordinator test ./...
+go -C gatewayd test ./...
 ```
 
 `npm run verify` reads `.env` automatically. Go does not, so export the two service connections when
@@ -81,7 +83,24 @@ npm run db:refresh && npm run verify
 npm run db:refresh && go -C coordinator test ./...   # with the two URLs exported as above
 ```
 
-For an end-to-end local execution, start the deterministic adapter sandbox with `npm run sandbox`, then run the Coordinator with `go -C coordinator run ./cmd/coordinator`. Its health endpoints default to `127.0.0.1:8091`; production business adapters are intentionally not included.
+### Running the gateway-mediated topology
+
+Every tool call goes through `gatewayd`. `npm run e2e:up` brings the topology up in dependency order — the gateway, then the four mock tool services, which register themselves through the SDK — and finishes once the gateway reports a published tool view:
+
+```sh
+npm run e2e:up
+```
+
+It defaults to in-memory tool-view storage, which needs nothing installed but loses every published view on restart. To use a GCS-compatible store instead, point it at an emulator:
+
+```sh
+docker run -d --rm -p 4443:4443 fsouza/fake-gcs-server -scheme http -public-host localhost:4443
+STORAGE_EMULATOR_HOST=http://localhost:4443 GATEWAYD_BLOB_BACKEND=gcs npm run e2e:up
+```
+
+`STORAGE_EMULATOR_HOST` must match the emulator's `-public-host`. When it does not, writes land but reads resolve to nothing, which looks like an empty bucket rather than a misconfiguration.
+
+With the topology up, `GATEWAY_BASE_URL=http://127.0.0.1:8092 npx vitest run test/conformance/gateway-e2e.test.ts` exercises the live path, and `npm run record:tool-view` refreshes the recorded view the check-rule fixtures read. Then run the Coordinator with `go -C coordinator run ./cmd/coordinator`; its health endpoints default to `127.0.0.1:8091`. Production business adapters are intentionally not included.
 
 The default connection string is `postgresql://flory:flory-dev-password@127.0.0.1:5432/flory`. Confirm access with:
 
@@ -112,7 +131,7 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Validation harness](doc/design/06-validation-harness.md)                                           | Sandbox contract, fault injection, scenario matrix, and correctness oracles. |
 | [Distributed Transaction Coordinator](doc/design/07-distributed-transaction-coordinator.md)         | Scope lifecycle, event-log interactions, barriers, execution, and recovery.      |
 | [Database schema and storage model](doc/design/08-database-schema.md)                               | Event log immutability, sequence allocation, and synchronous projections.   |
-| [`gatewayd` Tool Registry Gateway](doc/design/09-tool-registry-gateway.md)                          | Immutable tool views, dynamic registration, and one-attempt MCP routing.     |
+| [`gatewayd` Tool Registry Gateway](doc/design/09-tool-registry-gateway.md)                          | Immutable tool views, dynamic registration, the SDK, and one-attempt routing. |
 
 Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/). The [deployment architecture](doc/design/diagrams/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/design/diagrams/architecture.html) remains a higher-level companion. Editable Draw.io diagrams cover [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Coordinator/Engine interaction](doc/design/diagrams/coordinator-engine-interaction.drawio).
 
@@ -124,6 +143,7 @@ Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagram
 ├── .env.example           # Overrideable local connection and service settings
 ├── AGENTS.md              # Design invariants and contributor review checklist
 ├── coordinator/           # Go 1.25 Distributed Transaction Coordinator service
+├── gatewayd/              # Go 1.25 Tool Registry Gateway and its Go tool-service SDK
 ├── db/                    # PostgreSQL migrations, bootstrap, and migration utilities
 ├── docker/                # Optional containerized PostgreSQL for local development
 ├── doc/
@@ -133,7 +153,8 @@ Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagram
 │   └── plan/              # Implementation and rollout plans
 ├── spec/                  # TLA+ transaction-protocol model and TLC configurations
 ├── engine/                # TypeScript event store, projections, forks, and harness
-├── idl/                   # Versioned event-log schema, shared by TypeScript and Go
+├── idl/                   # Versioned shared contracts: the event-log JSON Schema and the gateway protobufs
+├── sdk/                   # TypeScript tool-service SDK
 ├── package.json           # Node 22 scripts and dependencies
 ├── test/                  # Test-only mocks, domain fixtures, and validation helpers
 ├── .editorconfig          # Shared editor behavior

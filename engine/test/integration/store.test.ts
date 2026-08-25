@@ -10,6 +10,9 @@ const coordinatorUrl = coordinatorDatabaseUrl;
 const engine = new EventStore({connectionString: engineUrl, actor: 'engine'});
 const coordinator = new EventStore({connectionString: coordinatorUrl, actor: 'coordinator'});
 const plannerId = '00000000-0000-4000-8000-000000000101';
+// Any tool vertex pins the frozen contract it was admitted against; these tests
+// never resolve a live view, so one fixed digest stands in for it.
+const toolViewDigest = `sha256:${'0'.repeat(64)}`;
 
 async function plannerRun(): Promise<string> {
     const run = await engine.createRun();
@@ -66,6 +69,8 @@ describe('PostgreSQL event store', () => {
                 payload: {
                     role: 'tool',
                     tool: 'inventory.check',
+                    tool_version: '1.0.0',
+                    tool_view_digest: toolViewDigest,
                     input: {sku: 'SKU-1'},
                     retry_policy: {max_attempts: 2, initial_backoff_ms: 0, multiplier: 2, max_backoff_ms: 0},
                     txn: {effect_class: 'none', mode: 'plain'},
@@ -121,6 +126,8 @@ describe('PostgreSQL event store', () => {
                 payload: {
                     role: 'tool',
                     tool: 'inventory.check',
+                    tool_version: '1.0.0',
+                    tool_view_digest: toolViewDigest,
                     input: {sku: 'SKU-1'},
                     retry_policy: {max_attempts: 1, initial_backoff_ms: 0, multiplier: 1, max_backoff_ms: 0},
                     txn: {effect_class: 'none', mode: 'plain'},

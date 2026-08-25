@@ -44,9 +44,15 @@ export interface TransactionSpec {
 export interface ToolVertexPayload {
     role: 'tool';
     tool: string;
+    tool_version: string;
+    tool_view_digest: string;
     input: Record<string, unknown>;
     retry_policy: RetryPolicy;
     txn: TransactionSpec;
+}
+export interface SubgraphProposedPayload {
+    tool_view_ref: string;
+    tool_view_digest: string;
 }
 export interface ForkSubstitution {
     stream_seq: number;

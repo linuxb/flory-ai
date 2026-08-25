@@ -43,11 +43,18 @@ type TransactionSpec struct {
 }
 
 type ToolVertexPayload struct {
-	Role        string                 `json:"role"`
-	Tool        string                 `json:"tool"`
-	Input       map[string]interface{} `json:"input"`
-	RetryPolicy RetryPolicy            `json:"retry_policy"`
-	Txn         TransactionSpec        `json:"txn"`
+	Role           string                 `json:"role"`
+	Tool           string                 `json:"tool"`
+	ToolVersion    string                 `json:"tool_version"`
+	ToolViewDigest string                 `json:"tool_view_digest"`
+	Input          map[string]interface{} `json:"input"`
+	RetryPolicy    RetryPolicy            `json:"retry_policy"`
+	Txn            TransactionSpec        `json:"txn"`
+}
+
+type SubgraphProposedPayload struct {
+	ToolViewRef    string `json:"tool_view_ref"`
+	ToolViewDigest string `json:"tool_view_digest"`
 }
 
 type ForkSubstitution struct {

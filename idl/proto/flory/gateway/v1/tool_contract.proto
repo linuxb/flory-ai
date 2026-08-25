@@ -1,0 +1,97 @@
+// The registration contract a tool service declares to gatewayd.
+//
+// Every semantic field here participates in the content-addressed tool-view
+// digest. Operational facts that must not change a frozen contract's identity
+// -- instance membership and health -- live in registry.proto instead.
+syntax = "proto3";
+
+package flory.gateway.v1;
+
+option go_package = "github.com/linuxb/flory-ai/gatewayd/internal/pb/flory/gateway/v1;gatewayv1";
+
+// Side-effect classification from design document 02.
+enum EffectClass {
+    EFFECT_CLASS_UNSPECIFIED = 0;
+    EFFECT_CLASS_NONE = 1;
+    EFFECT_CLASS_BUFFERABLE = 2;
+    EFFECT_CLASS_REVERSIBLE = 3;
+    EFFECT_CLASS_IRREVERSIBLE = 4;
+}
+
+// Transaction integration supported by a registered tool.
+enum ToolMode {
+    TOOL_MODE_UNSPECIFIED = 0;
+    TOOL_MODE_PLAIN = 1;
+    TOOL_MODE_TCC = 2;
+    TOOL_MODE_SAGA = 3;
+}
+
+// How a compensating tool reverses its try. Snapshot restore is rejected at
+// registration because only delta compensation commutes with a concurrent
+// branch's committed change (AGENTS.md discipline 17).
+enum CompensationStyle {
+    COMPENSATION_STYLE_UNSPECIFIED = 0;
+    COMPENSATION_STYLE_NOT_COMPENSATING = 1;
+    COMPENSATION_STYLE_DELTA = 2;
+    COMPENSATION_STYLE_SNAPSHOT = 3;
+}
+
+// The retry envelope an executor may not exceed for this tool.
+//
+// The multiplier is expressed in thousandths so the whole contract remains
+// integer-valued: the tool-view digest is taken over canonical JSON, and a
+// floating-point literal has no canonical text form.
+message RetryConstraints {
+    uint32 max_attempts = 1;
+    uint32 initial_backoff_ms = 2;
+    uint32 multiplier_milli = 3;
+    uint32 max_backoff_ms = 4;
+}
+
+// The declared transaction properties of one tool.
+//
+// `is_pivot` and `compensable` have no field here on purpose: both are derived
+// from effect_class and the undo path (02 section 2.1), and a declared copy
+// could disagree with what it was derived from.
+message TransactionSpec {
+    EffectClass effect_class = 1;
+    ToolMode mode = 2;
+    // JSONPath into the arguments that identifies the idempotency key.
+    string idempotency_key_path = 3;
+    bool idempotent_retryable = 4;
+    uint32 try_timeout_s = 5;
+    string confirm_tool = 6;
+    string cancel_tool = 7;
+    string compensate_tool = 8;
+    string status_tool = 9;
+}
+
+// The protocol contract for reaching a tool, separate from any endpoint address.
+message AdapterSpec {
+    // Wire protocol of the upstream. Only "grpc" is implemented.
+    string protocol = 1;
+    // Protocol-specific operation selector, for documentation and future adapters.
+    string operation = 2;
+}
+
+// One immutable (tool_id, tool_version) contract.
+message ToolContract {
+    string tool_id = 1;
+    string tool_version = 2;
+    string description = 3;
+    // JSON Schema text. Tool payloads stay JSON Schema because that is what MCP
+    // inputSchema and the planner consume; protobuf describes the envelope only.
+    string input_schema = 4;
+    string output_schema = 5;
+    // Stable logical route identifier. In the digest; endpoint membership is not.
+    string route_id = 6;
+    AdapterSpec adapter = 7;
+    TransactionSpec txn = 8;
+    CompensationStyle compensation_style = 9;
+    // Resource footprint used by check-rules R9 and R11, e.g. "inventory:{sku}".
+    repeated string footprint = 10;
+    repeated string writes = 11;
+    uint32 timeout_ms = 12;
+    RetryConstraints retry_constraints = 13;
+    string owner = 14;
+}

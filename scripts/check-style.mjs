@@ -2,9 +2,11 @@ import {readdir, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
 const MAX_LINE_LENGTH = 200;
-const SOURCE_DIRECTORIES = ['db', 'engine', 'scripts', 'test'];
+const SOURCE_DIRECTORIES = ['db', 'engine', 'scripts', 'sdk', 'test'];
 const STYLE_FILES = ['idl/event-log.schema.json'];
 const TYPE_SCRIPT_EXTENSIONS = new Set(['.cts', '.mts', '.ts', '.mjs']);
+// Generated protobuf stubs are exempt: protoc-gen-es owns their layout.
+const EXCLUDED_DIRECTORIES = new Set(['sdk/typescript/gen']);
 
 async function listSourceFiles(directory) {
     const entries = await readdir(directory, {withFileTypes: true});
@@ -12,7 +14,7 @@ async function listSourceFiles(directory) {
         entries.map((entry) => {
             const path = join(directory, entry.name);
             if (entry.isDirectory()) {
-                return listSourceFiles(path);
+                return EXCLUDED_DIRECTORIES.has(path) ? [] : listSourceFiles(path);
             }
             return TYPE_SCRIPT_EXTENSIONS.has(path.slice(path.lastIndexOf('.'))) ? [path] : [];
         }),

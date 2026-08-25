@@ -1,0 +1,125 @@
+// The gatewayd south-side registration surface, spoken by the tool-service SDK.
+syntax = "proto3";
+
+package flory.gateway.v1;
+
+import "flory/gateway/v1/tool_contract.proto";
+
+option go_package = "github.com/linuxb/flory-ai/gatewayd/internal/pb/flory/gateway/v1;gatewayv1";
+
+// One running instance of a tool service. Never part of the tool-view digest:
+// membership may change so the gateway can route a pinned contract to a healthy
+// instance, and that must not change tool semantics or version identity.
+message InstanceInfo {
+    string instance_id = 1;
+    string route_id = 2;
+    // gRPC dial target of this instance, "host:port".
+    string target = 3;
+    // How long the registration lease survives without a heartbeat.
+    uint32 lease_ttl_ms = 4;
+}
+
+enum ServingStatus {
+    SERVING_STATUS_UNSPECIFIED = 0;
+    SERVING_STATUS_SERVING = 1;
+    SERVING_STATUS_NOT_SERVING = 2;
+}
+
+// The instance's own view of its readiness, carried on every heartbeat. The
+// gateway additionally probes grpc.health.v1.Health; both must agree before an
+// instance is routable.
+message HealthReport {
+    ServingStatus status = 1;
+    string detail = 2;
+}
+
+// The closed registration-rejection vocabulary from design document 09 section 3.
+// Both SDK languages report identical codes.
+enum AdmissionCode {
+    ADMISSION_CODE_UNSPECIFIED = 0;
+    // G1: identity or schema fields missing, or a schema that does not compile.
+    ADMISSION_CODE_MALFORMED_CONTRACT = 1;
+    // G2: mode tcc without a complete, idempotent, timed try-confirm-cancel triple.
+    ADMISSION_CODE_INCOMPLETE_TCC_TRIPLE = 2;
+    // G3: mode saga without a registered idempotent compensation.
+    ADMISSION_CODE_INCOMPLETE_SAGA_COMPENSATION = 3;
+    // G4: an effect class that disagrees with the declared undo path.
+    ADMISSION_CODE_MISLABELLED_EFFECT_CLASS = 4;
+    // G5: compensation declared as snapshot restore rather than delta.
+    ADMISSION_CODE_NON_DELTA_COMPENSATION = 5;
+    // G6: a referenced companion tool is absent from the view.
+    ADMISSION_CODE_UNRESOLVED_COMPANION = 6;
+    // G7: a published (tool_id, tool_version) was re-registered with a different body.
+    ADMISSION_CODE_IMMUTABLE_VERSION_CONFLICT = 7;
+    // G8: a derived attribute was declared, or an unknown field was supplied.
+    ADMISSION_CODE_DERIVED_ATTRIBUTE_DECLARED = 8;
+}
+
+enum ToolState {
+    TOOL_STATE_UNSPECIFIED = 0;
+    // Structurally valid but waiting on a companion that no service has registered yet.
+    TOOL_STATE_PENDING = 1;
+    // Published in the current tool view.
+    TOOL_STATE_ADMITTED = 2;
+    TOOL_STATE_REJECTED = 3;
+}
+
+message ToolStatus {
+    string tool_id = 1;
+    string tool_version = 2;
+    ToolState state = 3;
+    AdmissionCode code = 4;
+    string detail = 5;
+}
+
+// A pointer to one immutable published tool view.
+message ToolViewRef {
+    string tool_view_ref = 1;
+    string tool_view_digest = 2;
+}
+
+message RegisterRequest {
+    InstanceInfo instance = 1;
+    repeated ToolContract tools = 2;
+    HealthReport health = 3;
+}
+
+message RegisterResponse {
+    repeated ToolStatus statuses = 1;
+    ToolViewRef view = 2;
+}
+
+message HeartbeatRequest {
+    string instance_id = 1;
+    HealthReport health = 2;
+}
+
+message HeartbeatResponse {
+    // False after a gateway restart, which tells the SDK to register again.
+    bool known_instance = 1;
+    ToolViewRef view = 2;
+}
+
+message DeregisterRequest {
+    string instance_id = 1;
+}
+
+message DeregisterResponse {}
+
+message GetToolViewRequest {
+    // Empty resolves the current view; a digest resolves that exact frozen view.
+    string tool_view_digest = 1;
+}
+
+message GetToolViewResponse {
+    ToolViewRef view = 1;
+    // The canonical tool-view document, verbatim, so the caller can verify the digest.
+    string document = 2;
+}
+
+service RegistryService {
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+    rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
+    rpc GetToolView(GetToolViewRequest) returns (GetToolViewResponse);
+}

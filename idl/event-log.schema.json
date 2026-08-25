@@ -48,6 +48,10 @@
             },
             "then": {"required": ["ignorable"], "properties": {"ignorable": {"const": true}}}
         },
+        {
+            "if": {"properties": {"event_type": {"const": "subgraph/proposed"}}, "required": ["event_type"]},
+            "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphProposedPayload"}}}
+        },
         {"if": {"properties": {"event_type": {"const": "vertex/created"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/vertexCreatedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "txn/scope"}}, "required": ["event_type"]}, "then": {"required": ["scope_id"], "properties": {"payload": {"$ref": "#/$defs/txnScopePayload"}}}},
         {
@@ -62,6 +66,13 @@
     ],
     "additionalProperties": false,
     "$defs": {
+        "toolViewDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "subgraphProposedPayload": {
+            "type": "object",
+            "required": ["tool_view_ref", "tool_view_digest"],
+            "properties": {"tool_view_ref": {"type": "string", "minLength": 1}, "tool_view_digest": {"$ref": "#/$defs/toolViewDigest"}},
+            "additionalProperties": true
+        },
         "retryPolicy": {
             "type": "object",
             "required": ["max_attempts", "initial_backoff_ms", "multiplier", "max_backoff_ms"],
@@ -94,10 +105,12 @@
                 {"type": "object", "required": ["role"], "properties": {"role": {"const": "confirmation-barrier"}}, "additionalProperties": false},
                 {
                     "type": "object",
-                    "required": ["role", "tool", "input", "retry_policy", "txn"],
+                    "required": ["role", "tool", "tool_version", "tool_view_digest", "input", "retry_policy", "txn"],
                     "properties": {
                         "role": {"const": "tool"},
                         "tool": {"type": "string", "minLength": 1},
+                        "tool_version": {"type": "string", "minLength": 1},
+                        "tool_view_digest": {"$ref": "#/$defs/toolViewDigest"},
                         "input": {"type": "object"},
                         "retry_policy": {"$ref": "#/$defs/retryPolicy"},
                         "txn": {"$ref": "#/$defs/transactionSpec"}
@@ -124,6 +137,7 @@
             "properties": {
                 "idempotency_key": {"type": "string", "minLength": 1},
                 "deadline_at": {"type": "string", "format": "date-time"},
+                "tool_view_digest": {"$ref": "#/$defs/toolViewDigest"},
                 "confirm_tool": {"type": "string", "minLength": 1},
                 "cancel_tool": {"type": "string", "minLength": 1},
                 "compensate_tool": {"type": "string", "minLength": 1},

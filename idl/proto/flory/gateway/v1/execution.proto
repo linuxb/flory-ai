@@ -1,0 +1,47 @@
+// The surface a tool service implements and gatewayd dispatches one attempt to.
+syntax = "proto3";
+
+package flory.gateway.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/linuxb/flory-ai/gatewayd/internal/pb/flory/gateway/v1;gatewayv1";
+
+// The executor-facing result vocabulary, identical to the Coordinator's.
+enum Outcome {
+    OUTCOME_UNSPECIFIED = 0;
+    OUTCOME_SUCCEEDED = 1;
+    // The same idempotent operation may be attempted again -- by the executor, never here.
+    OUTCOME_RETRYABLE_FAILURE = 2;
+    OUTCOME_PERMANENT_FAILURE = 3;
+    // Requires a pivot status query to resolve.
+    OUTCOME_UNKNOWN = 4;
+}
+
+// Exactly one logical attempt. The gateway never generates a second one.
+message ExecuteRequest {
+    string run_id = 1;
+    string vertex_id = 2;
+    string scope_id = 3;
+    uint32 attempt_no = 4;
+    string tool_id = 5;
+    string tool_version = 6;
+    string tool_view_digest = 7;
+    string idempotency_key = 8;
+    // Arguments as JSON text, already validated against the frozen input schema.
+    // JSON text rather than google.protobuf.Struct, whose numbers are doubles and
+    // would silently lose integer fidelity.
+    string arguments = 9;
+    google.protobuf.Timestamp deadline = 10;
+}
+
+message ExecuteResponse {
+    Outcome outcome = 1;
+    // Result as JSON text; empty is equivalent to an empty object.
+    string result = 2;
+    string error = 3;
+}
+
+service ToolExecutionService {
+    rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+}

@@ -8,10 +8,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
-    "format": "prettier --write engine test db scripts idl/event-log.schema.json --ignore-unknown",
-    "format:check": "prettier --check engine test db scripts idl/event-log.schema.json --ignore-unknown && node scripts/check-style.mjs",
-    "generate": "node scripts/generate-event-types.mjs",
-    "generate:check": "node scripts/generate-event-types.mjs --check",
+    "format": "prettier --write engine sdk test db scripts idl/event-log.schema.json --ignore-unknown",
+    "format:check": "prettier --check engine sdk test db scripts idl/event-log.schema.json --ignore-unknown && node scripts/check-style.mjs",
+    "generate": "node scripts/generate-event-types.mjs && node scripts/generate-proto.mjs",
+    "generate:check": "node scripts/generate-event-types.mjs --check && node scripts/generate-proto.mjs --check",
     "db:up": "docker compose -f docker/compose.yml up -d --wait postgres",
     "db:down": "docker compose -f docker/compose.yml down",
     "db:bootstrap": "tsx db/bootstrap.ts",
@@ -24,10 +24,15 @@
     "verify": "npm run generate:check && npm run build && npm run test"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.14.0",
+    "@connectrpc/connect": "^2.1.2",
+    "@connectrpc/connect-node": "^2.1.2",
     "ajv": "^8.17.1",
     "pg": "^8.13.1"
   },
   "devDependencies": {
+    "@bufbuild/buf": "^1.72.0",
+    "@bufbuild/protoc-gen-es": "^2.14.0",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "prettier": "3.5.3",

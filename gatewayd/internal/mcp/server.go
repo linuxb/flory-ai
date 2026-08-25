@@ -116,7 +116,15 @@ func (server *Server) toolsList(ctx context.Context, raw json.RawMessage) (any, 
 	}
 	return map[string]any{
 		"tools": tools,
-		"_meta": map[string]any{"tool_view_ref": view.published.Ref, "tool_view_digest": view.published.Digest},
+		"_meta": map[string]any{
+			"tool_view_ref":    view.published.Ref,
+			"tool_view_digest": view.published.Digest,
+			// The canonical document, verbatim. The tools array above is a rendering
+			// for a model; this is the byte sequence the digest was taken over, so a
+			// caller can re-derive the digest instead of trusting the gateway's word
+			// for what it served -- which is what content addressing is for.
+			"tool_view_document": string(view.published.Canonical),
+		},
 	}, nil
 }
 

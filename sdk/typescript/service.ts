@@ -128,6 +128,16 @@ export class ToolService {
     }
 
     /**
+     * Sets the address the gateway will reach this instance on.
+     *
+     * A service that binds port 0 does not know its own address until it has listened, and the gateway needs a
+     * reachable target rather than the port the service asked for. Call this before registering.
+     */
+    setTarget(target: string): void {
+        this.config.target = target;
+    }
+
+    /**
      * Publishes this instance's own readiness.
      *
      * It drives both signals the gateway consults: the health check it probes, and the report carried on each

@@ -1,4 +1,4 @@
-import {ToolRegistry, type SubDagProposal} from '../../../engine/src/check-rules.js';
+import type {SubDagProposal} from '../../../engine/src/check-rules.js';
 
 /** A test-only inventory actor with an oracle-visible signed-delta ledger. */
 export class MockInventoryService {
@@ -109,93 +109,6 @@ export class MockCommerceWorld {
     readonly payment = new MockPaymentService();
     readonly logistics = new MockLogisticsService();
     readonly channel = new MockChannelService();
-}
-
-/** Creates the metadata registry used by complex e-commerce DAG fixtures. */
-export function createMockCommerceRegistry(): ToolRegistry {
-    const registry = new ToolRegistry();
-    const register = registry.register.bind(registry);
-    register({name: 'inventory.check', effectClass: 'none', mode: 'plain', idempotentRetryable: true, footprint: ['inventory:SKU-1']});
-    register({
-        name: 'inventory.reserve',
-        effectClass: 'reversible',
-        mode: 'tcc',
-        idempotentRetryable: true,
-        footprint: ['inventory:SKU-1'],
-        writes: ['inventory:SKU-1'],
-        confirmTool: 'inventory.confirm',
-        cancelTool: 'inventory.release',
-        tryTimeoutS: 300,
-    });
-    register({
-        name: 'inventory.confirm',
-        effectClass: 'bufferable',
-        mode: 'plain',
-        idempotentRetryable: true,
-        footprint: ['inventory:SKU-1'],
-        writes: ['inventory:SKU-1'],
-    });
-    register({
-        name: 'inventory.release',
-        effectClass: 'reversible',
-        mode: 'plain',
-        idempotentRetryable: true,
-        footprint: ['inventory:SKU-1'],
-        writes: ['inventory:SKU-1'],
-    });
-    register({
-        name: 'payment.authorize',
-        effectClass: 'reversible',
-        mode: 'tcc',
-        idempotentRetryable: true,
-        footprint: ['payment:ORDER-1'],
-        writes: ['payment:ORDER-1'],
-        confirmTool: 'payment.capture',
-        cancelTool: 'payment.void',
-        tryTimeoutS: 300,
-    });
-    register({
-        name: 'payment.capture',
-        effectClass: 'irreversible',
-        mode: 'plain',
-        idempotentRetryable: true,
-        footprint: ['payment:ORDER-1'],
-        writes: ['payment:ORDER-1'],
-    });
-    register({
-        name: 'payment.void',
-        effectClass: 'reversible',
-        mode: 'plain',
-        idempotentRetryable: true,
-        footprint: ['payment:ORDER-1'],
-        writes: ['payment:ORDER-1'],
-    });
-    register({name: 'logistics.quote', effectClass: 'none', mode: 'plain', idempotentRetryable: true, footprint: ['carrier:fast-co']});
-    register({
-        name: 'logistics.book',
-        effectClass: 'irreversible',
-        mode: 'plain',
-        idempotentRetryable: true,
-        footprint: ['carrier:fast-co'],
-        writes: ['carrier:fast-co'],
-    });
-    register({
-        name: 'channel.draft',
-        effectClass: 'bufferable',
-        mode: 'plain',
-        idempotentRetryable: true,
-        footprint: ['channel:LISTING-1'],
-        writes: ['channel:LISTING-1'],
-    });
-    register({
-        name: 'channel.publish',
-        effectClass: 'bufferable',
-        mode: 'plain',
-        idempotentRetryable: true,
-        footprint: ['channel:LISTING-1'],
-        writes: ['channel:LISTING-1'],
-    });
-    return registry;
 }
 
 /** Builds a two-scope DAG with parallel reads/tries, a confirmation barrier, and two sequential pivots. */

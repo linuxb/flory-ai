@@ -1,10 +1,24 @@
+import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 import {checkSubDag, type SubDagProposal} from '../../../engine/src/check-rules.js';
-import {createComplexCommerceDag, createMockCommerceRegistry, MockCommerceWorld} from './services.js';
+import {loadToolRegistry, type ToolViewDocument} from '../../../engine/src/tool-view.js';
+import {createComplexCommerceDag, MockCommerceWorld} from './services.js';
+
+/**
+ * The registry these fixtures are admitted against.
+ *
+ * It is loaded from the tool view the gateway published for the four mock tool services, recorded by
+ * `npm run record:tool-view`. There is no hand-written catalog to keep in step: a mislabelled effect class in a
+ * service's own declaration reaches these tests and fails them, which is what doc 06 section 3.3 asks for.
+ */
+function publishedRegistry() {
+    const document = JSON.parse(readFileSync(new URL('../../fixtures/tool-view-ecommerce.json', import.meta.url), 'utf8')) as ToolViewDocument;
+    return loadToolRegistry(document);
+}
 
 describe('complex e-commerce DAG validation', () => {
     it('admits and executes a multi-service, two-pivot DAG with explicit scope boundaries', () => {
-        const registry = createMockCommerceRegistry();
+        const registry = publishedRegistry();
         expect(checkSubDag(createComplexCommerceDag(), registry)).toEqual({accepted: true, violations: []});
 
         const world = new MockCommerceWorld();
@@ -26,7 +40,7 @@ describe('complex e-commerce DAG validation', () => {
     });
 
     it('rejects a conflicting parallel branch and admits the same work behind a pre-pivot barrier', () => {
-        const registry = createMockCommerceRegistry();
+        const registry = publishedRegistry();
         const withoutBarrier: SubDagProposal = {
             scopes: [{id: 's', members: ['reserve', 'confirm', 'capture']}],
             vertices: [
@@ -50,7 +64,7 @@ describe('complex e-commerce DAG validation', () => {
     });
 
     it('requires a confirmation barrier before independent parallel pivots', () => {
-        const registry = createMockCommerceRegistry();
+        const registry = publishedRegistry();
         const withoutBarrier: SubDagProposal = {
             scopes: [
                 {id: 'payment', members: ['authorize', 'capture']},

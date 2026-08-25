@@ -20,6 +20,8 @@
     "db:reset": "tsx db/reset.ts",
     "db:refresh": "npm run db:reset && npm run db:migrate",
     "sandbox": "tsx test/sandbox/server.ts",
+    "e2e:up": "node scripts/e2e-up.mjs",
+    "record:tool-view": "node scripts/record-tool-view.mjs",
     "test": "vitest run",
     "verify": "npm run generate:check && npm run build && npm run test"
   },

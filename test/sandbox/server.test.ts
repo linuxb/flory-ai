@@ -1,25 +1,43 @@
 import {describe, expect, it} from 'vitest';
+import {FaultSchedule} from '../mocks/ecommerce/faults.js';
 import {Sandbox} from './server.js';
 
-describe('out-of-process sandbox core', () => {
-    it('deduplicates a repeated reservation and releases the scope-owned delta', () => {
+describe('the deterministic test world', () => {
+    // The ledger property is about the actor rather than about any transport, so it is asserted directly on the world
+    // the tool services act on.
+    it('deduplicates a repeated reservation and releases only the delta that reservation held', () => {
         const sandbox = new Sandbox();
-        const request = {run_id: 'r', vertex_id: 'v', attempt_no: 1, tool: 'inventory.reserve', idempotency_key: 'order-1', input: {sku: 'SKU-1', quantity: 3}};
-        expect(sandbox.execute(request).outcome).toBe('succeeded');
-        expect(sandbox.execute(request).outcome).toBe('succeeded');
+        const inventory = sandbox.commerce.inventory;
+        inventory.reserve('order-1', 'SKU-1', 3);
+        inventory.reserve('order-1', 'SKU-1', 3);
         expect((sandbox.snapshot().inventory as {open_holds: number}).open_holds).toBe(1);
-        expect(sandbox.execute({...request, tool: 'inventory.release'}).outcome).toBe('succeeded');
+        expect(inventory.check('SKU-1')).toBe(97);
+        inventory.release('order-1');
         expect((sandbox.snapshot().inventory as {open_holds: number}).open_holds).toBe(0);
+        expect(inventory.check('SKU-1')).toBe(100);
     });
 
-    it('injects faults deterministically by seed, tool, and attempt', () => {
+    it('starts each run from clean ledgers', () => {
         const sandbox = new Sandbox();
-        sandbox.reset({seed: 'scenario-7', faults: {'scenario-7:logistics.book:1': 'retryable-failure'}});
-        const request = {run_id: 'r', vertex_id: 'v', attempt_no: 1, tool: 'logistics.book', idempotency_key: 'order-1', input: {order_id: 'order-1', carrier: 'fast', postcode: '3210'}};
-        expect(sandbox.execute(request).outcome).toBe('retryable-failure');
-        expect(sandbox.execute({...request, attempt_no: 2}).outcome).toBe('succeeded');
+        sandbox.commerce.inventory.reserve('order-1', 'SKU-1', 3);
+        sandbox.reset();
+        expect((sandbox.snapshot().inventory as {open_holds: number}).open_holds).toBe(0);
+    });
+});
 
-        sandbox.reset({seed: 'scenario-8', faults: {'scenario-7:logistics.book:1': 'permanent-failure'}});
-        expect(sandbox.execute(request).outcome).toBe('succeeded');
+describe('fault injection', () => {
+    // Keyed by seed, tool, and attempt, so a scenario can fail one attempt of one tool and no other.
+    it('is deterministic in all three key components', () => {
+        const faults = new FaultSchedule();
+        faults.reset('scenario-7', {'scenario-7:logistics.book:1': 'retryable-failure'});
+        expect(faults.injected('logistics.book', 1)).toBe('retryable-failure');
+        expect(faults.injected('logistics.book', 2)).toBeUndefined();
+        expect(faults.injected('payment.capture', 1)).toBeUndefined();
+    });
+
+    it('ignores a schedule written against another seed', () => {
+        const faults = new FaultSchedule();
+        faults.reset('scenario-8', {'scenario-7:logistics.book:1': 'permanent-failure'});
+        expect(faults.injected('logistics.book', 1)).toBeUndefined();
     });
 });

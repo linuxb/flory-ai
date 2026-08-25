@@ -1,88 +1,65 @@
 import {createServer, type IncomingMessage, type ServerResponse} from 'node:http';
+import type {ToolService} from '../../sdk/typescript/index.js';
+import {startChannelService} from '../mocks/ecommerce/channel-service.js';
+import {FaultSchedule, type InjectedOutcome} from '../mocks/ecommerce/faults.js';
+import {startInventoryService} from '../mocks/ecommerce/inventory-service.js';
+import {startLogisticsService} from '../mocks/ecommerce/logistics-service.js';
+import {startPaymentService} from '../mocks/ecommerce/payment-service.js';
 import {MockCommerceWorld} from '../mocks/ecommerce/services.js';
-
-interface OperationRequest {
-    run_id: string;
-    vertex_id: string;
-    attempt_no: number;
-    tool: string;
-    idempotency_key?: string;
-    input: Record<string, unknown>;
-}
 
 interface ResetRequest {
     seed?: string;
-    faults?: Record<string, 'retryable-failure' | 'permanent-failure' | 'unknown'>;
+    faults?: Record<string, InjectedOutcome>;
 }
 
-/** Deterministic, test-only business adapter world exposed over HTTP. */
+/**
+ * The deterministic test world.
+ *
+ * It owns the ledgers, the fault schedule, and the oracle snapshot, and it hosts four tool services. It is not itself
+ * a tool service and contains no gateway protocol: registration, heartbeat, and health belong to the SDK, and the
+ * contracts belong to the services that implement them.
+ */
 export class Sandbox {
     private world = new MockCommerceWorld();
-    private seed = 'default';
-    private faults: ResetRequest['faults'] = {};
+    private readonly faults = new FaultSchedule();
+    private services: ToolService[] = [];
 
-    /** Resets all ledgers and installs deterministic `(seed, tool, attempt)` outcomes. */
-    reset(request: ResetRequest = {}): void {
-        this.world = new MockCommerceWorld();
-        this.seed = request.seed ?? 'default';
-        this.faults = {...request.faults};
+    /** Returns the current ledgers, so a tool service reads the world it is meant to act on. */
+    get commerce(): MockCommerceWorld {
+        return this.world;
     }
 
-    /** Executes one adapter request using idempotent mock actors. */
-    execute(request: OperationRequest): Record<string, unknown> {
-        const injected = this.faults?.[`${this.seed}:${request.tool}:${request.attempt_no}`];
-        if (injected) return {outcome: injected, error: `injected ${injected}`};
-        const input = request.input;
-        const key = request.idempotency_key ?? String(input.order_id ?? request.vertex_id);
-        try {
-            let result: Record<string, unknown> = {};
-            switch (request.tool) {
-                case 'inventory.check':
-                    result = {available: this.world.inventory.check(String(input.sku))};
-                    break;
-                case 'inventory.reserve':
-                    this.world.inventory.reserve(key, String(input.sku), Number(input.quantity));
-                    break;
-                case 'inventory.confirm':
-                    this.world.inventory.confirm(key);
-                    break;
-                case 'inventory.release':
-                    this.world.inventory.release(key);
-                    break;
-                case 'payment.authorize':
-                    this.world.payment.authorize(String(input.order_id), Number(input.amount));
-                    break;
-                case 'payment.capture':
-                    this.world.payment.capture(String(input.order_id));
-                    break;
-                case 'payment.void':
-                    this.world.payment.void(String(input.order_id));
-                    break;
-                case 'payment.status':
-                    result = {occurred: this.world.payment.charges.has(String(input.order_id))};
-                    break;
-                case 'logistics.quote':
-                    result = {price: this.world.logistics.quote(String(input.carrier), String(input.postcode))};
-                    break;
-                case 'logistics.book':
-                    this.world.logistics.book(String(input.order_id), String(input.carrier), String(input.postcode));
-                    break;
-                case 'channel.draft':
-                    this.world.channel.draft(String(input.listing_id), String(input.sku), Number(input.price));
-                    break;
-                case 'channel.publish':
-                    this.world.channel.publish(String(input.listing_id));
-                    break;
-                default:
-                    return {outcome: 'permanent-failure', error: `unknown sandbox tool ${request.tool}`};
-            }
-            return {outcome: 'succeeded', result};
-        } catch (error) {
-            return {outcome: 'permanent-failure', error: error instanceof Error ? error.message : String(error)};
+    /** Starts the four tool services and registers them with the gateway. */
+    async start(gatewayUrl: string, heartbeatIntervalMs?: number): Promise<void> {
+        const options = {gatewayUrl, faults: this.faults, heartbeatIntervalMs};
+        // The world is read through this.world on every call, so a reset swaps the ledgers underneath the services
+        // without restarting them -- and therefore without disturbing the published tool view.
+        const proxy = new Proxy({} as MockCommerceWorld, {get: (_target, property) => this.world[property as keyof MockCommerceWorld]});
+        this.services = await Promise.all([startInventoryService(proxy, options), startPaymentService(proxy, options), startLogisticsService(proxy, options), startChannelService(proxy, options)]);
+        for (const service of this.services) {
+            await service.register();
+            service.start();
         }
     }
 
-    /** Returns an oracle-visible snapshot; this endpoint is never a production adapter contract. */
+    /** Stops every service, deregistering each so its route is withdrawn cleanly. */
+    async stop(): Promise<void> {
+        await Promise.all(this.services.map((service) => service.stop()));
+        this.services = [];
+    }
+
+    /**
+     * Resets the ledgers and installs deterministic `(seed, tool, attempt)` outcomes.
+     *
+     * It deliberately leaves the services registered: the tool view is a contract catalog, and a scenario resetting
+     * its world must not change what the tools are.
+     */
+    reset(request: ResetRequest = {}): void {
+        this.world = new MockCommerceWorld();
+        this.faults.reset(request.seed, request.faults);
+    }
+
+    /** Returns an oracle-visible snapshot; this endpoint is never a production contract. */
     snapshot(): Record<string, unknown> {
         return {
             inventory: {available: this.world.inventory.check('SKU-1'), open_holds: this.world.inventory.openHoldCount(), ledger: this.world.inventory.ledger},
@@ -104,14 +81,10 @@ function writeJson(response: ServerResponse, status: number, value: unknown): vo
     response.end(JSON.stringify(value));
 }
 
-/** Creates the out-of-process deterministic sandbox HTTP handler. */
-export function createSandboxHandler(sandbox = new Sandbox()): (request: IncomingMessage, response: ServerResponse) => void {
+/** Creates the world's control handler. It exposes reset and snapshots only, never tool execution. */
+export function createSandboxHandler(sandbox: Sandbox): (request: IncomingMessage, response: ServerResponse) => void {
     return (request, response) => {
         void (async () => {
-            if (request.method === 'POST' && request.url === '/v1/execute') {
-                writeJson(response, 200, sandbox.execute((await readJson(request)) as unknown as OperationRequest));
-                return;
-            }
             if (request.method === 'POST' && request.url === '/test/reset') {
                 sandbox.reset((await readJson(request)) as ResetRequest);
                 response.writeHead(204).end();
@@ -119,6 +92,10 @@ export function createSandboxHandler(sandbox = new Sandbox()): (request: Incomin
             }
             if (request.method === 'GET' && request.url === '/test/snapshot') {
                 writeJson(response, 200, sandbox.snapshot());
+                return;
+            }
+            if (request.method === 'GET' && request.url === '/healthz') {
+                response.writeHead(204).end();
                 return;
             }
             response.writeHead(404).end();
@@ -129,5 +106,13 @@ export function createSandboxHandler(sandbox = new Sandbox()): (request: Incomin
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
     const address = process.env.SANDBOX_ADDR ?? '127.0.0.1';
     const port = Number(process.env.SANDBOX_PORT ?? 8090);
-    createServer(createSandboxHandler()).listen(port, address, () => process.stdout.write(`sandbox listening on http://${address}:${port}\n`));
+    const gatewayUrl = process.env.GATEWAYD_BASE_URL ?? 'http://127.0.0.1:8093';
+    const sandbox = new Sandbox();
+    await sandbox.start(gatewayUrl, Number(process.env.GATEWAYD_HEARTBEAT_MS ?? 5000));
+    createServer(createSandboxHandler(sandbox)).listen(port, address, () => process.stdout.write(`sandbox world listening on http://${address}:${port}\n`));
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+        process.on(signal, () => {
+            void sandbox.stop().then(() => process.exit(0));
+        });
+    }
 }

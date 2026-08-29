@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>scene</title>
+<style>
+  html,body{margin:0;padding:0;background:#000;overflow:hidden}
+  #c{display:block;width:1280px;height:768px}
+</style></head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const W = 1280, H = 768, SS = 2;            // logical size + supersample factor
+const cv = document.getElementById('c');
+cv.width = W * SS; cv.height = H * SS;
+const ctx = cv.getContext('2d', { alpha: false });
+
+/* ---------------- palettes ----------------
+   The scene is drawn twice, once per theme, so the README can hand GitHub a
+   <picture> with a dark and a light source. Every colour used while drawing must
+   come from C — no literals — or the light render inherits dark values. */
+const THEMES = {
+  dark: {
+    bg:'#05070f', grid:'#0d1526', panel:'#0b1220', panel2:'#0e172a',
+    panelLog:'#081221', panelTxn:'#0a1020', stroke:'#1d2942',
+    text:'#e8eefb', muted:'#8ea6c8', dim:'#5b6f90',
+    cyan:'#22d3ee', violet:'#a78bfa', amber:'#fbbf24', emerald:'#34d399',
+    rose:'#fb7185', sky:'#60a5fa', orange:'#fb923c',
+    rail:'#1b2b47', railEvent:'#221c44', railReject:'#3a2436',
+    veilRGB:'255,255,255',                 // faint overlay fills
+    knockout:'rgba(5,7,15,0.92)',          // background behind captions
+    cometCore:'#ffffff',                   // hot centre of a travelling packet
+    glow:1, wash:1, trail:1,
+  },
+  light: {
+    bg:'#f4f7fc', grid:'#dae4f1', panel:'#ffffff', panel2:'#ffffff',
+    panelLog:'#eef6fa', panelTxn:'#f0f3fb', stroke:'#cbd8e8',
+    text:'#101f35', muted:'#4a5f7a', dim:'#8496ad',
+    cyan:'#0e7490', violet:'#6d28d9', amber:'#b45309', emerald:'#047857',
+    rose:'#be123c', sky:'#1d4ed8', orange:'#c2410c',
+    rail:'#c3d3e7', railEvent:'#d6cbef', railReject:'#e6ccd6',
+    veilRGB:'15,23,42',
+    knockout:'rgba(244,247,252,0.94)',
+    cometCore:null,                        // on paper the accent itself is the core
+    glow:0.42, wash:0.5, trail:2.4,        // a faint trail vanishes on white
+  },
+};
+let C = THEMES.dark;
+const veil = a => `rgba(${C.veilRGB},${a})`;
+const FS = '"Inter","Helvetica Neue",Helvetica,Arial,sans-serif';
+const FM = '"SF Mono","JetBrains Mono",Menlo,monospace';
+
+/* ---------------- helpers ---------------- */
+const clamp = (v,a,b)=>v<a?a:v>b?b:v;
+const cl01 = v=>clamp(v,0,1);
+const seg = (t,a,b)=>cl01((t-a)/(b-a));            // ramp 0..1 in window
+const ease = u=>u<.5?2*u*u:1-Math.pow(-2*u+2,2)/2; // easeInOutQuad
+const easeOut = u=>1-Math.pow(1-u,3);
+const EPS = 2e-3;                                  // below this, an activity level is off
+const pulse = u=>{ const v=Math.sin(Math.PI*cl01(u)); return v<EPS?0:v; };  // 0->1->0
+
+function hexA(hex,a){
+  const n = parseInt(hex.slice(1),16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.arcTo(x+w,y,x+w,y+h,r);
+  ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r);
+  ctx.arcTo(x,y,x+w,y,r);
+  ctx.closePath();
+}
+function panel(x,y,w,h,{r=14,fill=C.panel,stroke=C.stroke,lw=1.2,glow=null,ga=0}={}){
+  rr(x,y,w,h,r);
+  ctx.fillStyle = fill; ctx.fill();
+  if (glow && ga>EPS){
+    ctx.save(); ctx.shadowColor = hexA(glow,.85*ga*C.glow); ctx.shadowBlur = 22*C.glow;
+    ctx.strokeStyle = hexA(glow,.15+.75*ga); ctx.lineWidth = lw+.6; ctx.stroke();
+    ctx.restore();
+  } else { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+}
+function text(s,x,y,{size=12,color=C.text,weight='400',font=FS,align='left',ls=0,alpha=1,glow=null}={}){
+  if (alpha<=0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `${weight} ${size}px ${font}`;
+  ctx.textAlign = ls?'left':align; ctx.textBaseline='middle';
+  ctx.fillStyle = color;
+  if (glow){ ctx.shadowColor = hexA(glow,.9*C.glow); ctx.shadowBlur = 14*C.glow; }
+  if (ls){
+    let total = 0; for (const ch of s) total += ctx.measureText(ch).width + ls;
+    let cx = align==='center' ? x-total/2 : align==='right' ? x-total : x;
+    for (const ch of s){ ctx.fillText(ch,cx,y); cx += ctx.measureText(ch).width + ls; }
+  } else ctx.fillText(s,x,y);
+  ctx.restore();
+}
+function chip(x,y,w,h,label,{color=C.dim,fill=null,size=11,ga=0,mono=false,weight='500'}={}){
+  /* eslint-disable-next-line no-param-reassign */
+  rr(x,y,w,h,h/2);
+  ga = ga>EPS ? ga : 0;
+  ctx.fillStyle = ga>0 ? hexA(color,.10+.14*ga) : (fill||veil(.02)); ctx.fill();
+  ctx.strokeStyle = hexA(color,.30+.55*ga); ctx.lineWidth = 1;
+  if (ga>0){ ctx.save(); ctx.shadowColor=hexA(color,.7*ga*C.glow); ctx.shadowBlur=16*C.glow; ctx.stroke(); ctx.restore(); }
+  else ctx.stroke();
+  text(label, x+w/2, y+h/2+.5, {size, color: ga>0?C.text:C.muted, align:'center', weight,
+       font: mono?FM:FS, glow: ga>.4?color:null});
+}
+function label(str,x,y,{size=10.5,color=C.muted,align='left',pad=7,font=FS,weight='400',alpha=1}={}){
+  if (alpha<=0) return;
+  ctx.save(); ctx.font=`${weight} ${size}px ${font}`;
+  const w=ctx.measureText(str).width;
+  const x0 = align==='right' ? x-w : align==='center' ? x-w/2 : x;
+  ctx.globalAlpha=alpha;
+  rr(x0-pad,y-size*.85,w+pad*2,size*1.7,4); ctx.fillStyle=C.knockout; ctx.fill();
+  ctx.restore();
+  text(str,x0,y,{size,color,font,weight,alpha});
+}
+function bandDot(x,y,color,act=0,r=5){
+  ctx.save();
+  ctx.beginPath(); ctx.arc(x,y,r,0,7);
+  ctx.fillStyle=hexA(color,.95);
+  ctx.shadowColor=hexA(color,.9*C.glow); ctx.shadowBlur=(10+8*act)*C.glow;
+  ctx.fill();
+  ctx.restore();
+}
+/* polyline path with arc-length lookup */
+function path(pts){
+  const segs=[]; let total=0;
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1], b=pts[i], len=Math.hypot(b[0]-a[0],b[1]-a[1]);
+    segs.push({a,b,len}); total+=len;
+  }
+  return { pts, total, at(u){
+    let d=cl01(u)*total;
+    for(const s of segs){ if(d<=s.len||s===segs[segs.length-1]){ const k=s.len?d/s.len:0;
+      return [s.a[0]+(s.b[0]-s.a[0])*k, s.a[1]+(s.b[1]-s.a[1])*k]; } d-=s.len; }
+    return pts[pts.length-1];
+  }};
+}
+function rail(p,{color=C.rail,lw=1.6,dash=null,alpha=1}={}){
+  ctx.save(); ctx.globalAlpha=alpha;
+  ctx.beginPath(); ctx.moveTo(p.pts[0][0],p.pts[0][1]);
+  for(let i=1;i<p.pts.length;i++) ctx.lineTo(p.pts[i][0],p.pts[i][1]);
+  ctx.strokeStyle=color; ctx.lineWidth=lw; ctx.lineJoin='round'; ctx.lineCap='round';
+  if(dash) ctx.setLineDash(dash);
+  ctx.stroke(); ctx.restore();
+}
+/* glowing comet travelling a path at progress u (0..1) */
+function comet(p,u,color,{size=3.6,tailPx=52,alpha=1}={}){
+  if(u<=0.0001||u>=0.9999) return;      // never park a comet at a path end
+  ctx.save(); ctx.globalAlpha=alpha;
+  const N=16, tail=tailPx/p.total;
+  for(let i=N;i>=1;i--){
+    const uu = u - tail*(i/N);
+    if(uu<0) continue;
+    const k=1-i/N;                        // 0 at the far end of the tail
+    const [x,y]=p.at(uu);
+    ctx.beginPath(); ctx.arc(x,y,size*(.30+.62*k),0,7);
+    ctx.fillStyle=hexA(color,(.06+.34*k*k)*C.trail);
+    ctx.fill();
+  }
+  const [x,y]=p.at(u);
+  ctx.shadowColor=hexA(color,.95*C.glow); ctx.shadowBlur=16*C.glow;
+  ctx.beginPath(); ctx.arc(x,y,size,0,7); ctx.fillStyle=C.cometCore||color; ctx.fill();
+  ctx.beginPath(); ctx.arc(x,y,size*1.9,0,7); ctx.fillStyle=hexA(color,.35); ctx.fill();
+  ctx.restore();
+}
+function ring(x,y,u,color,{r0=6,r1=30,lw=2}={}){
+  if(u<=0||u>=1) return;
+  ctx.save();
+  ctx.globalAlpha=(1-u)*.9;
+  ctx.beginPath(); ctx.arc(x,y,r0+(r1-r0)*easeOut(u),0,7);
+  ctx.strokeStyle=color; ctx.lineWidth=lw*(1-u*.5);
+  ctx.shadowColor=hexA(color,.8*C.glow); ctx.shadowBlur=12*C.glow; ctx.stroke();
+  ctx.restore();
+}
+function litRail(p,color,a){                       // rail highlight while traffic flows
+  if(a<=EPS) return; rail(p,{color:hexA(color,.10+.30*a),lw:2.0});
+}
+function arrowHead(x,y,dir,color,a){
+  if(a<=0) return;
+  ctx.save(); ctx.globalAlpha=a; ctx.fillStyle=color;
+  ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x-6*dir,y-4); ctx.lineTo(x-6*dir,y+4);
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+
+/* ---------------- layout ---------------- */
+const M = 49, CW = W-2*M;              // panels span 49 .. 1231
+const B1_Y = 90,  B1_H = 58;           // plan · admit · tool view
+const REJ_Y = 165;                     // the rejection return arc
+const LOG_Y = 180, LOG_H = 96;         // append-only event log
+const BAR1_Y = 288;                    // log <-> executors distributor
+const EX_Y = 300, EX_H = 64;           // the two executors
+const BAR2_Y = 378;                    // executors <-> gateway distributor
+const GW_Y = 392, GW_H = 48;           // gatewayd
+const FAN_Y = 456;                     // gateway <-> tool services distributor
+const SV_Y = 474, SV_H = 112, SV_W = 276;
+const TX_Y = 614, TX_H = 98;           // transaction-scope ribbon
+const EVX = 970, EVY = 279, EVW = 246; // ticker slot for the txn/* event that just landed
+const FT_Y = 732;
+
+const PLAN_X = 49,  PLAN_W = 356;      // 49 .. 405
+const CHK_X  = 445, CHK_W  = 390;      // 445 .. 835, centred on 640
+const TV_X   = 875, TV_W   = 356;      // 875 .. 1231
+
+const ORCH_CX = 332, COORD_CX = 948;
+
+const SERVICES = [
+  {x:49,  name:'Inventory', hue:'emerald', eff:'reversible · tcc',
+   ops:['check · reserve','confirm | release','commit'] },
+  {x:351, name:'Payment',   hue:'sky',     eff:'reversible · tcc',
+   ops:['authorize','capture | void','status'] },
+  {x:653, name:'Logistics', hue:'rose',    eff:'irreversible · pivot',
+   ops:['quote','book','unknown → status query'] },
+  {x:955, name:'Channel',   hue:'violet',  eff:'bufferable',
+   ops:['draft','publish','released on commit'] },
+];
+SERVICES.forEach(s=>{ s.cx = s.x + SV_W/2; });
+
+/* ---------------- the event log, in stream_seq space ----------------
+   Eight events are appended over one loop and the label cycle has period
+   eight, so frame 0 and the frame after the last slide are identical. No
+   absolute stream_seq is ever painted on a tile, for the same reason. */
+const EVENTS = [
+  {name:'subgraph/proposed', hue:'cyan'},
+  {name:'subgraph/frozen',   hue:'cyan'},
+  {name:'txn/scope',         hue:'violet'},
+  {name:'vertex/started',    hue:'sky'},
+  {name:'txn/try',           hue:'emerald'},
+  {name:'txn/pivot-passed',  hue:'rose'},
+  {name:'txn/confirm',       hue:'emerald'},
+  {name:'vertex/succeeded',  hue:'sky'},
+];
+const APPEND = [.105,.225,.250,.315,.445,.680,.800,.905];
+const SLIDE  = .050;                   // how long one tile takes to slide in
+const PITCH = 116, TILE_W = 104, TILE_H = 32;
+const HEAD0 = 1040, L0 = HEAD0 - 9;
+const BAR_X = 60, TILE_Y = LOG_Y + 32;
+const lsnX = (l,off)=> BAR_X + (l-L0)*PITCH + off;
+const evOf = l => EVENTS[(((l - HEAD0 - 1) % 8) + 8) % 8];
+
+/* ---------------- rails ---------------- */
+const P = {};
+P.planChk = path([[PLAN_X+PLAN_W, 119],[CHK_X, 119]]);
+P.tvChk   = path([[TV_X, 119],[CHK_X+CHK_W, 119]]);
+P.chkLog  = path([[600, B1_Y+B1_H],[600, LOG_Y]]);
+P.reject  = path([[520, B1_Y+B1_H],[520, REJ_Y],[228, REJ_Y],[228, B1_Y+B1_H]]);
+P.logOrch = path([[600, LOG_Y+LOG_H],[600, BAR1_Y],[ORCH_CX, BAR1_Y],[ORCH_CX, EX_Y]]);
+P.logCoor = path([[600, LOG_Y+LOG_H],[600, BAR1_Y],[COORD_CX, BAR1_Y],[COORD_CX, EX_Y]]);
+P.coorLog = path([[COORD_CX, EX_Y],[COORD_CX, BAR1_Y],[680, BAR1_Y],[680, LOG_Y+LOG_H]]);
+P.orchGw  = path([[ORCH_CX, EX_Y+EX_H],[ORCH_CX, BAR2_Y],[580, BAR2_Y],[580, GW_Y]]);
+P.coorGw  = path([[COORD_CX, EX_Y+EX_H],[COORD_CX, BAR2_Y],[700, BAR2_Y],[700, GW_Y]]);
+P.gwCoor  = path([[700, GW_Y],[700, BAR2_Y],[COORD_CX, BAR2_Y],[COORD_CX, EX_Y+EX_H]]);
+SERVICES.forEach((s,i)=>{
+  P['in'+i]  = path([[640,GW_Y+GW_H],[640,FAN_Y],[s.cx-40,FAN_Y],[s.cx-40,SV_Y]]);
+  P['out'+i] = path([[s.cx+40,SV_Y],[s.cx+40,FAN_Y],[640,FAN_Y],[640,GW_Y+GW_H]]);
+});
+const FAN_BAR = path([[SERVICES[0].cx-40, FAN_Y],[SERVICES[3].cx+40, FAN_Y]]);
+const BAR1 = path([[ORCH_CX, BAR1_Y],[COORD_CX, BAR1_Y]]);
+const BAR2 = path([[ORCH_CX, BAR2_Y],[COORD_CX, BAR2_Y]]);
+/* tools/list — the tool view is resolved from gatewayd before planning */
+P.view = path([[1231, GW_Y+16],[1246, GW_Y+16],[1246,119],[TV_X+TV_W,119]]);
+
+/* ---------------- transaction ribbon ---------------- */
+const TR_Y = 680, TR_X0 = 100, TR_X1 = 1192, GATE_X = 906;
+const MS = [
+  {x:112,  t:.340, sym:'dia',  hue:'emerald', lab:'savepoint',        sub:'scope entry'},
+  {x:302,  t:.415, sym:'sq',   hue:'emerald', lab:'inventory.reserve',sub:'try · sealed'},
+  {x:472,  t:.450, sym:'sq',   hue:'sky',     lab:'payment.authorize',sub:'try · sealed'},
+  {x:640,  t:.520, sym:'bar',  hue:'amber',   lab:'pivot barrier',    sub:'every try sealed'},
+  {x:800,  t:.625, sym:'hex',  hue:'rose',    lab:'logistics.book',   sub:'irreversible'},
+  {x:GATE_X,t:.685,sym:'gate', hue:'rose',    lab:'one-way gate',     sub:'txn/pivot-passed'},
+  {x:1040, t:.780, sym:'sq',   hue:'emerald', lab:'confirm × 2',      sub:'idempotent'},
+  {x:1170, t:.880, sym:'dia',  hue:'violet',  lab:'committed',        sub:''},
+];
+
+/* ---------------- timeline (normalised 0..1) ---------------- */
+const TL = {
+  planner:[.005,.085], viewPull:[.010,.075], propose:[.058,.118],
+  rules:[.118,.205],   freeze:[.190,.240],
+  claim:[.250,.330],   toGw:[.300,.378],
+  fanTry:[.348,.428],  sealed:[.404,.472],
+  barrier:[.470,.560],
+  pivotOut:[.560,.640], pivotBack:[.630,.700],
+  confirm:[.700,.800], publish:[.815,.900],
+  reset:[.945,.995],
+};
+
+function narration(t){
+  if (t<.115) return ['01  PLAN',      'the planner proposes the next sub-DAG against one frozen tool view', C.cyan];
+  if (t<.245) return ['02  ADMIT',     'checkSubDag runs R1–R11 — the rules admit a plan, the model never does', C.amber];
+  if (t<.340) return ['03  CLAIM',     'each executor claims only the vertices the database lets it own', C.sky];
+  if (t<.470) return ['04  TRY',       'a TCC try reserves the resource and seals a half-open bracket', C.emerald];
+  if (t<.560) return ['05  BARRIER',   'the pivot barrier admits only once every required try is sealed', C.amber];
+  if (t<.700) return ['06  PIVOT',     'the irreversible call runs; txn/pivot-passed is durably appended', C.rose];
+  if (t<.815) return ['07  CONFIRM',   'the sealed members confirm — idempotent and retryable', C.emerald];
+  return           ['08  COMMITTED',   'past the gate recovery only moves forward, never backward', C.violet];
+}
+
+/* ---------------- static background ---------------- */
+function drawBackground(){
+  ctx.fillStyle=C.bg; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle=C.grid;
+  for(let y=24;y<H;y+=24) for(let x=24;x<W;x+=24){ ctx.fillRect(x,y,1.1,1.1); }
+  const g1=ctx.createRadialGradient(180,70,0,180,70,540);
+  g1.addColorStop(0,hexA(C.cyan,.075*C.wash)); g1.addColorStop(1,hexA(C.cyan,0));
+  ctx.fillStyle=g1; ctx.fillRect(0,0,760,620);
+  const g2=ctx.createRadialGradient(1140,660,0,1140,660,540);
+  g2.addColorStop(0,hexA(C.rose,.075*C.wash)); g2.addColorStop(1,hexA(C.rose,0));
+  ctx.fillStyle=g2; ctx.fillRect(600,240,680,528);
+  const g3=ctx.createRadialGradient(640,LOG_Y+40,0,640,LOG_Y+40,440);
+  g3.addColorStop(0,hexA(C.cyan,.055*C.wash)); g3.addColorStop(1,hexA(C.cyan,0));
+  ctx.fillStyle=g3; ctx.fillRect(0,LOG_Y-120,W,340);
+}
+
+function drawHeader(){
+  // logo mark: one planner node fanning into a frozen sub-DAG
+  const lx=54, ly=34;
+  ctx.save();
+  const edges=[[[0,0],[20,-11]],[[0,0],[20,0]],[[0,0],[20,11]],[[20,-11],[20,0]]];
+  ctx.strokeStyle=hexA(C.cyan,.55); ctx.lineWidth=1.3;
+  for(const [a,b] of edges){ ctx.beginPath(); ctx.moveTo(lx+a[0],ly+a[1]); ctx.lineTo(lx+b[0],ly+b[1]); ctx.stroke(); }
+  const nodes=[[0,0,C.cyan],[20,-11,C.emerald],[20,0,C.amber],[20,11,C.rose]];
+  for(const [dx,dy,col] of nodes){
+    ctx.beginPath(); ctx.arc(lx+dx,ly+dy,3.6,0,7);
+    ctx.fillStyle=hexA(col,.95); ctx.shadowColor=hexA(col,.75); ctx.shadowBlur=8; ctx.fill();
+  }
+  ctx.restore();
+  text('Flory', 88, 30, {size:27, weight:'700', ls:.4, glow:C.cyan});
+  text('JIT DAG  ·  TCC + PIVOT-SAGA  ·  APPEND-ONLY EVENT LOG', 92, 55, {size:10, color:C.dim, weight:'700', ls:1.6});
+  text('AI harness orchestration for the boundary between probabilistic planning and irreversible effects.',
+       178, 30, {size:12, color:C.muted});
+  // the core tension, as a badge
+  const bw=396, bx=W-M-bw;
+  panel(bx,17,bw,26,{r:13,fill:hexA(C.rose,.06),stroke:hexA(C.rose,.32)});
+  text('plan', bx+16, 30.5, {size:10.5, color:C.cyan, weight:'700', font:FM});
+  text('probabilistic', bx+46, 30.5, {size:10, color:C.dim});
+  text('→', bx+118, 30.5, {size:12, color:C.muted});
+  text('admit', bx+134, 30.5, {size:10.5, color:C.amber, weight:'700', font:FM});
+  text('deterministic', bx+172, 30.5, {size:10, color:C.dim});
+  text('→', bx+248, 30.5, {size:12, color:C.muted});
+  text('effect', bx+264, 30.5, {size:10.5, color:C.rose, weight:'700', font:FM});
+  text('irreversible', bx+bw-16, 30.5, {size:10, color:C.dim, align:'right'});
+}
+
+function drawFooter(){
+  const items=[
+    ['the log is the only boundary',C.cyan],['R1–R11 admit, the model does not',C.amber],
+    ['at most one pivot per scope',C.rose],['forward-only past the gate',C.violet],
+    ['exactly one attempt per call',C.sky],['replan in place · fork offline',C.emerald],
+  ];
+  let x=M;
+  ctx.font=`500 11px ${FS}`;
+  for(const [s,col] of items){
+    const w=ctx.measureText(s).width+34;
+    rr(x,FT_Y,w,24,12); ctx.fillStyle=veil(.02); ctx.fill();
+    ctx.strokeStyle=hexA(col,.28); ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.arc(x+14,FT_Y+12,3,0,7); ctx.fillStyle=hexA(col,.85); ctx.fill();
+    text(s,x+23,FT_Y+12.5,{size:11,color:C.muted,weight:'500'});
+    x+=w+10;
+  }
+}
+
+/* ---------------- the transaction ribbon ---------------- */
+function msSymbol(m,act,fade){
+  const col=C[m.hue], y=TR_Y;
+  ctx.save();
+  ctx.shadowColor=hexA(col,.85*act*C.glow); ctx.shadowBlur=(6+14*act)*C.glow;
+  const a = .34+.62*act;
+  if(m.sym==='dia'){
+    ctx.beginPath(); ctx.moveTo(m.x,y-8); ctx.lineTo(m.x+8,y); ctx.lineTo(m.x,y+8); ctx.lineTo(m.x-8,y);
+    ctx.closePath(); ctx.fillStyle=hexA(col,a*.4); ctx.fill();
+    ctx.strokeStyle=hexA(col,a); ctx.lineWidth=1.6; ctx.stroke();
+  } else if(m.sym==='sq'){
+    rr(m.x-9,y-9,18,18,5); ctx.fillStyle=hexA(col,a*.35); ctx.fill();
+    ctx.strokeStyle=hexA(col,a); ctx.lineWidth=1.6; ctx.stroke();
+  } else if(m.sym==='bar'){
+    rr(m.x-4,y-15,8,30,4); ctx.fillStyle=hexA(col,a*.45); ctx.fill();
+    ctx.strokeStyle=hexA(col,a); ctx.lineWidth=1.5; ctx.stroke();
+  } else if(m.sym==='hex'){
+    ctx.beginPath();
+    for(let i=0;i<6;i++){ const an=Math.PI/6+i*Math.PI/3, px=m.x+11*Math.cos(an), py=y+11*Math.sin(an);
+      i?ctx.lineTo(px,py):ctx.moveTo(px,py); }
+    ctx.closePath(); ctx.fillStyle=hexA(col,a*.4); ctx.fill();
+    ctx.strokeStyle=hexA(col,a); ctx.lineWidth=1.8; ctx.stroke();
+  } else if(m.sym==='gate'){
+    // two shutters that slam shut once txn/pivot-passed is durable
+    const k = act*fade;
+    ctx.strokeStyle=hexA(col,.20+.7*k); ctx.lineWidth=2.2; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(m.x,y-19); ctx.lineTo(m.x,y-19+15*k); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(m.x,y+19); ctx.lineTo(m.x,y+19-15*k); ctx.stroke();
+    ctx.setLineDash([3,4]); ctx.lineWidth=1.1; ctx.strokeStyle=hexA(col,.30);
+    ctx.beginPath(); ctx.moveTo(m.x,y-19); ctx.lineTo(m.x,y+19); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawRibbon(t){
+  const fade = 1 - seg(t,TL.reset[0],TL.reset[1]);      // the next scope resets the ribbon
+  panel(M,TX_Y,CW,TX_H,{r:14,fill:C.panelTxn,stroke:C.stroke});
+  text('TRANSACTION SCOPE', M+16, TX_Y+18, {size:10, color:C.rose, weight:'700', ls:1.4});
+  text('pivot-saga skeleton:  undoable prefix  →  one pivot  →  idempotent-retry suffix',
+       M+156, TX_Y+18, {size:10.5, color:C.dim});
+  text('R3 — at most one pivot per scope   ·   R9 — barrier before it', W-M-16, TX_Y+18,
+       {size:10.5, color:C.muted, align:'right'});
+
+  // the track
+  rail(path([[TR_X0,TR_Y],[TR_X1,TR_Y]]),{color:C.rail,lw:2});
+  // the pre-pivot half is compensable, the post-pivot half is not
+  rail(path([[TR_X0,TR_Y],[GATE_X,TR_Y]]),{color:hexA(C.emerald,.22),lw:2});
+  rail(path([[GATE_X,TR_Y],[TR_X1,TR_Y]]),{color:hexA(C.rose,.22),lw:2});
+  arrowHead(TR_X1,TR_Y,1,hexA(C.rose,.5),1);
+
+  MS.forEach(m=>{
+    const act = seg(t,m.t,m.t+.06)*fade;
+    msSymbol(m,act,fade);
+    if(m.lab){
+      text(m.lab, m.x, TR_Y-34, {size:9.5, color:act>.3?C.text:C.muted, align:'center',
+           font:FM, weight:'500', alpha:.55+.45*act});
+      if(m.sub) text(m.sub, m.x, TR_Y-22, {size:8.5, color:C[m.hue], align:'center', alpha:.45+.5*act});
+    }
+    ring(m.x,TR_Y, fade>EPS&&m.t<=t&&t<m.t+.16 ? seg(t,m.t,m.t+.16) : 0, C[m.hue], {r0:8,r1:26,lw:1.6});
+  });
+  // what each half of the track promises
+  const braces=[[TR_X0,GATE_X,C.emerald],[GATE_X,TR_X1,C.rose]];
+  for(const [a,b,col] of braces){
+    ctx.save(); ctx.strokeStyle=hexA(col,.28); ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(a+2,TR_Y+14); ctx.lineTo(a+2,TR_Y+19); ctx.lineTo(b-2,TR_Y+19);
+    ctx.lineTo(b-2,TR_Y+14); ctx.stroke(); ctx.restore();
+  }
+  text('R2 — every in-scope node before the pivot is undoable; cancel and compensate lead back to the savepoint',
+       (TR_X0+GATE_X)/2, TR_Y+29, {size:10, color:C.muted, align:'center'});
+  text('R1 — forward only, idempotent retry',
+       (GATE_X+TR_X1)/2, TR_Y+29, {size:10, color:C.muted, align:'center'});
+
+  // the progress head, alive only while the scope is
+  const KEY=[[.340,112],[.415,302],[.450,472],[.520,640],[.625,800],[.685,GATE_X],[.780,1040],[.880,1170]];
+  if(t>.335&&t<.945){
+    let hx=KEY[KEY.length-1][1];
+    if(t<=KEY[0][0]) hx=KEY[0][1];
+    else for(let i=1;i<KEY.length;i++){
+      if(t<=KEY[i][0]){ const k=(t-KEY[i-1][0])/(KEY[i][0]-KEY[i-1][0]);
+        hx=KEY[i-1][1]+(KEY[i][1]-KEY[i-1][1])*ease(k); break; }
+    }
+    const a = seg(t,.335,.360) * (1-seg(t,.900,.945));
+    ctx.save(); ctx.globalAlpha=a;
+    const col = hx<GATE_X ? C.emerald : C.rose;
+    ctx.beginPath(); ctx.arc(hx,TR_Y,4.4,0,7);
+    ctx.fillStyle=C.cometCore||col;
+    ctx.shadowColor=hexA(col,.95*C.glow); ctx.shadowBlur=16*C.glow; ctx.fill();
+    ctx.beginPath(); ctx.arc(hx,TR_Y,8,0,7); ctx.fillStyle=hexA(col,.30); ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* ---------------- frame ---------------- */
+function frame(t){
+  drawBackground();
+  drawHeader();
+  drawFooter();
+
+  const [tag,desc,ncol] = narration(t);
+  ctx.font = `400 11.5px ${FS}`;
+  const dw = ctx.measureText(desc).width;
+  text(desc, W-M, 57, {size:11.5, color:C.muted, align:'right'});
+  text(tag, W-M-dw-16, 57, {size:11, color:ncol, align:'right', weight:'700', font:FM, ls:1.1, glow:ncol});
+
+  /* how far the log has slid, and where its head is */
+  let off = 0, head = HEAD0, lastAppend = -1;
+  for(let i=0;i<APPEND.length;i++){
+    off -= PITCH*ease(seg(t,APPEND[i],APPEND[i]+SLIDE));
+    if(t>=APPEND[i]){ head++; lastAppend = i; }
+  }
+  const floor = t>=APPEND[5] ? HEAD0+6 : HEAD0-2;      // the backtrack floor: the last passed pivot
+
+  /* ---- rails (static base) ---- */
+  rail(P.planChk); rail(P.tvChk,{color:C.rail,dash:[4,4]}); rail(P.chkLog);
+  rail(P.reject,{color:C.railReject,dash:[3,5],lw:1.3});
+  rail(BAR1); rail(path([[600,LOG_Y+LOG_H],[600,BAR1_Y]])); rail(path([[680,LOG_Y+LOG_H],[680,BAR1_Y]]));
+  rail(path([[ORCH_CX,BAR1_Y],[ORCH_CX,EX_Y]])); rail(path([[COORD_CX,BAR1_Y],[COORD_CX,EX_Y]]));
+  rail(BAR2); rail(path([[ORCH_CX,EX_Y+EX_H],[ORCH_CX,BAR2_Y]])); rail(path([[COORD_CX,EX_Y+EX_H],[COORD_CX,BAR2_Y]]));
+  rail(path([[580,BAR2_Y],[580,GW_Y]])); rail(path([[700,BAR2_Y],[700,GW_Y]]));
+  rail(FAN_BAR); rail(path([[640,GW_Y+GW_H],[640,FAN_Y]]));
+  SERVICES.forEach((s,i)=>{
+    rail(path([[s.cx-40,FAN_Y],[s.cx-40,SV_Y]]));
+    rail(path([[s.cx+40,FAN_Y],[s.cx+40,SV_Y]]),{color:C.railEvent,dash:[4,5]});
+  });
+  rail(P.view,{color:C.rail,dash:[4,5],lw:1.3});
+
+  /* ---- traffic glow ---- */
+  const planAct = pulse(seg(t,TL.propose[0],TL.propose[1]));
+  litRail(P.planChk,C.cyan,planAct);
+  litRail(P.chkLog,C.cyan,pulse(seg(t,TL.freeze[0],TL.freeze[1])));
+  const claimAct = pulse(seg(t,TL.claim[0],TL.claim[1]));
+  litRail(P.logCoor,C.sky,claimAct); litRail(P.logOrch,C.sky,claimAct*.7);
+  const gwAct = pulse(seg(t,TL.toGw[0],TL.confirm[1]));
+  litRail(P.coorGw,C.violet,gwAct*.7);
+  litRail(P.view,C.amber,pulse(seg(t,TL.viewPull[0],TL.viewPull[1])));
+
+  /* ---- band 1: plan, admit, tool view ---- */
+  const pAct = pulse(seg(t,TL.planner[0],TL.planner[1]));
+  panel(PLAN_X,B1_Y,PLAN_W,B1_H,{r:12,fill:C.panel2,glow:C.cyan,ga:pAct*.9});
+  bandDot(PLAN_X+20,B1_Y+16,C.cyan,pAct,4.2);
+  text('Agent Orchestrator — planner', PLAN_X+34, B1_Y+16, {size:13, weight:'600'});
+  text('ReAct loop · progressive disclosure · owns replanning', PLAN_X+18, B1_Y+33, {size:10, color:C.dim});
+  chip(PLAN_X+18, B1_Y+40, PLAN_W-36, 18, 'proposes the next sub-DAG, never the safety label',
+       {color:C.cyan, ga:pAct*.8, size:9.5});
+
+  const rAct = seg(t,TL.rules[0],TL.rules[1]) * (1 - seg(t,TL.reset[0],TL.reset[1]));
+  const rGlow = pulse(rAct);
+  panel(CHK_X,B1_Y,CHK_W,B1_H,{r:12,fill:C.panel2,glow:C.amber,ga:rGlow*.9});
+  text('checkSubDag(proposal, toolView)', CHK_X+18, B1_Y+16, {size:12, weight:'600', font:FM});
+  text('no network I/O', CHK_X+CHK_W-18, B1_Y+16, {size:10, color:C.dim, align:'right'});
+  const pw=(CHK_W-36-10*4)/11;
+  for(let i=0;i<11;i++){
+    const on = cl01(rAct*11.6 - i);
+    const px = CHK_X+18+i*(pw+4);
+    rr(px,B1_Y+26,pw,15,4);
+    ctx.fillStyle = on>.05 ? hexA(C.emerald,.14+.24*on) : veil(.03); ctx.fill();
+    ctx.strokeStyle = on>.05 ? hexA(C.emerald,.35+.5*on) : hexA(C.dim,.30); ctx.lineWidth=1;
+    if(on>.5){ ctx.save(); ctx.shadowColor=hexA(C.emerald,.6*on*C.glow); ctx.shadowBlur=10*C.glow; ctx.stroke(); ctx.restore(); }
+    else ctx.stroke();
+    text('R'+(i+1), px+pw/2, B1_Y+34, {size:8.5, color:on>.5?C.emerald:C.dim, align:'center', font:FM, weight:'600'});
+  }
+  text(rAct>=1 ? 'accepted  →  subgraph/frozen' : 'admission is the engine’s, not the model’s',
+       CHK_X+CHK_W/2, B1_Y+49, {size:10, color:rAct>=1?C.emerald:C.muted, align:'center', font:FM,
+       alpha:.7+.3*rGlow});
+
+  const vAct = pulse(seg(t,TL.viewPull[0],TL.viewPull[1]));
+  panel(TV_X,B1_Y,TV_W,B1_H,{r:12,fill:C.panel2,glow:C.amber,ga:vAct*.8});
+  bandDot(TV_X+20,B1_Y+16,C.amber,vAct,4.2);
+  text('Immutable tool view', TV_X+34, B1_Y+16, {size:13, weight:'600'});
+  text('resolved once over MCP tools/list, then frozen', TV_X+18, B1_Y+33, {size:10, color:C.dim});
+  chip(TV_X+18, B1_Y+40, TV_W-36, 18, 'digest sha256:9f2c4e…  pinned for the whole subgraph',
+       {color:C.amber, ga:vAct*.8, size:9.5, mono:true});
+  label('tools/list', 1246, 300, {size:8.5, color:C.amber, align:'center', font:FM, alpha:.8, pad:5});
+
+  // the other exit from admission
+  label('violation  →  subgraph/rejected  →  regenerate, never bypass',
+        374, REJ_Y, {size:10, color:hexA(C.rose,.75), align:'center'});
+
+  /* ---- band 2: the event log ---- */
+  const logAct = Math.max(pulse(seg(t,TL.freeze[0],TL.freeze[1])), pulse(seg(t,.660,.720)));
+  panel(M,LOG_Y,CW,LOG_H,{r:14,fill:C.panelLog,glow:C.cyan,ga:logAct*.6});
+  text('EVENT LOG', M+16, LOG_Y+16, {size:10, color:C.cyan, weight:'700', ls:1.4});
+  text('append-only in PostgreSQL · the sole source of truth for the DAG and for the transaction brackets',
+       M+100, LOG_Y+16, {size:10.5, color:C.dim});
+  text('surface = pure fold over unshadowed rows', W-M-16, LOG_Y+16,
+       {size:10, color:C.muted, align:'right', font:FM});
+
+  ctx.save();
+  rr(M+8,LOG_Y+26,CW-16,TILE_H+12,10); ctx.clip();
+  for(let l=L0-2; l<=L0+24; l++){
+    const x=lsnX(l,off);
+    if(x<M-140||x>M+CW+20) continue;
+    const empty = l>head+0.001;
+    const ev = evOf(l);
+    const col = empty ? C.dim : C[ev.hue];
+    const isNew = !empty && l===head;
+    const born = (isNew && lastAppend>=0)
+      ? easeOut(seg(t,APPEND[lastAppend],APPEND[lastAppend]+.038)) : 1;
+    const yy = TILE_Y + (1-born)*9;
+    ctx.save();
+    ctx.globalAlpha = born;
+    rr(x,yy,TILE_W,TILE_H,6);
+    ctx.fillStyle = empty ? veil(.02) : hexA(col,.12);
+    ctx.fill();
+    if(isNew){ ctx.shadowColor=hexA(col,.7*born*C.glow); ctx.shadowBlur=14*C.glow; }
+    ctx.strokeStyle = empty ? hexA(C.dim,.22) : hexA(col,.30+.5*(isNew?born:0));
+    ctx.lineWidth=1.1; ctx.stroke(); ctx.shadowBlur=0;
+    if(!empty){
+      rr(x+8,yy+5,TILE_W-16,2.5,1.2); ctx.fillStyle=hexA(col,.55+.4*(isNew?born:0)); ctx.fill();
+      text(ev.name, x+TILE_W/2, yy+20, {size:8.5, color: isNew?C.text:C.muted, align:'center',
+           font:FM, weight:'500', glow: isNew&&born>.4 ? col : null});
+    }
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // the backtrack floor: replanning may not cross the last pivot that passed.
+  // The newest tile already glows, so the head needs no marker of its own.
+  const fx = Math.min(lsnX(floor,off) + TILE_W + 6, M+CW-12);
+  ctx.save();
+  ctx.strokeStyle=hexA(C.rose,.85); ctx.lineWidth=2;
+  ctx.shadowColor=hexA(C.rose,.8*C.glow); ctx.shadowBlur=12*C.glow;
+  ctx.beginPath(); ctx.moveTo(fx,TILE_Y-8); ctx.lineTo(fx,TILE_Y+TILE_H+8); ctx.stroke();
+  ctx.restore();
+  chip(Math.max(M+16, fx-190), TILE_Y+TILE_H+3, 182, 17, 'backtrack floor',
+       {color:C.rose, ga:.30+.55*pulse(seg(t,.675,.740)), size:9.5, mono:true});
+
+  /* ---- band 3: the two executors ---- */
+  const oAct = pulse(seg(t,TL.claim[0],TL.claim[1]))*.8;
+  panel(M,EX_Y,566,EX_H,{r:13,fill:C.panel,glow:C.sky,ga:oAct});
+  bandDot(M+20,EX_Y+22,C.sky,oAct);
+  text('Agent Orchestrator — executor', M+34, EX_Y+22, {size:13, weight:'600'});
+  text('TypeScript', 566+M-16, EX_Y+22, {size:10, color:C.dim, align:'right', font:FM});
+  text('claims only read-only vertices: effect_class none, no scope, no bracket to own',
+       M+18, EX_Y+45, {size:10.5, color:C.muted});
+
+  const cAct = Math.max(pulse(seg(t,TL.claim[0],TL.claim[1])),
+                        pulse(seg(t,TL.fanTry[0],TL.sealed[1])),
+                        pulse(seg(t,TL.pivotOut[0],TL.pivotBack[1])),
+                        pulse(seg(t,TL.confirm[0],TL.confirm[1])));
+  panel(665,EX_Y,566,EX_H,{r:13,fill:C.panel,glow:C.violet,ga:cAct*.95});
+  bandDot(665+20,EX_Y+22,C.violet,cAct);
+  text('Distributed Transaction Coordinator', 665+34, EX_Y+22, {size:13, weight:'600'});
+  text('Go 1.25', 1231-16, EX_Y+22, {size:10, color:C.dim, align:'right', font:FM});
+  text('claims every effectful vertex · decides every retry · appends every txn/* event',
+       665+18, EX_Y+45, {size:10.5, color:C.muted});
+  label('the database enforces the split — neither service can record the other’s vertex',
+        640, BAR1_Y, {size:10, color:C.dim, align:'center'});
+
+  /* ---- band 4: gatewayd ---- */
+  const gAct = pulse(seg(t,TL.toGw[0],TL.publish[1]));
+  panel(M,GW_Y,CW,GW_H,{r:13,fill:C.panel,glow:C.amber,ga:gAct*.85});
+  bandDot(M+20,GW_Y+16,C.amber,gAct);
+  text('gatewayd — Tool Registry Gateway', M+34, GW_Y+16, {size:13, weight:'600'});
+  text('MCP north · gRPC south · publishes content-addressed tool views · writes nothing to the log',
+       W-M-16, GW_Y+16, {size:10.5, color:C.muted, align:'right'});
+  chip(M+18, GW_Y+28, 300, 16, 'routes exactly one requested attempt',
+       {color:C.amber, ga:gAct*.8, size:9.5, mono:true});
+  text('it never decides a retry, never hides one, and never generates a second',
+       M+330, GW_Y+36, {size:10, color:C.dim});
+  label('tools/call  ·  digest + tool_version + idempotency_key + deadline', 640, FAN_Y,
+        {size:10, color:hexA(C.amber,.85), align:'center'});
+
+  /* ---- band 5: the tool services ---- */
+  const svcAct = [
+    Math.max(pulse(seg(t,TL.fanTry[1]-.06,TL.sealed[1])), pulse(seg(t,TL.confirm[0]+.02,TL.confirm[1]))),
+    Math.max(pulse(seg(t,TL.fanTry[1]-.04,TL.sealed[1])), pulse(seg(t,TL.confirm[0]+.05,TL.confirm[1]))),
+    pulse(seg(t,TL.pivotOut[1]-.06,TL.pivotBack[1])),
+    pulse(seg(t,TL.publish[0],TL.publish[1])),
+  ];
+  SERVICES.forEach((s,i)=>{
+    const col=C[s.hue], act=svcAct[i];
+    panel(s.x,SV_Y,SV_W,SV_H,{r:14,fill:C.panel2,glow:col,ga:act*.95});
+    bandDot(s.x+20,SV_Y+22,col,act);
+    text(s.name, s.x+34, SV_Y+22, {size:14, weight:'700'});
+    chip(s.x+18, SV_Y+38, SV_W-36, 18, s.eff, {color:col, ga:act*.85, size:9.5, mono:true});
+    s.ops.forEach((op,k)=> text(op, s.x+22, SV_Y+70+k*13, {size:10, color:C.dim, font:FM}));
+    ring(s.cx-40, SV_Y, act>0 ? seg(t, i===2?TL.pivotOut[1]-.06:i===3?TL.publish[0]:TL.fanTry[1]-.06,
+         (i===2?TL.pivotOut[1]-.06:i===3?TL.publish[0]:TL.fanTry[1]-.06)+.10) : 0, col, {r0:4,r1:24});
+  });
+  label('four tool services · each declares its contracts and registers them through the SDK · deterministic faults keyed by (seed, tool, attempt_no)',
+        640, SV_Y+SV_H+14, {size:10, color:C.dim, align:'center'});
+
+  /* ---- band 6 ---- */
+  drawRibbon(t);
+
+  /* ---- comets ---- */
+  comet(P.view, seg(t,TL.viewPull[0],TL.viewPull[1]), C.amber, {size:3.4, tailPx:70});
+  comet(P.planChk, seg(t,TL.propose[0],TL.propose[1]), C.cyan, {size:4.2, tailPx:26});
+  comet(P.tvChk, seg(t,TL.viewPull[1]-.02,TL.rules[0]+.01), C.amber, {size:3.4, tailPx:26});
+  comet(P.chkLog, seg(t,TL.freeze[0],TL.freeze[1]), C.cyan, {size:4.4, tailPx:28});
+  comet(P.logCoor, seg(t,TL.claim[0],TL.claim[1]), C.sky, {size:4});
+  comet(P.logOrch, seg(t,TL.claim[0]+.012,TL.claim[1]+.012), C.sky, {size:3.4});
+  comet(P.coorGw, seg(t,TL.toGw[0],TL.toGw[1]), C.violet, {size:4});
+
+  // try fan-out to the two TCC services, and the sealed brackets coming back
+  [0,1].forEach(i=>{
+    comet(P['in'+i], seg(t, TL.fanTry[0]+i*.012, TL.fanTry[1]+i*.012), C[SERVICES[i].hue], {size:3.6, tailPx:56});
+    comet(P['out'+i], seg(t, TL.sealed[0]+i*.012, TL.sealed[1]+i*.012), C.emerald, {size:3.6, tailPx:56});
+  });
+  const sl = seg(t,TL.sealed[0],TL.sealed[1]);
+  if(sl>.15&&sl<.95){
+    chip(468, GW_Y-26, 176, 20, 'txn/try · sealed', {color:C.emerald, ga:.85, size:10, mono:true});
+  }
+  // the barrier holds the pivot until every try is sealed
+  const bAct = pulse(seg(t,TL.barrier[0],TL.barrier[1]));
+  if(bAct>.02){
+    ctx.save();
+    ctx.globalAlpha = bAct;
+    ctx.strokeStyle=hexA(C.amber,.75); ctx.lineWidth=2.4; ctx.setLineDash([6,5]);
+    ctx.beginPath(); ctx.moveTo(147,FAN_Y+9); ctx.lineTo(1053,FAN_Y+9); ctx.stroke();
+    ctx.restore();
+    // captioned on the line itself, clear of the service titles below it
+    label('pivot barrier — hold until every try is sealed', 950, FAN_Y+9,
+          {size:10, color:C.amber, align:'center', weight:'600', alpha:bAct});
+  }
+  // the pivot itself
+  comet(P['in2'], seg(t,TL.pivotOut[0],TL.pivotOut[1]), C.rose, {size:4.6, tailPx:60});
+  comet(P['out2'], seg(t,TL.pivotBack[0],TL.pivotBack[1]), C.rose, {size:4.6, tailPx:60});
+  const pv = seg(t,TL.pivotBack[0],TL.pivotBack[1]);
+  if(pv>.10&&pv<.95){
+    comet(P.gwCoor, cl01((pv-.25)/.7), C.rose, {size:4});
+    comet(P.coorLog, cl01((pv-.45)/.5), C.rose, {size:4.4});
+  }
+  if(pv>.05&&pv<.98){
+    chip(EVX, EVY, EVW, 20, 'txn/pivot-passed · durable',
+         {color:C.rose, ga:.9, size:10, mono:true});
+  }
+  // confirm the sealed members, then release the buffered listing
+  [0,1].forEach(i=>{
+    comet(P['in'+i], seg(t, TL.confirm[0]+i*.02, TL.confirm[1]-.05+i*.02), C.emerald, {size:3.4, tailPx:56});
+    comet(P['out'+i], seg(t, TL.confirm[0]+.05+i*.02, TL.confirm[1]+i*.02), C.emerald, {size:3.4, tailPx:56});
+  });
+  comet(P['in3'], seg(t,TL.publish[0],TL.publish[1]), C.violet, {size:3.6, tailPx:56});
+  const cf = seg(t,TL.confirm[0],TL.confirm[1]);
+  if(cf>.15&&cf<.95){
+    comet(P.coorLog, cl01((cf-.35)/.6), C.emerald, {size:4});
+    chip(EVX, EVY, EVW, 20, 'txn/confirm · idempotent',
+         {color:C.emerald, ga:.85, size:10, mono:true});
+  }
+}
+
+/* ---------------- driver ---------------- */
+const out = document.createElement('canvas');
+out.width=W; out.height=H;
+const octx = out.getContext('2d',{alpha:false});
+octx.imageSmoothingEnabled=true; octx.imageSmoothingQuality='high';
+
+window.__setTheme = function(name){
+  C = THEMES[name] || THEMES.dark;
+  document.documentElement.style.background = C.bg;
+  return name;
+};
+window.__themes = Object.keys(THEMES);
+window.__render = function(t){
+  ctx.setTransform(SS,0,0,SS,0,0);
+  ctx.imageSmoothingQuality='high';
+  frame(t);
+  ctx.setTransform(1,0,0,1,0,0);
+  octx.drawImage(cv,0,0,W,H);
+  return true;
+};
+window.__pixels = function(){
+  const d = octx.getImageData(0,0,W,H).data;
+  let bin='';
+  const chunk=0x8000;
+  for(let i=0;i<d.length;i+=chunk) bin += String.fromCharCode.apply(null, d.subarray(i,i+chunk));
+  return btoa(bin);
+};
+window.__size={W,H};
+// opened directly: follow the browser's colour scheme, and allow ?theme=light
+{
+  const q = new URLSearchParams(location.search).get('theme');
+  window.__setTheme(q || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+  if (!q) matchMedia('(prefers-color-scheme: light)')
+    .addEventListener('change', e => window.__setTheme(e.matches ? 'light' : 'dark'));
+}
+// live preview when opened directly
+if (!window.__noAuto){
+  let start=null;
+  const loop=(ts)=>{ if(!start) start=ts; const t=((ts-start)/7680)%1; window.__render(t);
+    document.title='t='+t.toFixed(3); requestAnimationFrame(loop); };
+  requestAnimationFrame(loop);
+}
+</script>
+</body></html>

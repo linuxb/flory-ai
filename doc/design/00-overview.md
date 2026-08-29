@@ -45,7 +45,7 @@ Its central challenge is that **LLM planning is probabilistic, while inventory d
 
 The current deployment view is [diagrams/deployment-architecture.html](./diagrams/deployment-architecture.html). It shows the Agent Orchestrator, Distributed Transaction Coordinator, `gatewayd`, PostgreSQL event log, blob storage, and business services, including registration and execution-routing paths. The self-contained diagram adapts to light and dark themes and provides a Light/Dark/Auto control.
 
-The [conceptual architecture overview](./diagrams/architecture.html) remains a higher-level companion. Focused mechanism diagrams are editable Draw.io files: [transaction boundaries](./diagrams/txn-boundary.drawio), [replanning flow](./diagrams/replan-flow.drawio), [projection and offline evaluation](./diagrams/projection.drawio), and [Coordinator/Engine interaction](./diagrams/coordinator-engine-interaction.drawio).
+The [animated architecture overview](../animations/architecture-dark.gif) in the README walks the same components through one transaction scope, from planning to the pivot and its confirmations; its generator is [doc/animations/src](../animations/src). The [conceptual architecture overview](./diagrams/architecture.html) remains a higher-level companion. Focused mechanism diagrams are editable Draw.io files: [transaction boundaries](./diagrams/txn-boundary.drawio), [replanning flow](./diagrams/replan-flow.drawio), [projection and offline evaluation](./diagrams/projection.drawio), and [Coordinator/Engine interaction](./diagrams/coordinator-engine-interaction.drawio).
 
 ## 4. Five Design Principles
 

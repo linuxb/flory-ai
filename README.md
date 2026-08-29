@@ -1,5 +1,21 @@
 # Flory
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="doc/animations/architecture-dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="doc/animations/architecture-light.gif">
+    <img src="doc/animations/architecture-light.gif" width="100%"
+         alt="Animated Flory architecture: a planner proposes a sub-DAG against one frozen tool view; checkSubDag admits it against rules R1-R11 and the frozen subgraph is appended to the append-only event log; the Agent Orchestrator claims the read-only vertices and the Distributed Transaction Coordinator claims every effectful one; through gatewayd a TCC try seals a bracket on the inventory and payment services, a pivot barrier holds until every try is sealed, the irreversible logistics booking runs, txn/pivot-passed closes a one-way gate, and the sealed members confirm.">
+  </picture>
+</p>
+
+<p align="center">
+  <sub>
+    one log for the DAG and the transaction brackets &nbsp;·&nbsp; the rules admit a plan, the model never does &nbsp;·&nbsp; past the pivot, recovery only moves forward<br>
+    diagram source: <a href="doc/animations/src"><code>doc/animations/src</code></a>
+  </sub>
+</p>
+
 Flory is a design for an AI harness orchestration engine for AI-driven e-commerce. It supports workflows spanning supplier operations (product selection, procurement, and inventory) and sales channels (pricing, listings, orders, and logistics).
 
 The system is designed for the difficult boundary between probabilistic LLM planning and irreversible business effects. It combines just-in-time DAG planning with append-only event logging, deterministic transaction validation, and recovery-aware execution.
@@ -133,7 +149,7 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Database schema and storage model](doc/design/08-database-schema.md)                               | Event log immutability, sequence allocation, and synchronous projections.   |
 | [`gatewayd` Tool Registry Gateway](doc/design/09-tool-registry-gateway.md)                          | Immutable tool views, dynamic registration, the SDK, and one-attempt routing. |
 
-Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/). The [deployment architecture](doc/design/diagrams/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/design/diagrams/architecture.html) remains a higher-level companion. Editable Draw.io diagrams cover [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Coordinator/Engine interaction](doc/design/diagrams/coordinator-engine-interaction.drawio).
+The README hero image is the animated architecture overview; its generator lives in [doc/animations/src](doc/animations/src). Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/). The [deployment architecture](doc/design/diagrams/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/design/diagrams/architecture.html) remains a higher-level companion. Editable Draw.io diagrams cover [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Coordinator/Engine interaction](doc/design/diagrams/coordinator-engine-interaction.drawio).
 
 ## Repository layout
 
@@ -147,6 +163,7 @@ Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagram
 ├── db/                    # PostgreSQL migrations, bootstrap, and migration utilities
 ├── docker/                # Optional containerized PostgreSQL for local development
 ├── doc/
+│   ├── animations/        # Animated architecture diagram and its generator
 │   ├── design/            # Architecture and mechanism specifications
 │   │   ├── adr/           # Architecture decision records
 │   │   └── diagrams/      # HTML and Draw.io diagrams

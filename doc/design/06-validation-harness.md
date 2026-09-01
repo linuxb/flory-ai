@@ -51,6 +51,8 @@ For each of these the assertion is stronger than "rejected": **no tool in the sa
 
 Planning quality is a first-class product property, so the live tier is designed now rather than retrofitted (§9). It reuses the same sandbox, the same fault injector, and the same oracles; only the assertion form changes.
 
+The live planner is selected by configuration rather than by scenario code. A T-C run supplies a provider label, one of the supported wire protocols, a full endpoint, a model ID, and an API key or local key-file path. Provider-specific optional request fields are passed as a JSON object. Pricing is also configuration: all cache-hit input, cache-miss input, and output rates plus their source and tier must be supplied together, or cost estimation remains disabled while token and duration accounting continue.
+
 ## 3. Sandbox Contract
 
 ### 3.1 Two views, one world
@@ -153,6 +155,8 @@ A scenario is a declarative record, not a script. The runner is generic; scenari
 `expect.episodes` is a list, not a flat ladder sequence, because monotonicity is a per-episode property (§7, O3). A scenario that produces two independent failures declares two entries.
 
 The `goal_prompt` is the initial workflow prompt that drives orchestration. In T-B it is context for the scripted planner's branch selection; in T-C it is the real model input. Keeping one field for both means a scenario can be promoted from T-B to T-C by changing `planner.mode` and nothing else.
+
+The repository's gated live test uses the same minimal scenario shape with `planner.mode = "live"`. It is enabled only by `FLORY_LLM_LIVE=1`; ordinary tests use an in-memory HTTP double and require no key. The live test creates a real planner vertex, performs one thought call, then reads the PostgreSQL stream back and asserts that its `budget/charged` event contains positive duration and token usage plus cost when a pricing snapshot was configured.
 
 ## 6. Scenario Matrix
 
@@ -304,6 +308,8 @@ T-C runs a live model only inside the sandbox against a fixed, versioned scenari
 ### 9.1 Metrics are log projections
 
 Per discipline 23, no separate telemetry. Every metric below is a projection over the event log and the ledger, so a changed definition can be recomputed over history.
+
+For model calls, `budget/charged.usage` normalizes input, output, total, reasoning, cache-hit input, and cache-miss input tokens. `duration_ms` measures the complete HTTP call. `estimated_cost` is present only when the run configured a complete pricing snapshot and embeds the price reference, tier, and rates used; it is not relabelled as billed cost.
 
 | Metric | Definition | Direction |
 |---|---|---|

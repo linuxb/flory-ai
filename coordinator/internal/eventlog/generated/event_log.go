@@ -57,6 +57,41 @@ type SubgraphProposedPayload struct {
 	ToolViewDigest string `json:"tool_view_digest"`
 }
 
+type LLMUsage struct {
+	InputTokens          int64 `json:"input_tokens"`
+	OutputTokens         int64 `json:"output_tokens"`
+	TotalTokens          int64 `json:"total_tokens"`
+	ReasoningTokens      int64 `json:"reasoning_tokens"`
+	CacheHitInputTokens  int64 `json:"cache_hit_input_tokens"`
+	CacheMissInputTokens int64 `json:"cache_miss_input_tokens"`
+}
+
+type LLMRatesPerMillion struct {
+	CacheHitInput  float64 `json:"cache_hit_input"`
+	CacheMissInput float64 `json:"cache_miss_input"`
+	Output         float64 `json:"output"`
+}
+
+type LLMCostEstimate struct {
+	Currency        string             `json:"currency"`
+	Amount          float64            `json:"amount"`
+	PricingRef      string             `json:"pricing_ref"`
+	PricingTier     string             `json:"pricing_tier,omitempty"`
+	RatesPerMillion LLMRatesPerMillion `json:"rates_per_million"`
+}
+
+type BudgetChargedPayload struct {
+	Category       string           `json:"category"`
+	Provider       string           `json:"provider"`
+	Protocol       string           `json:"protocol"`
+	Endpoint       string           `json:"endpoint"`
+	RequestedModel string           `json:"requested_model"`
+	ResponseModel  string           `json:"response_model"`
+	DurationMS     float64          `json:"duration_ms"`
+	Usage          LLMUsage         `json:"usage"`
+	EstimatedCost  *LLMCostEstimate `json:"estimated_cost,omitempty"`
+}
+
 type ForkSubstitution struct {
 	StreamSeq  int64  `json:"stream_seq"`
 	PinVersion string `json:"pin_version"`

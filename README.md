@@ -33,6 +33,8 @@ This repository contains the architecture and design baseline plus an executable
 - **PostgreSQL:** stores the append-only event log and metadata-only harness state, and allocates the write-order sequence.
 - **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own. Execution events belong to the vertex's executor: read-only vertices are the Orchestrator's, everything else is the Coordinator's, and the database enforces the split.
 
+Planner thought calls use a provider-neutral adapter configured through `FLORY_LLM_*`. Set a complete OpenAI Chat Completions-compatible or Anthropic Messages-compatible endpoint, its exact model ID, and either `FLORY_LLM_API_KEY` or the safer local `FLORY_LLM_API_KEY_FILE`. See [.env.example](.env.example) for the full configuration, including optional provider request fields and auditable pricing snapshots. Successful calls record measured duration, normalized provider token usage, and optional estimated cost in `budget/charged`; secrets and raw prompts or completions are not event payloads.
+
 ## Local development
 
 Flory needs one PostgreSQL 16-or-newer server and does not care where it comes from. All connections

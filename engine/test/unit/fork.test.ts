@@ -59,6 +59,12 @@ describe('computeForkSlice', () => {
         expect(slice.deferred.map((item) => item.stream_seq)).toEqual([5, 8]);
     });
 
+    it('invalidates the divergence planner model charge under a model substitution', () => {
+        const charged = [...stream, event(9, 'budget/charged', {vertex_id: PLANNER})];
+        const slice = computeForkSlice(charged, PLANNER, [{stream_seq: 2, pin_version: 'model://planner@v2'}], 9);
+        expect(slice.invalidated.map((item) => item.stream_seq)).toContain(9);
+    });
+
     it('diverges at a tool-caller vertex and keeps its causal ancestors in the seed', () => {
         const slice = computeForkSlice(stream, TOOL, [{stream_seq: 4, pin_version: 'tool://check@v2'}], 8);
         expect(slice.seed.map((item) => item.stream_seq)).toEqual([1, 2, 3, 4]);

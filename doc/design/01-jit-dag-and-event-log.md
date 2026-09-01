@@ -12,7 +12,8 @@
 
 ### 2.1 Planner node
 
-- Calls a model with linearized execution context, the task goal, and a prompt assembled from harness-state (see [04](./04-refine-and-harness-state.md)).
+- Executes a **thought call** through the engine's provider-neutral model adapter. The planner vertex pins the provider and model, while runtime configuration supplies the wire protocol, full HTTPS endpoint, API key, timeout, optional provider request fields, and an optional pricing snapshot. OpenAI Chat Completions-compatible and Anthropic Messages-compatible endpoints share the same planner boundary; provider-specific response envelopes never escape the adapter.
+- Sends the model the linearized execution context, task goal, and prompt assembled from harness-state (see [04](./04-refine-and-harness-state.md)). The API key is transport-only secret material: it is neither part of the pin nor written to an event payload.
 - Produces a **sub-DAG proposal**: tool-caller nodes, zero or more downstream planner nodes (decision points), and declared transaction-scope boundaries and attributes (see [02](./02-transaction-model.md)).
 - A proposal must pass check-rules before it is frozen for execution. Rejection returns the violations to the planner for regeneration.
 - The planner is an **online replan anchor**: a replan boundary may only be placed at a closed planner vertex. Offline forks, however, are not bound by this and may occur at any vertex.
@@ -111,7 +112,11 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | `fork/created` | **Offline evaluation only** (§5.2): source run, `at_vertex_id`, `eval_up_to_seq`, seed length, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` | engine |
 | `run/end-seed` | First own event of a fork, closing its inherited seed; every inherited copy — in the seed or merged later — is read-only (§5.2) | engine |
 | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | engine/executor |
-| `budget/charged` | Token and cost accounting | engine |
+| `budget/charged` | One completed LLM thought call: provider, protocol, sanitized endpoint, requested and returned model, measured duration, normalized input/output/cache/reasoning token usage, and an optional cost estimate tied to its exact pricing snapshot | engine |
+
+The engine appends `vertex/started` before the network request. A successful response appends `budget/charged` and `vertex/succeeded` together; a transport or provider failure appends `vertex/failed`. The charge contains provider-reported usage rather than a local tokenizer estimate. Its optional `estimated_cost` is explicitly an estimate: it records currency, price reference, price tier, and all per-million-token rates used in the calculation, so a later provider price change cannot rewrite historical economics. If no trustworthy pricing snapshot is configured, usage is still recorded and `estimated_cost` is omitted.
+
+Event payloads retain only normalized metadata and SHA-256 input/output digests. They never contain authorization headers, API keys, raw prompts, raw completions, query parameters, or provider response envelopes. Raw model material, when retention is enabled, follows the blob-reference boundary described in §7.
 
 ### 3.2.1 Which executor owns a vertex
 

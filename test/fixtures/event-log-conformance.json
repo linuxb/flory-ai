@@ -80,6 +80,69 @@
             "valid": true,
             "expected_scope_state": "open",
             "events": [{"stream_seq": 1, "event_type": "extension/diagnostic", "ignorable": true, "payload": {}}]
+        },
+        {
+            "name": "LLM budget charge carries normalized usage and a pricing snapshot",
+            "valid": true,
+            "expected_scope_state": "open",
+            "events": [
+                {
+                    "stream_seq": 1,
+                    "event_type": "budget/charged",
+                    "vertex_id": "00000000-0000-4000-8000-000000000501",
+                    "payload": {
+                        "category": "llm",
+                        "provider": "compatible-provider",
+                        "protocol": "openai-chat-completions",
+                        "endpoint": "https://llm.example.test/v1/chat/completions",
+                        "requested_model": "best-model",
+                        "response_model": "best-model-20260901",
+                        "duration_ms": 432.1,
+                        "usage": {
+                            "input_tokens": 100,
+                            "output_tokens": 25,
+                            "total_tokens": 125,
+                            "reasoning_tokens": 10,
+                            "cache_hit_input_tokens": 40,
+                            "cache_miss_input_tokens": 60
+                        },
+                        "estimated_cost": {
+                            "currency": "USD",
+                            "amount": 0.000114,
+                            "pricing_ref": "price-snapshot-1",
+                            "rates_per_million": {"cache_hit_input": 0.1, "cache_miss_input": 1, "output": 2}
+                        }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "LLM budget charge must identify its planner vertex",
+            "valid": false,
+            "expected_scope_state": "open",
+            "events": [
+                {
+                    "stream_seq": 1,
+                    "event_type": "budget/charged",
+                    "payload": {
+                        "category": "llm",
+                        "provider": "compatible-provider",
+                        "protocol": "openai-chat-completions",
+                        "endpoint": "https://llm.example.test/v1/chat/completions",
+                        "requested_model": "best-model",
+                        "response_model": "best-model",
+                        "duration_ms": 1,
+                        "usage": {
+                            "input_tokens": 1,
+                            "output_tokens": 1,
+                            "total_tokens": 2,
+                            "reasoning_tokens": 0,
+                            "cache_hit_input_tokens": 0,
+                            "cache_miss_input_tokens": 1
+                        }
+                    }
+                }
+            ]
         }
     ]
 }

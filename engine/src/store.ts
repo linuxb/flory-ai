@@ -31,7 +31,7 @@ export interface ForkSlice {
     divergence_seq: number;
 }
 
-const EXECUTION_EVENT_TYPES = new Set(['vertex/started', 'vertex/succeeded', 'vertex/failed', 'vertex/retried']);
+const EXECUTION_EVENT_TYPES = new Set(['vertex/started', 'vertex/succeeded', 'vertex/failed', 'vertex/retried', 'budget/charged']);
 
 /** Returns every vertex causally downstream of one vertex, derived from `vertex/created` parent references. */
 export function causalDescendants(events: readonly StoredEvent[], vertexId: string): Set<string> {

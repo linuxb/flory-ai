@@ -141,7 +141,7 @@ An offline result may recommend a candidate for operator review. It cannot autho
 
 ### 4.2 Provenance and aggregation
 
-**Metrics are projections, not telemetry.** Replan depth, token cost, check-rule verdicts, and suspension state are folded from the log. When a metric definition changes, history can be recomputed under a named projector version.
+**Metrics are projections, not telemetry.** Replan depth, token usage and estimated cost, check-rule verdicts, and suspension state are folded from the log. Each LLM `budget/charged` row carries provider-reported normalized usage, measured wall-clock duration, and, when configured, the immutable price reference and rates used for its estimate. The projection therefore never consults today's provider price page to reinterpret an old run. When a metric definition changes, history can be recomputed under a named projector version.
 
 **Fold per stream, then summarize — never fold concatenated streams.** Projection purity is guaranteed within one stream and explicitly not across them ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3). Descriptive corpus summaries may be grouped by task type, SKU-count bucket, pivot presence, or failure class, but every underlying case result remains available and no pooled causal claim is made.
 

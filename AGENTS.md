@@ -4,158 +4,66 @@
 
 - Write all repository documentation in English.
 - Keep design documents in `doc/design/`, architecture decision records in `doc/design/adr/`, and planning documents in `doc/plan/`.
-- Record any decision with rejected alternatives as an ADR: `doc/design/adr/adr-NNN-short-slug.md`, numbered sequentially, never renumbered. A changed decision means a new ADR that supersedes the old one, not an edit to it. A superseded ADR is then removed from the tree — the new ADR restates whatever survives, and git history preserves the rest; numbering gaps are expected.
+- Record any decision with rejected alternatives as an ADR: `doc/design/adr/adr-NNN-short-slug.md`, numbered sequentially and never renumbered. A changed decision requires a new ADR that supersedes the old one. Remove the superseded ADR after restating everything that survives; Git history preserves the prior decision and numbering gaps are expected.
 - Store design diagrams in `doc/design/diagrams/`.
 - Prefer self-contained HTML for architecture diagrams. Use Draw.io (`.drawio`) for focused mechanism diagrams that need to remain editable.
-- **Keep related charts on one Draw.io sheet.** Arrange them as labelled regions (`A. …`, `B. …`) on a single enlarged page instead of opening a new sheet per chart; readers should compare without switching tabs, and cross-region arrows can express how the charts relate. Open a new sheet only for genuinely unrelated subsystems.
-- Every diagram must adapt to light and dark themes: no hard-coded background or ink colors, `background="none"` on Draw.io canvases, and a Light/Dark/Auto toggle in standalone HTML.
-- **This is not a licence to remove colour.** "No hard-coded colors" means the *canvas background* and *neutral ink*, never the semantic palette. Every Draw.io shape keeps `fillColor` + `strokeColor` from the shared palette with `fontColor` equal to its stroke, which is what stays legible in both themes; in HTML the palette lives in CSS variables while only the surface tokens follow the theme. A monochrome diagram is a regression, not a theme fix.
+- Keep related charts on one Draw.io sheet as labelled regions (`A. …`, `B. …`) on an enlarged page. Use another sheet only for a genuinely unrelated subsystem.
+- Every diagram must adapt to light and dark themes: use `background="none"` on Draw.io canvases and provide a Light/Dark/Auto toggle in standalone HTML. Keep the semantic colour palette; only canvas surfaces and neutral ink adapt to the theme. A monochrome diagram is a regression.
 - Keep diagram labels, captions, and surrounding documentation in English.
 - Use relative links between documentation files so the documentation remains portable.
-- **Update documentation by rewriting the affected section, never by patching it.** When a decision changes, replace the whole section with the current design and **delete every superseded sentence** — no "previously we said", no parenthetical corrections, no notes bolted onto a stale paragraph. Rationale that is still true may be carried forward, and a rule set may keep a compact revision table when knowing *why a rule was rejected* prevents its reintroduction, but the body of a document must read as though it were written today. Reason: patch-on-patch documentation makes the reader reconstruct history to find the current rule, which is exactly when the wrong rule gets implemented.
-- Keep the root `README.md` repository-layout tree synchronized whenever a top-level directory is added, removed, or repurposed. State the directory's role; the README is the entry point for contributors discovering repository structure.
-- Keep `.github/workflows/formal-verification.yml` aligned with the transaction protocol's source documents. When a documentation change adds or changes a transaction discipline, invariant, admission rule, recovery rule, or oracle expectation, add that document to the workflow's `paths` filter in the same change. Include `AGENTS.md` and the workflow file itself so changes to the discipline or its CI contract cannot bypass TLC review.
+- Rewrite an affected documentation section as a coherent current design. Delete superseded statements instead of appending corrections or historical commentary.
+- Keep the root `README.md` repository-layout tree synchronized whenever a top-level directory is added, removed, or repurposed, and state the directory's role.
+- Keep `.github/workflows/formal-verification.yml` aligned with the transaction protocol's source documents. A change to a transaction discipline, invariant, admission rule, recovery rule, or oracle expectation must add its source document to the workflow's `paths` filter in the same change. Keep `AGENTS.md` and the workflow file itself in that filter.
+- Keep this file as a thin contributor index. Architecture details, protocol fields, algorithms, event lists, and rationale belong in the linked design documents and ADRs; do not duplicate them here.
 
-## Design Disciplines
+## Architecture Index
 
-These are invariants, not preferences. A change that violates one is wrong even when its tests pass. Each rule states the reason, because the reason is what tells you how to handle a case the rule does not literally cover. Full rationale lives in [`doc/design/`](doc/design/).
+The linked design document or ADR is authoritative. The summaries below identify ownership and review routes; they are not substitute specifications.
 
-### The event log is ground truth
+| Area | Contributor summary | Authoritative sources |
+|---|---|---|
+| System overview | The system combines a JIT-DAG engine, an append-only event log, transaction coordination, tool discovery, and replayable evaluation. | [Design overview](doc/design/00-overview.md) |
+| Event log and storage | The log is immutable ground truth; projections are recomputable, safety-critical guards are synchronous, and database constraints enforce expressible invariants. | [Doc 01 §3](doc/design/01-jit-dag-and-event-log.md#3-event-log-storage-model), [Doc 08](doc/design/08-database-schema.md) |
+| Projection pipeline | Canonical context projection is deterministic, pure, versioned, and implemented once in TypeScript. | [Doc 01 §4](doc/design/01-jit-dag-and-event-log.md#4-surface-projection-and-linearization), [Doc 05 §2](doc/design/05-context-aggregation-and-offline-evaluation.md#2-projection-pipeline) |
+| Transactions and recovery | Deterministic admission rules govern TCC and pivot-saga execution; recovery and replanning preserve transaction boundaries. | [Doc 02](doc/design/02-transaction-model.md), [Doc 03](doc/design/03-replan-and-recovery.md), [Doc 07](doc/design/07-distributed-transaction-coordinator.md) |
+| Replanning and forks | Online replanning stays in the source stream; forks are offline, causal counterfactuals evaluated against one history. | [Doc 01 §5](doc/design/01-jit-dag-and-event-log.md#5-replanning-in-place-and-forking-for-offline-evaluation), [Doc 05 §3](doc/design/05-context-aggregation-and-offline-evaluation.md#3-counterfactual-evaluation-by-fork), [ADR-005](doc/design/adr/adr-005-lazy-causal-fork-semantics.md) |
+| Harness state and refine | Harness state contains versioned metadata and references; refine produces validated structured edits. | [Doc 04](doc/design/04-refine-and-harness-state.md) |
+| Validation and formal verification | Scenario oracles, replay properties, and formal models define the protocol's verification surface. | [Doc 06](doc/design/06-validation-harness.md), [ADR-003](doc/design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) |
+| Tool registry gateway | `gatewayd` publishes immutable tool views and routes one pinned attempt; registration and execution use the repository SDK and IDL contracts. | [Doc 09](doc/design/09-tool-registry-gateway.md), [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) |
+| Language and service boundaries | The TypeScript engine, Go coordinator, Go gateway, and PostgreSQL store remain separate components with schema-first shared contracts. | [ADR-001](doc/design/adr/adr-001-engine-language-split.md), [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) |
 
-1. **Append only.** Never `UPDATE` or `DELETE` an `event_log` row. State transitions, shadowing, and forks are new events. Reason: every derived view, audit trail, replay test, and offline evaluation reads the same rows; mutating one row silently invalidates all of them.
-2. **Shadow, never delete.** A replanned-away subtree stays in the log behind a `subgraph/shadowed` event. Reason: it is both the audit record and the evidence that stops a planner from repeating a disproven path.
-3. **Materialized projections may be updated, but only by the projector, and must be recomputable** from the complete log with an identical result. A materialization is a cache, never a source.
-3b. **Projections that gate a side effect are updated in the same transaction as the event append, never asynchronously.** Pivot admission and replan-boundary legality are safety-critical synchronous reads; a projection lagging by milliseconds can let an irreversible action fire that should have been blocked. Both live in the same database, so this is one ordinary transaction.
-3c. **Push an invariant into a database constraint whenever it is expressible there.** Constraints do not forget and the coordinator has many concurrent writers. Required at schema-creation time, because retrofitting any of them onto live data means cleaning history first: no `UPDATE`/`DELETE` grant on `event_log` for the application role (enforces discipline 1); a `BEFORE INSERT` trigger checking `current_user` against event ownership (enforces discipline 29); `UNIQUE (idempotency_key)` on the bracket projection; a partial unique index for one-pivot-per-scope; a state-transition trigger for "no cancel after pivot".
-4. **Atomic append.** A frozen sub-DAG writes `subgraph/frozen` plus all its `vertex/created` events in one database transaction: the whole subgraph is visible or none of it is.
-5. **Fail closed on reads.** An unrecognized `event_type` makes the reader reject the whole log unless the event carries an explicit `ignorable` flag. Reason: silently skipping an unknown event corrupts replay in a way no test will catch.
-6. **Two sequences, one of which may never feed a fold.** `stream_seq` is per-run, strictly increasing, contiguous, rollback-safe, and commit-ordered — it is allocated from a counter column on the run row inside the appending transaction. `global_seq` is a `BIGSERIAL`: gappy, not commit-ordered, for coarse global ordering and operational triage only. **Never fold over `global_seq`.** Reason: a sequence is allocated before commit and observed after it, so concurrent appends can be observed out of order — which does not merely skip an event, it makes the same event set fold differently on different reads, and projection purity collapses along with replay testing, prompt caching, and offline evaluation. Neither sequence carries causality; causality is `parent_refs`.
-6b. **Projection purity is scoped to one stream, and that scope is honest.** A run owns exactly one stream. A fold over one stream is pure; a fold over concatenated streams is not. Every projection, and every fork evaluation — which compares two surfaces, each folded from a single stream — is single-stream by construction, so this costs nothing. But cross-run analytics must be computed as **fold per stream, then aggregate**, never as one fold ordered by `global_seq`.
-6c. **Reducers must commute over concurrent events.** Serializing appends fixes storage order, not scheduling order: two concurrent siblings may take `stream_seq` in either order across replays. Any reducer that is order-sensitive over events with no `parent_refs` path between them breaks purity even with a perfect sequence. `linearize` satisfies this by sorting on `vertex_id`; semantic folds satisfy it because compensation is delta-based (discipline 17). Asserted by the permutation test in doc 06 O4.
-7. **Keep the log vertex-fidelity, not token-fidelity.** Raw model input/output lives in blob storage referenced from `payload`; the log stores summaries. Reason: token-level logs force a compaction subsystem and leak PII into the primary table.
+### Component and contract routes
 
-### Forks and evaluation
+| Component or contract | Repository location | Design route |
+|---|---|---|
+| TypeScript engine | `engine/` | [Doc 01](doc/design/01-jit-dag-and-event-log.md), [Doc 05](doc/design/05-context-aggregation-and-offline-evaluation.md), [ADR-001](doc/design/adr/adr-001-engine-language-split.md) |
+| Distributed Transaction Coordinator (Go 1.25) | `coordinator/` | [Doc 02](doc/design/02-transaction-model.md), [Doc 07](doc/design/07-distributed-transaction-coordinator.md), [ADR-001](doc/design/adr/adr-001-engine-language-split.md) |
+| `gatewayd` (Go 1.25) | `gatewayd/` | [Doc 09](doc/design/09-tool-registry-gateway.md), [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) |
+| Tool-service SDKs and shared IDLs | `gatewayd/sdk/`, `sdk/typescript/`, `idl/` | [Doc 09 §3](doc/design/09-tool-registry-gateway.md#3-registration-and-the-tool-view-contract), [Doc 08 §1](doc/design/08-database-schema.md#1-executable-boundary) |
+| PostgreSQL schema and migrations | `db/` | [Doc 08](doc/design/08-database-schema.md) |
 
-7b. **The event log is immutable history; a fork is the only way to ask a counterfactual.** Never edit an event to explore an alternative. `fork(source_stream, at_vertex_id, substitutions, eval_up_to_seq)` branches a new run at the divergence vertex, substitutes `pin_version` on the named events, invalidates the vertex's causal descendants (the fork regenerates that chain), lazily merges causally independent events, and folds no further than `eval_up_to_seq`. Reason: mutating history would destroy the one property everything else rests on, and branching costs nothing because folds are already per-stream.
-7c. **A substitution changes only a `pin_version`.** Model endpoint, tool API contract, prompt-assembly strategy, and fold reducer are all pinned, so "what if we used a different model / a different carrier contract / a different assembly" are the same operation on different pins. Nothing else about an inherited event may differ.
-7d. **A no-substitution fork must reproduce the source surface exactly.** Any difference means an unpinned dependency leaked into the projection pipeline. This is the cheapest available detector for that defect class, so it runs after every change to a projection layer or a pin default.
-7e. **Offline evaluation never crosses into writes.** The `fold_mode` ladder is `recorded` → `model-live` → `reads-live`; `writes-live` is production and is not an evaluation mode. Live reads are permitted precisely because `effect_class: none` means no side effect. The executor enforces the declared mode at the node level, recording an unverified estimate rather than calling a tool above it.
-7f. **Fork evidence is case-specific.** A fork is a paired counterfactual on one history. ToB e-commerce runs differ in task, catalog, inventory, prices, and external timing, so unrelated runs are not parallel comparison units. Report the source result, fork result, substitutions, and limitations for each history; never turn a corpus of forks into a causal or population-level claim.
+Do not add a third engine language without a new ADR. Components must use their documented public boundaries rather than importing or calling another component's internals. Shared contract changes start in `idl/`; regenerate every consumer and update required conformance fixtures in the same change.
 
-### Projections are pure
+## Review Gates
 
-8. **`surface`, `slice`, `fold`, `linearize`, and `assemble` are pure functions.** No I/O, no clock, no randomness, no ambient config. Reason: purity is what makes replay testing, prompt caching, and reproducible historical evaluation possible at all.
-9. **Every layer can dump its intermediate output.** Reason: a wrong prompt must be localizable to one layer instead of bisected across six.
-10. **`linearize` sorts parallel branches lexicographically by `vertex_id` — never by a sequence number, timestamp, or completion order.** Reason: two reasons, and both matter. Scheduling jitter would break replay determinism, and it would also change the prompt prefix on every turn and destroy the provider prompt-cache hit rate.
-11. **Assert planner visibility before every model call**: the context being sent must equal the log projection. Compare projection hashes rather than re-serializing full history.
-12. **Fold reducers are registered, versioned, and unit-tested** (`fold://inventory@v3`). A reducer may not call tools, read the clock, or perform I/O. Reason: arithmetic like "which of these 12 inventory results is current" belongs in tested code, never in a prompt.
+Use these as routing checks, then review the linked specification. Reject a change that:
 
-### Transactions
-
-13. **Never mix control-plane and data-plane transactions.** Engine metadata uses database transactions; business side effects use TCC plus pivot-saga. They are separate layers with separate failure handling.
-14. **Check-rules are authoritative and deterministic.** A planner declares transaction boundaries; the rule engine admits them. Model self-checking is never a safety guarantee. A rejected proposal is regenerated with the violations attached — never patched through.
-15. **A pivot is a one-way gate.** After `txn/pivot-passed`, forward recovery only: retry idempotent successors, then suspend for human intervention. Never automatically compensate backward across a pivot.
-16. **Cancel before replan.** Planning may not resume across an open `txn/try`. Compensate first, then move the boundary.
-16b. **Replan in place; fork only offline.** An online replan appends `replan/boundary` plus `subgraph/shadowed` to the **same stream** — never a child run. Reason: a run is a business process, so its identity must stay whole for audit. A fork (disciplines 7b–7f) is offline only and must never cancel or confirm an inherited `txn/try` — whether copied in its seed or merged later as a causally independent event — because that hold belongs to a live order; it mocks around the open bracket or terminates lazily instead.
-17. **Compensation is delta-based and scoped to its own footprint.** Release what this try reserved; never restore an absolute snapshot value. Reason: only delta compensation commutes with another branch's committed change. This is validated at tool registration, and it matters most for value-type resources such as price, where snapshot-restore looks natural and is wrong.
-18. **Every retryable tool declares an idempotency key**, and every compensation tool is itself idempotent.
-
-### Harness-state and prompts
-
-19. **Harness-state stores metadata only — no prose.** Prompt text lives in a versioned template library and is referenced by `*_ref`; memory is reached through mem-hints. Reason: raw text in state cannot be versioned, diffed, replayed, or governed reliably.
-20. **Mem-hint queries come from a whitelist of parameterized, read-only, row-limited templates.** Refine may select and parameterize a template, never emit query code.
-21. **A refine proposal is a validated structured edit list, never a prompt rewrite.** The base prompt is immutable in code, not merely in instructions. Each edit records before/after snapshots so rollback is inverse-edit replay.
-
-### Offline evaluation and traceability
-
-22. **Evaluation is historical and paired within one case.** Compare a source stream only with forks derived from that same stream. Production traffic is not divided into comparison groups, and unrelated ToB cases are never treated as exchangeable samples.
-23. **Metrics are log projections, not separate telemetry.** Reason: when a metric definition changes, history can be recomputed; with independent telemetry, changing a definition discards the comparison baseline.
-24. **Record complete evaluation provenance in `fork/created`:** source `run_id`, `at_vertex_id`, `eval_up_to_seq`, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version`. Omitting any versioned dependency makes the historical result impossible to reproduce.
-25. **Safety guardrails outrank apparent improvements.** Lower estimated cost with a worse invariant verdict, post-pivot risk, or unverified write dependency is a rejection. An offline result may recommend promotion for review; it never authorizes production automatically.
-26. **Fold each stream before reporting a corpus.** Cross-case summaries are descriptive and stratified by task type, SKU-count bucket, and pivot presence. Preserve every case result and its limitations; do not report a pooled causal effect.
-
-### Versioning
-
-27. **Bump the relevant version on any behavior change:** log schema version (in `run/start`), `projector_version` (any change to a projection layer or fold reducer), `harness_state_version`, and template refs. Version identifiers are wire format; treat them as such from the first commit.
-28. **Any change to the planner loop, a projection layer, or a fold reducer requires a replay test.** Record a real run once; replay asserts an event-by-event log match ignoring timestamps. Regression testing needs no API key.
-28b. **Decisions publish their work; harnesses check rather than recompute.** `replan/boundary` carries the candidate set: each selectable candidate's cost, or a closed-vocabulary rejection reason for a non-selectable candidate, plus `estimated_cost` for later comparison against actual. Reason: verifying a choice by recomputing it duplicates the policy and tends to reproduce the author's own misunderstanding, yielding a green test over a wrong engine. A harness may traverse topology (`parent_refs`) freely — that is a fact, not a policy — but must never reimplement legality or cost.
-
-## Review Checklist
-
-Reject a change that does any of the following:
-
-- Updates or deletes a `event_log` row, or backfills `shadowed_by` outside the projector.
-- Adds I/O, a clock read, randomness, or ambient config to a projection layer or fold reducer.
-- Sorts planner context by either sequence number, timestamp, or completion order.
-- Folds over `global_seq`, or computes a cross-run metric as a single fold instead of fold-per-stream-then-aggregate.
-- Edits an event to explore an alternative instead of forking with a `pin_version` substitution.
-- Compares unrelated business cases as parallel samples, or reports a fork corpus as a causal or population-level result.
-- Lets an evaluation execute a node above its declared `fold_mode`.
-- Patches a documentation section instead of rewriting it, or leaves superseded text in place.
-- Adds a reducer that is order-sensitive over concurrent events.
-- Updates a side-effect-gating projection asynchronously.
-- Silently skips an unknown event type.
-- Lets a planner's own assertion substitute for a check-rule.
-- Compensates backward across `txn/pivot-passed`, or resumes planning across an open `txn/try`.
-- Creates a child run for an online replan, or lets a fork mutate an inherited `txn/try`.
-- Writes a compensation that restores an absolute value instead of releasing a delta.
-- Puts prompt prose or raw memory text into harness-state.
-- Adds a metric as new telemetry rather than as a log projection.
-- Changes a projection layer without bumping `projector_version` or adding a replay test.
+- Mutates event history, folds over the global operational sequence, silently accepts an unknown event type, or updates a side-effect-gating projection asynchronously. See [Doc 01 §3](doc/design/01-jit-dag-and-event-log.md#3-event-log-storage-model) and [Doc 08](doc/design/08-database-schema.md).
+- Adds I/O, clock reads, randomness, or ambient configuration to canonical projection code; reimplements that pipeline outside TypeScript; or makes a reducer order-sensitive over concurrent events. See [Doc 01 §4](doc/design/01-jit-dag-and-event-log.md#4-surface-projection-and-linearization) and [Doc 05 §2](doc/design/05-context-aggregation-and-offline-evaluation.md#2-projection-pipeline).
+- Creates a child run for online replanning, lets an offline fork mutate inherited work or execute writes, or treats unrelated business cases as causal comparison samples. See [Doc 01 §5](doc/design/01-jit-dag-and-event-log.md#5-replanning-in-place-and-forking-for-offline-evaluation), [Doc 03](doc/design/03-replan-and-recovery.md), and [Doc 05](doc/design/05-context-aggregation-and-offline-evaluation.md).
+- Bypasses deterministic transaction admission, compensates backward across a pivot, replans across an open try, or restores absolute snapshots during compensation. See [Doc 02](doc/design/02-transaction-model.md), [Doc 03](doc/design/03-replan-and-recovery.md), and [Doc 07](doc/design/07-distributed-transaction-coordinator.md).
+- Stores prompt prose or raw memory in harness state, or turns refine into an unstructured prompt rewrite. See [Doc 04](doc/design/04-refine-and-harness-state.md).
+- Violates derived executor or event ownership, lets `gatewayd` append events or own retries, or hand-rolls the gateway registration protocol instead of using its SDK. See [Doc 01 §3.2.1](doc/design/01-jit-dag-and-event-log.md#321-which-executor-owns-a-vertex), [Doc 08 §3](doc/design/08-database-schema.md#3-write-time-guards), and [Doc 09](doc/design/09-tool-registry-gateway.md).
+- Changes generated shared types instead of their IDL source, or omits a conformance fixture for shared cross-language semantics. See [ADR-001](doc/design/adr/adr-001-engine-language-split.md), [Doc 08 §1](doc/design/08-database-schema.md#1-executable-boundary), and [Doc 09 §7](doc/design/09-tool-registry-gateway.md#7-the-two-routes-and-their-fixtures).
+- Moves business semantics or verification mocks into the production engine. See [Doc 05 §2.2](doc/design/05-context-aggregation-and-offline-evaluation.md#22-semantic-fold-framework-mechanism-domain-owned-meaning) and [Doc 06 §3.5](doc/design/06-validation-harness.md#35-phase-1-implementation-form).
+- Changes planner, projection, reducer, protocol, or harness behaviour without the required version update and replay or oracle coverage. See [Doc 01 §6](doc/design/01-jit-dag-and-event-log.md#6-replay-testing), [Doc 05](doc/design/05-context-aggregation-and-offline-evaluation.md), and [Doc 06](doc/design/06-validation-harness.md).
+- Patches a documentation section instead of rewriting it, leaves superseded content behind, or fails to update the formal-verification path filter when transaction semantics change.
 
 ## TypeScript and JavaScript Style
 
-- Hand-written TypeScript and JavaScript must follow the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html). Generated sources are exempt except for identifiers that are consumed by hand-written code.
+- Hand-written TypeScript and JavaScript must follow the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html). Generated sources are exempt except for identifiers consumed by hand-written code.
 - Use UTF-8, LF line endings, four spaces for indentation, single-quoted strings, trailing commas, and no trailing whitespace. Apply the repository Prettier configuration; do not hand-format around it.
 - The project line limit is **200 columns**. Wrap expressions, parameter lists, object literals, test fixtures, and JSON Schema declarations so every TypeScript, JavaScript, and IDL schema line stays within this limit. An unbreakable external URL or required wire literal is the only exception and must be documented locally.
 - Use lowerCamelCase for TypeScript identifiers and UpperCamelCase for types. Preserve snake_case only for externally defined protocol, JSON, SQL, or generated field names.
 - Use `import type` and `export type` for type-only references. Document every top-level export in non-generated source with JSDoc; also document any property or method whose purpose is not immediately obvious from its name and type.
 - Run `npm run format:check` before review. It checks both Prettier conformance and the 200-column limit.
-
-## Stack and Language Boundary
-
-Two authoritative services, one stateless gateway, one database. The language split is recorded in [ADR-001](doc/design/adr/adr-001-engine-language-split.md); the gateway boundary is recorded in [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) and specified in [design doc 09](doc/design/09-tool-registry-gateway.md).
-
-- **TypeScript** — engine service: planner loop, event vocabulary as discriminated unions, the canonical projection pipeline, check-rules, prompt assembly, refine loop, model adapters, replay testing, and execution of the read-only vertices it owns (discipline 29).
-- **Go 1.25** — implementation language for the Distributed Transaction Coordinator: transaction scopes, timeout sweeping, orphan-try detection, the tool executor, and adapters that must live inside existing Go infrastructure.
-- **`gatewayd` (Go 1.25)** — dynamic tool registration, immutable tool-view publication, and one-attempt routing. Its north side is MCP `tools/list` and `tools/call`, which both executors consume; its south side is gRPC, which tool services reach through the SDK. It is not a planner, transaction coordinator, retry owner, event writer, or projection implementation. Sharing Go with the Coordinator does not permit either component to import the other's internals: they are separate modules, and their public boundaries remain MCP and the event log.
-- **The tool-service SDK** — `gatewayd/sdk` for Go and `sdk/typescript` for TypeScript, both generated from `idl/proto/`. A tool service declares its contracts and serves execution; it never implements the gateway protocol itself.
-- **PostgreSQL** — the event log and harness-state. It allocates `seq`, so the two services need no coordination protocol. Work handoff uses `SELECT … FOR UPDATE SKIP LOCKED` or `LISTEN/NOTIFY`; do not introduce a message broker before there is load that requires one.
-- No third language in the engine without a new ADR.
-
-### The boundary is the log
-
-The services never call each other's internals. They communicate only by appending events:
-
-| Owner | Exclusive write access |
-|---|---|
-| TS engine | `run/start`, `run/end`, `run/end-seed`, `subgraph/proposed`, `subgraph/frozen`, `subgraph/rejected`, `subgraph/shadowed`, `replan/boundary`, `fork/created`, `vertex/created`, `budget/charged` |
-| Distributed Transaction Coordinator | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` |
-| The vertex's executor | `vertex/started`, `vertex/succeeded`, `vertex/failed`, `vertex/retried` |
-
-29. **Enforce event ownership at the append boundary** in both services, and **enforce executor authority in the database**. A service appending an event type it does not own is a bug, not a shortcut.
-
-    **Execution events belong to whichever executor owns that vertex, and the partition is by effect class.** A tool-caller vertex is Orchestrator-executed if and only if its pinned contract declares `effect_class: none` *and* it carries no `scope_id`; every other queued vertex is Coordinator-executed. Reason: a read has no bracket, no compensation, and no pivot interaction, so there is nothing for a transaction coordinator to own, and the `reads-live` fold mode (discipline 7e) already assumes the Orchestrator executes exactly that class live. R10 guarantees every side-effecting node belongs to a scope, so the two classes partition the queued vertices with no overlap and no gap — the check-rule and the constraint state one fact in two places rather than two facts that can drift.
-
-    The executor class is **derived from the vertex payload, never declared** — the same discipline as `is_pivot` — and both the work queue and the ownership trigger compute it the same way. An in-process guard in either service is advice; the database is the boundary, because a split enforced only by convention degrades into whichever worker claimed the row first.
-
-29b. **`gatewayd` writes no events at all.** It validates registrations, publishes tool views, and routes one requested attempt. It never retries a side-effecting call, never appends to the log, never decides compensation, and never selects a tool version its caller did not pin. Reason: retry legality depends on idempotency, TCC state, and pivot state owned by an executor, so a gateway that decided any of it would become a second transaction authority.
-30. **Canonical projections have exactly one implementation, in TypeScript.** `surface`, `slice`, `fold`, `linearize`, and `assemble` may never be reimplemented in Go. Reason: a second implementation of the projection semantics produces the worst available bug class — two projectors that disagree on an edge case — and it makes discipline 3 (identical recomputation) and discipline 24 (`projector_version` attribution) unverifiable.
-30a. **The engine is domain-neutral, and mocks are test-only.** The canonical pipeline owns generic reducer registration, deterministic dispatch, and projection mechanics only. A mock business world, mock reducer, mock view, or mock oracle belongs under `test/mocks/`, not under `engine/` or a production `domain/` package. Reason: importing a SKU, carrier, payment, or any other business concept into the engine turns a reusable safety boundary into an e-commerce-specific implementation; promoting a verification fake to `domain/` makes tests look like production business behavior.
-31. **Operational projections may live in either service.** Narrow, local folds that serve execution or operations — unmatched `txn/try` scanning, timeout sweeps, executor readiness checks — are not canonical projections. They do not feed a prompt, do not participate in attribution, and are independently testable. Discipline 30 restricts planner-context projection, not log reading in general; the Distributed Transaction Coordinator is expected to read the log.
-32. **Replay testing lives wherever the projector lives**, i.e. in TypeScript, because it must exercise the same code as production. Batch historical recomputation is also driven by the canonical projector: scale it by sharding on `run_id` across worker processes, or push a fold down into SQL. Never by porting the projector.
-33. **Every shared contract is a schema-first IDL in the repository with generated types for every language that speaks it.** The event log is JSON Schema (`idl/event-log.schema.json`); the gateway's tool-service surface is Protocol Buffers (`idl/proto/`). A field change means editing the schema and regenerating, never editing one side's types. `npm run generate:check` gates both.
-33b. **A tool service reaches `gatewayd` only through the SDK.** Registration, heartbeat, and health are what make a stateless gateway recoverable, and a service that hand-rolled any of them would look registered while being unroutable, or keep heartbeating at a gateway that has forgotten it. The Go SDK validates contracts by calling the gateway's own admission rules rather than restating them.
-34. **Cross-language conformance tests are required** for any semantics more than one language implements: golden fixtures plus expected outcomes that every implementation must satisfy. Fail-closed behavior on an unknown `event_type` without an `ignorable` flag is a mandatory fixture, and so is byte-identical canonical tool-view encoding, because a digest one side cannot reproduce makes every pinned contract unresolvable.
-
-Add to the review checklist:
-
-- Appends an event type owned by the other service.
-- Appends a `vertex/*` event for a vertex outside the writer's executor class, or executes a scoped or side-effecting vertex from the Orchestrator.
-- Declares an executor class, an `is_pivot`, or any other derived attribute instead of deriving it.
-- Lets `gatewayd` retry a side-effecting call, append an event, or resolve a tool version the caller did not pin.
-- Hand-rolls the gateway registration protocol instead of using the SDK.
-- Reimplements a canonical projection layer outside TypeScript.
-- Imports a business semantic into the engine framework, or places a mock business semantic outside `test/mocks/`.
-- Changes a shared contract in one language's generated types instead of in the IDL.
-- Adds log-reading semantics shared by both services without a conformance fixture.

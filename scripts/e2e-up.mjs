@@ -89,7 +89,6 @@ await requireFreePort('the sandbox world', process.env.SANDBOX_ADDR ?? '127.0.0.
 
 process.stdout.write(`starting gatewayd (blob backend: ${backend})\n`);
 start('gatewayd', 'go', ['-C', 'gatewayd', 'run', './cmd/gatewayd'], {
-    GOTOOLCHAIN: process.env.GOTOOLCHAIN ?? 'go1.25.0',
     GATEWAYD_BLOB_BACKEND: backend,
     GATEWAYD_HTTP_ADDR: new URL(gatewayHttp).host,
     GATEWAYD_GRPC_ADDR: gatewayGrpc,

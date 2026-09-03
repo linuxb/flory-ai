@@ -199,11 +199,11 @@ func TestScopeCancelResumesAfterCompletedMember(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	runID, scopeID, first, second, pivot := scenarioIDs(t)
+	runID, scopeID, first, second, _ := scenarioIDs(t)
 	if _, err := engine.Exec(ctx, `SELECT create_run($1)`, runID); err != nil {
 		t.Fatal(err)
 	}
-	appendEngineEvents(t, ctx, engine, runID, barrierFixture(scopeID, first, second, pivot))
+	appendEngineEvents(t, ctx, engine, runID, tryFixture(scopeID, first, second, 60))
 	setupAdapter := &recordingAdapter{}
 	setupService := New(database, setupAdapter, Config{WorkerID: "cancel-setup-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
 	for range 2 {
@@ -239,13 +239,114 @@ func TestScopeCancelResumesAfterCompletedMember(t *testing.T) {
 	}
 }
 
+func TestSweepCancelsExpiredOpenScope(t *testing.T) {
+	if os.Getenv("FLORY_INTEGRATION") != "1" {
+		t.Skip("set FLORY_INTEGRATION=1 to run PostgreSQL Coordinator integration tests")
+	}
+	ctx := context.Background()
+	engine := openPool(t, ctx, environmentForTest("ENGINE_DATABASE_URL", "postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory"))
+	defer engine.Close()
+	database, err := store.Open(ctx, environmentForTest("COORDINATOR_DATABASE_URL", "postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	runID, scopeID, first, second, _ := scenarioIDs(t)
+	if _, err := engine.Exec(ctx, `SELECT create_run($1)`, runID); err != nil {
+		t.Fatal(err)
+	}
+	appendEngineEvents(t, ctx, engine, runID, tryFixture(scopeID, first, second, 1))
+	setup := New(database, &recordingAdapter{}, Config{WorkerID: "sweep-setup-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	for range 2 {
+		if err := setup.ProcessOne(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(1100 * time.Millisecond)
+	adapter := &recordingAdapter{}
+	sweeper := New(database, adapter, Config{WorkerID: "sweep-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	if err := sweeper.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(adapter.calls, []string{"inventory.release.a", "inventory.release.b"}) {
+		t.Fatalf("sweeper calls=%v", adapter.calls)
+	}
+	assertScopeState(t, ctx, engine, runID, scopeID, "cancelled")
+}
+
+func TestSweepResumesCancellationAfterLeaseExpires(t *testing.T) {
+	if os.Getenv("FLORY_INTEGRATION") != "1" {
+		t.Skip("set FLORY_INTEGRATION=1 to run PostgreSQL Coordinator integration tests")
+	}
+	ctx := context.Background()
+	engine := openPool(t, ctx, environmentForTest("ENGINE_DATABASE_URL", "postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory"))
+	defer engine.Close()
+	database, err := store.Open(ctx, environmentForTest("COORDINATOR_DATABASE_URL", "postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	runID, scopeID, first, second, _ := scenarioIDs(t)
+	if _, err := engine.Exec(ctx, `SELECT create_run($1)`, runID); err != nil {
+		t.Fatal(err)
+	}
+	appendEngineEvents(t, ctx, engine, runID, tryFixture(scopeID, first, second, 60))
+	setup := New(database, &recordingAdapter{}, Config{WorkerID: "recovery-setup-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	for range 2 {
+		if err := setup.ProcessOne(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := "scope:" + scopeID + ":cancel"
+	if err := database.RequestScopeCancel(ctx, runID, scopeID, key, "sweeper takeover test"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := database.ClaimCancelMember(ctx, "crashed-worker", runID, scopeID, time.Second)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim cancel member before crash: member=%v error=%v", claimed, err)
+	}
+	adapter := &recordingAdapter{}
+	sweeper := New(database, adapter, Config{WorkerID: "takeover-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	if err := sweeper.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(adapter.calls) != 0 {
+		t.Fatalf("live lease was taken over: calls=%v", adapter.calls)
+	}
+	assertScopeState(t, ctx, engine, runID, scopeID, "cancelling")
+	time.Sleep(1100 * time.Millisecond)
+	if err := sweeper.Sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(adapter.calls) != 2 {
+		t.Fatalf("expired lease recovery calls=%v", adapter.calls)
+	}
+	assertScopeState(t, ctx, engine, runID, scopeID, "cancelled")
+}
+
 func barrierFixture(integrationScope, firstTry, secondTry, pivotVertex string) []map[string]any {
+	events := tryFixture(integrationScope, firstTry, secondTry, 60)
+	retry := map[string]any{"max_attempts": 2, "initial_backoff_ms": 0, "multiplier": 2, "max_backoff_ms": 0}
+	return append(events, map[string]any{"event_type": "vertex/created", "vertex_id": pivotVertex, "parent_refs": []string{firstTry, secondTry}, "scope_id": integrationScope, "payload": map[string]any{"role": "tool", "tool": "payment.capture", "input": map[string]any{"order_id": "ORDER-1"}, "retry_policy": retry, "txn": map[string]any{"effect_class": "irreversible", "mode": "plain", "idempotency_key": integrationScope + ":capture", "status_tool": "payment.status"}}})
+}
+
+func tryFixture(integrationScope, firstTry, secondTry string, tryTimeoutSeconds int) []map[string]any {
 	retry := map[string]any{"max_attempts": 2, "initial_backoff_ms": 0, "multiplier": 2, "max_backoff_ms": 0}
 	return []map[string]any{
 		{"event_type": "run/start", "payload": map[string]any{"schema_version": "v1"}},
-		{"event_type": "vertex/created", "vertex_id": firstTry, "scope_id": integrationScope, "payload": map[string]any{"role": "tool", "tool": "inventory.reserve.a", "input": map[string]any{"sku": "SKU-1"}, "retry_policy": retry, "txn": map[string]any{"effect_class": "reversible", "mode": "tcc", "idempotency_key": integrationScope + ":reserve-a", "try_timeout_s": 60, "confirm_tool": "inventory.confirm.a", "cancel_tool": "inventory.release.a"}}},
-		{"event_type": "vertex/created", "vertex_id": secondTry, "scope_id": integrationScope, "payload": map[string]any{"role": "tool", "tool": "inventory.reserve.b", "input": map[string]any{"sku": "SKU-1"}, "retry_policy": retry, "txn": map[string]any{"effect_class": "reversible", "mode": "tcc", "idempotency_key": integrationScope + ":reserve-b", "try_timeout_s": 60, "confirm_tool": "inventory.confirm.b", "cancel_tool": "inventory.release.b"}}},
-		{"event_type": "vertex/created", "vertex_id": pivotVertex, "parent_refs": []string{firstTry, secondTry}, "scope_id": integrationScope, "payload": map[string]any{"role": "tool", "tool": "payment.capture", "input": map[string]any{"order_id": "ORDER-1"}, "retry_policy": retry, "txn": map[string]any{"effect_class": "irreversible", "mode": "plain", "idempotency_key": integrationScope + ":capture", "status_tool": "payment.status"}}},
+		{"event_type": "vertex/created", "vertex_id": firstTry, "scope_id": integrationScope, "payload": map[string]any{"role": "tool", "tool": "inventory.reserve.a", "input": map[string]any{"sku": "SKU-1"}, "retry_policy": retry, "txn": map[string]any{"effect_class": "reversible", "mode": "tcc", "idempotency_key": integrationScope + ":reserve-a", "try_timeout_s": tryTimeoutSeconds, "confirm_tool": "inventory.confirm.a", "cancel_tool": "inventory.release.a"}}},
+		{"event_type": "vertex/created", "vertex_id": secondTry, "scope_id": integrationScope, "payload": map[string]any{"role": "tool", "tool": "inventory.reserve.b", "input": map[string]any{"sku": "SKU-1"}, "retry_policy": retry, "txn": map[string]any{"effect_class": "reversible", "mode": "tcc", "idempotency_key": integrationScope + ":reserve-b", "try_timeout_s": tryTimeoutSeconds, "confirm_tool": "inventory.confirm.b", "cancel_tool": "inventory.release.b"}}},
+	}
+}
+
+func assertScopeState(t *testing.T, ctx context.Context, engine *pgxpool.Pool, runID, scopeID, expected string) {
+	t.Helper()
+	var state string
+	if err := engine.QueryRow(ctx, `SELECT state FROM txn_scope WHERE run_id = $1 AND scope_id = $2`, runID, scopeID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != expected {
+		t.Fatalf("scope state=%s, want %s", state, expected)
 	}
 }
 

@@ -2,7 +2,7 @@
 
 > Status: Draft v0.1 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md)
 
-> Diagram: [diagrams/replan-flow.drawio](./diagrams/replan-flow.drawio), including the full flow and the L0–L4 escalation ladder.
+> Diagram: [diagram/replan-flow.drawio](../diagram/replan-flow.drawio), including the full flow and the L0–L4 escalation ladder.
 
 ## 1. Recovery Escalation Ladder
 
@@ -139,7 +139,7 @@ dsh unifies resume, fork, and replay into one primitive because a session is a c
 
 ## 6. Open Questions
 
-- **Oscillation across planners — resolved.** The consecutive-failure counter in §3 is per planner, so two planners that alternate would never trip it. The S1 TLC discovery model required by [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) found the shortest lasso `P2 -> P1 -> P2`, containing two `replan/boundary` transitions. The engine therefore permits at most `E = 2` replans in one failure episode, independent of planner identity; the next cancellation escalates to L3. This is a protocol bound, not a budget heuristic. Scenario S3c verifies the same rule ([06 §6](./06-validation-harness.md)); the executable evidence is in [`spec/`](../../spec/README.md).
+- **Oscillation across planners — resolved.** The consecutive-failure counter in §3 is per planner, so two planners that alternate would never trip it. The S1 TLC discovery model required by [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md) found the shortest lasso `P2 -> P1 -> P2`, containing two `replan/boundary` transitions. The engine therefore permits at most `E = 2` replans in one failure episode, independent of planner identity; the next cancellation escalates to L3. This is a protocol bound, not a budget heuristic. Scenario S3c verifies the same rule ([06 §6](./06-validation-harness.md)); the executable evidence is in [`spec/`](../../spec/README.md).
 - Expressing negative failure evidence so planners do not recreate isomorphic subgraphs. A candidate is to inject disproven `(tool, parameter pattern)` pairs as check-rule constraints rather than mere prompts.
 - Merging concurrent failures in parallel branches when both compete for the same ancestor planner as a boundary: serialize by first arrival and make the later failure wait for the new surface.
 - How long forward closure (§2.2 step 2) may be attempted on a post-pivot scope before the run is declared L4. Too short suspends a recoverable run for a human; too long holds resources indefinitely. The validation harness currently asserts only that L4 is eventually reached, not when ([06 §12](./06-validation-harness.md)).

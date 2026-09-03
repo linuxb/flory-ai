@@ -1,6 +1,6 @@
 # Validation Harness: Sandbox, Scenarios, and Oracles (06)
 
-> Status: Phase 0 implemented; Phase 1 partial | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [03](./03-replan-and-recovery.md), [05](./05-context-aggregation-and-offline-evaluation.md)
+> Status: Phase 0 implemented; Phases 1 and 2 active | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [03](./03-replan-and-recovery.md), [05](./05-context-aggregation-and-offline-evaluation.md)
 
 ## 1. What This Document Decides
 
@@ -25,7 +25,7 @@ Model calls are non-deterministic, so any assertion that depends on a live model
 
 | Tier | Planner | Assertion strength | Covers | Needs API key |
 |---|---|---|---|---|
-| **T-A pure function** | none | exact equality | check-rules R1–R11, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff (discipline 28) | no |
+| **T-A pure function** | none | exact equality | check-rules R1–R11, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff ([01 §6](./01-jit-dag-and-event-log.md#6-replay-testing)) | no |
 | **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, in-place replan and lazy causal fork semantics, orphan-try sweep, crash recovery | no |
 | **T-C live planner** | real model | statistical thresholds + guardrails | JIT planning quality, plan admissibility rate, token economics | yes |
 
@@ -35,7 +35,7 @@ Almost every property this document cares about is an engine property, not a mod
 
 ### 2.2 Negative plans are the point
 
-The scripted planner must be able to emit **deliberately illegal proposals**, not only good ones. Discipline 14 says a planner declares boundaries and the rule engine admits them; the only way to demonstrate that is to feed the rule engine plans that must be rejected:
+The scripted planner must be able to emit **deliberately illegal proposals**, not only good ones. The boundary contract in [02 §3](./02-transaction-model.md#3-three-layer-transaction-boundaries) lets the planner declare a scope only after the engine computes its minimum, then requires deterministic admission; the only way to demonstrate that contract is to feed the rule engine plans that must be rejected:
 
 - two pivots in one scope (R3)
 - a non-undoable node before the pivot (R2)
@@ -68,7 +68,7 @@ The engine may never read the ledger view. The oracles may never call the actor 
 
 ### 3.2 Ledger semantics
 
-Resources are modelled as **signed deltas with an owner**, never as absolute values, mirroring discipline 17.
+Resources are modelled as **signed deltas with an owner**, never as absolute values, matching the compensation contract in [02 §4.3](./02-transaction-model.md#43-parallel-branches-and-shared-resources-worked-example).
 
 ```
 available(sku) = on_hand(sku) − Σ open_holds(sku)
@@ -100,16 +100,18 @@ The sandbox provides exactly three irreversible operations, one per realistic fa
 
 `inventory.commit` deliberately lacks a status-query interface so the harness exercises the open question in 02 §6: what the engine does when a pivot's outcome is genuinely unknowable. The expected behaviour is L4 suspension plus a reconciliation task, never a guess.
 
-### 3.5 Phase 1 implementation form
+### 3.5 Current implementation form
 
-The delivered Phase 1 slice is an **in-process TypeScript mock world** under `test/mocks/`, never production engine code. Inventory, payment, logistics, and sales-channel actors provide deterministic state and oracle-visible ledgers. Their registry metadata and scripted DAGs exercise multi-service scope boundaries, sequential pivots, parallel branches, and confirmation-barrier admission. This slice validates static structure and deterministic actor semantics; it is not a substitute for a coordinator.
+The harness has two complementary execution surfaces. The **in-process TypeScript mock world** under `test/mocks/` provides deterministic actors, ledger inspection, static check-rule fixtures, and fast projection tests without putting business semantics in production engine code. The out-of-process surface runs the tool services through their SDKs and `gatewayd`, while the Distributed Transaction Coordinator uses PostgreSQL work queues, transaction projections, and leases.
 
-The remaining Phase 1 work is the scripted executor, event-owning actor adapter, deterministic fault injector, and the complete O1-O5/S1-S14 scenario set. Two constraints govern that implementation:
+Runtime integration tests establish the temporal pivot barrier, post-pivot confirm ordering, whole-scope pre-pivot cancellation, expired sealed-try cancellation, and takeover of a cancellation member after its worker lease expires. Cross-language fixtures cover event decoding and canonical tool-view encoding.
 
-1. **Event ownership is enforced even in-process.** The scripted executor stands in for the Distributed Transaction Coordinator and may append only coordinator-owned event types (discipline 29). An in-process harness that lets one component append everything would validate a system that does not exist.
-2. **Every tool call crosses a serialization boundary.** Arguments and results are encoded and decoded even though no socket is involved, so no test accidentally depends on shared object identity.
+The generic scripted scenario runner, deterministic fault injector, complete O1–O5 oracle implementation, and the full S1–S14 corpus remain incomplete. S12 in particular still requires an end-to-end duplicate-delivery scenario against the runtime path; idempotent tool implementations and unit tests are necessary but are not that scenario.
 
-Crash and duplicate-delivery scenarios (S11-S12), plus the temporal assertion that a runtime barrier waits until every participating try is sealed, cannot be honestly claimed by the current static harness. They require the coordinator and real PostgreSQL work handoff, are deferred to Phase 2, and remain marked as such in the matrix.
+Two constraints apply to every remaining harness component:
+
+1. **Event ownership is enforced on every path.** The Orchestrator and Coordinator append only the execution and protocol events assigned by [01 §3.2](./01-jit-dag-and-event-log.md#32-core-event-vocabulary), and PostgreSQL remains the final enforcement boundary ([08 §3](./08-database-schema.md#3-write-time-guards)).
+2. **Every tool call crosses a serialization boundary.** Even a fast in-process fixture encodes and decodes arguments and results, so no test depends on shared object identity that production does not have.
 
 ## 4. Fault Injector
 
@@ -179,10 +181,11 @@ Each row exists to kill one specific accident. A scenario that cannot fail if a 
 | S8 | `logistics.book` returns `unknown_outcome` | reconcile via `logistics.status`; exactly one booking in the ledger | O1 | T-B |
 | S9 | compensation registered as snapshot restore | rejected at tool registration, before any run starts | O1 | T-A |
 | S10 | `inventory.commit` returns `unknown_outcome`, no status query exists | L4 suspension plus a reconciliation task; no guess, no automatic compensation | O2, O3 | T-B |
-| S11 | crash between `vertex/created` and effect, then restart | orphan `txn/try` detected by the unmatched-try sweep after `try_timeout_s` (02 §4.4) and idempotently cancelled | O1, O2 | T-B (partial in Phase 1, full in Phase 2) |
+| S11 | Coordinator restarts after a successful try has sealed a bracket but before the scope reaches pivot or cancellation | after `try_timeout_s`, the sweeper fences the open scope and idempotently cancels every sealed member ([02 §4.4](./02-transaction-model.md#44-orphan-try-detection)) | O1, O2 | T-B runtime integration |
+| S11a | a cancellation worker dies after claiming an inverse action | a live member lease prevents takeover; after lease expiry, the sweeper resumes the same scope cancellation with its recorded idempotency key and reaches `txn/cancel {phase: completed}` | O1, O2 | T-B runtime integration |
 | S11b | **fork** whose divergence vertex sits inside an open txn bracket, inheriting a half-open `txn/try` from a live parent | **negative test**: the divergence is legal, but the inherited try is read-only — the child appends no `txn/confirm` or `txn/cancel` for it, evaluating around the bracket with mocked responses or terminating lazily at `eval_up_to_seq`. A cancel here is a data-plane incident, not a test failure only (01 §5.2, 02 §4.4) | O1, O2.no_inherited_mutation | T-B |
 | S11c | fork evaluated at `fold_mode: reads-live` whose plan contains `logistics.book` (`irreversible`) and `logistics.quote` (`none`) | the quote **is** executed and priced into the returned plan; the booking is skipped and recorded as an unverified estimate. Ledger unchanged; evaluation budget charged for the quote only (05 §3.2) | O1, O2 | T-B |
-| S12 | `duplicate_delivery` on `payment.charge` | exactly one charge in the ledger | O1 | T-B (Phase 2) |
+| S12 | `duplicate_delivery` on `payment.charge` | exactly one charge in the ledger | O1 | T-B runtime scenario pending |
 | S13 | **information dependence**: the same `goal_prompt` scenario run twice, differing only in an injected fact — `inventory.check` returns 20 units in variant 1 and 0 units in variant 2 | the sub-DAGs frozen **after** the planner that consumes that fact must **differ** (variant 2 must source or substitute). Identical plans prove the graph was pre-baked rather than JIT, which the depth assertion alone cannot detect | O4.info_dependence | T-B, promoted to T-C |
 | S14 | **clairvoyant parameters**: the scripted planner freezes a subgraph binding `carrier = "fast-co"` before any quote vertex has succeeded | rejected at freeze: every bound parameter must trace to an existing upstream vertex output or to `task_input`. A value that could not yet be known is a premature commitment, violating progressive disclosure even though depth is legal | O4.no_clairvoyance | T-B |
 
@@ -203,24 +206,24 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 
 ### O2 — Log invariants (reads the event log)
 
-| Assertion | Discipline |
+| Assertion | Authority |
 |---|---|
-| every `txn/try` has exactly one matching `txn/confirm` or `txn/cancel` | 02 §4.1 |
-| no `txn/cancel` appears after `txn/pivot-passed` in the same scope | 15 |
-| every `replan/boundary` sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)); offline forks are exempt (01 §5.2) | 16 |
-| no `replan/boundary` precedes the most recent `txn/pivot-passed` (**floor condition**, 03 §2.1 (ii)); forks are likewise exempt | 15 |
+| every sealed `txn/try` eventually projects to a confirmed or cancelled bracket; cancellation is scope-level and does not create a per-try cancel event | 02 §4.1 |
+| no `txn/cancel` appears after `txn/pivot-passed` in the same scope | 02 §4.1; 08 §3 |
+| every `replan/boundary` sits at a succeeded planner outside all open brackets (**bracket condition**, 03 §2.1 (i)); offline forks are exempt (01 §5.2) | 03 §2.1 |
+| no `replan/boundary` precedes the most recent `txn/pivot-passed` (**floor condition**, 03 §2.1 (ii)); forks are likewise exempt | 03 §2.1 |
 | **witness completeness**: every ancestor planner of the failed vertex, enumerated by `parent_refs` traversal, appears in the `replan/boundary` candidate list with either a published cost or a closed-vocabulary rejection reason | 03 §4.2 |
 | **witness minimality**: the selected boundary has the lowest **published** cost among candidates not marked rejected; the oracle never recalculates the cost | 03 §4.2 |
 | **witness honesty**: each rejection reason is factually true of the log — `open_bracket` requires an unmatched `txn/try` before that vertex, `below_floor` requires a later `txn/pivot-passed`, `savepoint_precedes` requires the cancelled scope's savepoint to precede the candidate | 03 §4.2 |
-| **no online fork**: an online replan appends `replan/boundary` in the same stream; `fork/created` appears only for offline evaluation (01 §5) | 1, 2 |
+| **no online fork**: an online replan appends `replan/boundary` in the same stream; `fork/created` appears only for offline evaluation (01 §5) | 01 §5 |
 | **no inherited mutation**: a fork appends no `txn/*` event referencing an inherited scope — one whose `txn/try` is a copy from the source stream | 02 §4.4 |
 | **causal inheritance**: a fork inherits no causal descendant (via `parent_refs`) of its divergence vertex, and every merged event is causally independent of it | 01 §5.2 |
-| a fork evaluation invokes no tool above its declared `fold_mode`, and never a write | 01 §5.4, discipline 7e |
-| a no-substitution fork reproduces the source surface exactly | discipline 7d |
-| no row is ever updated or deleted; shadowing is an event | 1, 2 |
-| an unknown `event_type` without `ignorable` makes the reader reject the whole log | 5 |
-| each event type was appended only by its owning service | 29 |
-| `subgraph/frozen` and its `vertex/created` events share one transaction boundary | 4 |
+| a fork evaluation invokes no tool above its declared `fold_mode`, and never a write | 01 §5.4; 05 §3.2 |
+| a no-substitution fork reproduces the source surface exactly | 01 §5.3; 01 §6 |
+| no `event_log` row is ever updated or deleted; projection rows may change, and shadowing remains an event | 01 §3.3 inv. 1 |
+| an unknown `event_type` without `ignorable` makes the reader reject the whole log | 01 §3.2.1 |
+| each event type was appended only by its owning service | 01 §3.2; 08 §3 |
+| `subgraph/frozen` and its `vertex/created` events share one transaction boundary | 01 §3.3 inv. 2 |
 
 ### O3 — Ladder trace
 
@@ -250,10 +253,10 @@ Structural assertions alone are **necessary but not sufficient**: an engine whos
 | **no clairvoyant parameters**: every parameter bound at freeze traces to an existing upstream vertex output or to `task_input` (S14) | a planner binding a value it cannot yet know has committed prematurely, violating progressive disclosure while satisfying every depth bound |
 | every `subgraph/frozen` has depth ≤ K (default 3) | chunking is present — necessary, and weak on its own |
 | the run contains ≥ 2 planner vertices whenever the goal requires a decision point | the DAG grew incrementally |
-| every frozen subgraph passed check-rules; no freeze without a preceding admission | discipline 14 |
-| identical `hash(log_prefix)` + `projector_version` + `harness_state_version` ⇒ identical prompt hash; changing any one of the three must change it | disciplines 8, 11, 24 |
-| replaying a recorded run reproduces the log event-for-event, timestamps ignored | discipline 28 |
-| `linearize` output **and every semantic-fold view** are unchanged when parallel branch completion order is permuted | discipline 10; [01 §3.3](./01-jit-dag-and-event-log.md) inv. 3 |
+| every frozen subgraph passed check-rules; no freeze without a preceding admission | [02 §3.4](./02-transaction-model.md#34-deterministic-check-rules) |
+| identical `hash(log_prefix)` + `projector_version` + `harness_state_version` ⇒ identical prompt hash; changing any one of the three must change it | [01 §4](./01-jit-dag-and-event-log.md#4-surface-projection-and-linearization); [05 §4.2](./05-context-aggregation-and-offline-evaluation.md#42-provenance-and-aggregation) |
+| replaying a recorded run reproduces the log event-for-event, timestamps ignored | [01 §6](./01-jit-dag-and-event-log.md#6-replay-testing) |
+| `linearize` output **and every semantic-fold view** are unchanged when parallel branch completion order is permuted | [01 §3.3](./01-jit-dag-and-event-log.md#33-invariants) inv. 3; [01 §4.2](./01-jit-dag-and-event-log.md#42-linearization) |
 
 The permutation assertion deserves emphasis: the harness runs selected scenarios twice with **deliberately permuted branch scheduling** and asserts an identical prompt hash *and* identical fold views. Scheduling jitter silently destroying replay determinism and prompt-cache hit rate is exactly the bug class that no ordinary test catches.
 
@@ -287,7 +290,7 @@ Two limits must be reported alongside any result, and neither is a detail.
 
 **The comparison is asymmetric.** The greedy side's cost is *measured* — it actually happened, so `budget/charged` plus tool prices give the real number — while the wider side's cost is *estimated* and its success is *assumed*. The honest conclusion is "wider would probably have been cheaper on this episode", never a proof.
 
-**The conclusion is case-specific.** The two forks share one source history, and a different business run is not a parallel sample ([05 §3.4](./05-context-aggregation-and-offline-evaluation.md), discipline 7f). The report states whether wider appears preferable for this episode, which writes remain unverified, and why the result may not transfer.
+**The conclusion is case-specific.** The two forks share one source history, and a different business run is not a parallel sample ([05 §3.4](./05-context-aggregation-and-offline-evaluation.md#34-case-boundary)). The report states whether wider appears preferable for this episode, which writes remain unverified, and why the result may not transfer.
 
 **Denominator: cost per resolved episode, never per replan attempt.** Greedy's failure mode is many cheap attempts, so per-attempt pricing structurally favours it and inverts the conclusion. Pair this with O5's detour-cost metric.
 
@@ -307,7 +310,7 @@ T-C runs a live model only inside the sandbox against a fixed, versioned scenari
 
 ### 9.1 Metrics are log projections
 
-Per discipline 23, no separate telemetry. Every metric below is a projection over the event log and the ledger, so a changed definition can be recomputed over history.
+Metrics are projections over the event log and the ledger, never a separate telemetry truth ([05 §4](./05-context-aggregation-and-offline-evaluation.md#4-offline-evaluation-discipline)). A changed definition can therefore be recomputed over history.
 
 For model calls, `budget/charged.usage` normalizes input, output, total, reasoning, cache-hit input, and cache-miss input tokens. `duration_ms` measures the complete HTTP call. `estimated_cost` is present only when the run configured a complete pricing snapshot and embeds the price reference, tier, and rates used; it is not relabelled as billed cost.
 
@@ -321,25 +324,25 @@ For model calls, `budget/charged.usage` normalizes input, output, total, reasoni
 | **post-pivot failure rate** | failures after `txn/pivot-passed` | **guardrail** |
 | **orphan-hold incidents** | O1 violations of any severity | **guardrail, zero tolerance** |
 
-Per discipline 25, a guardrail failure vetoes an apparent target-metric improvement. A configuration that uses fewer tokens but violates an invariant or raises risk in a paired scenario is rejected.
+A guardrail failure vetoes an apparent target-metric improvement ([05 §4.1](./05-context-aggregation-and-offline-evaluation.md#41-gates-and-evidence)). A configuration that uses fewer tokens but violates an invariant or raises risk in a paired scenario is rejected.
 
 ### 9.2 Reporting and provenance
 
-Per discipline 26, every result remains addressable by scenario and is grouped descriptively by task type, SKU-count bucket, and pivot presence. Aggregate-only comparisons are not reported because task heterogeneity spans orders of magnitude.
+Every result remains addressable by scenario and is grouped descriptively by task type, SKU-count bucket, and pivot presence ([05 §4.2](./05-context-aggregation-and-offline-evaluation.md#42-provenance-and-aggregation)). Aggregate-only comparisons are not reported because task heterogeneity spans orders of magnitude.
 
-Every T-C fork records source scenario and position, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` (discipline 24). Scenario ID and fault seed are recorded alongside so every reported observation reduces to one reproducible source/fork pair.
+Every T-C fork records source scenario and position, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` ([05 §4.2](./05-context-aggregation-and-offline-evaluation.md#42-provenance-and-aggregation)). Scenario ID and fault seed are recorded alongside so every reported observation reduces to one reproducible source/fork pair.
 
 ## 10. Phased Rollout
 
 | Phase | Delivery status | Scope | Exit criterion |
 |---|---|---|---|
 | **0** | Implemented | T-A table-driven R1-R11 checks, projection purity, event-store and fork replay tests; no sandbox or key | every R1-R11 code has an admitted baseline and an explicit violating fixture; projection and replay suites are green |
-| **1** | Partial | Test-only in-process inventory, payment, logistics, and channel actors plus complex DAG and static barrier fixtures are delivered; scripted execution, fault injection, O1-O5, and the remaining scenario corpus are pending | all S1-S10 variants and partial S11 scenarios are green; the four mechanism questions in §1 are answered without an API key |
-| **2** | Active | Sandbox promoted to an out-of-process service; Distributed Transaction Coordinator on real PostgreSQL | temporal barrier behavior, S11, and S12 are green; cross-language conformance fixtures pass (discipline 34) |
+| **1** | Active | Test-only actors, complex-DAG fixtures, static admission checks, projections, and replay tests are delivered; the generic scripted runner, fault injector, complete O1–O5 implementation, and remaining scenario corpus are pending | all S1–S10 variants are executable through one scenario runner and the four mechanism questions in §1 have direct oracle evidence |
+| **2** | Active | The out-of-process sandbox route, `gatewayd`, and the PostgreSQL-backed Distributed Transaction Coordinator are delivered; integration tests cover runtime barriers, scope cancellation, expired sealed tries, and cancellation-lease takeover | S11, S11a, and S12 are green end to end; event-log and tool-view cross-language conformance fixtures pass |
 | **3** | Not started | Historical fork evaluation (§8): greedy versus wider and JIT versus up-front on a versioned corpus, at declared `fold_mode`s | complete case reports, explicit unverified writes, and any candidate rule linked to its supporting and contradicting evidence |
 | **4** | Not started | T-C live-model sandbox qualification on the fixed scenario corpus | all hard oracles pass; scenario-level quality and cost evidence is published with complete fork provenance; an operator makes the production decision |
 
-Phases 0 through 2 require no API key and no model access, which is the point: regression testing must not depend on a model provider (discipline 28). Phases 3 and 4 may need model calls and live reads but never writes, so policy evaluation remains isolated from production business effects.
+Phases 0 through 2 require no API key and no model access, which is the point: replay and protocol regression testing must not depend on a model provider ([01 §6](./01-jit-dag-and-event-log.md#6-replay-testing)). Phases 3 and 4 may need model calls and live reads but never writes, so policy evaluation remains isolated from production business effects.
 
 ## 11. Relation to Existing Work
 

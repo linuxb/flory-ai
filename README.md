@@ -151,7 +151,7 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Database schema and storage model](doc/design/08-database-schema.md)                               | Event log immutability, sequence allocation, and synchronous projections.   |
 | [`gatewayd` Tool Registry Gateway](doc/design/09-tool-registry-gateway.md)                          | Immutable tool views, dynamic registration, the SDK, and one-attempt routing. |
 
-The README hero image is the animated architecture overview; its generator lives in [doc/animations/src](doc/animations/src). Architecture diagrams are available in [doc/design/diagrams/](doc/design/diagrams/). The [deployment architecture](doc/design/diagrams/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/design/diagrams/architecture.html) remains a higher-level companion. Editable Draw.io diagrams cover [transaction boundaries](doc/design/diagrams/txn-boundary.drawio), [replanning](doc/design/diagrams/replan-flow.drawio), [projections](doc/design/diagrams/projection.drawio), and [Coordinator/Engine interaction](doc/design/diagrams/coordinator-engine-interaction.drawio).
+The README hero image is the animated architecture overview; its generator lives in [doc/animations/src](doc/animations/src). Architecture diagrams are available in [doc/diagram/](doc/diagram/). The [deployment architecture](doc/diagram/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/diagram/architecture.html) remains a higher-level companion. Editable Draw.io diagrams cover [transaction boundaries](doc/diagram/txn-boundary.drawio), [replanning](doc/diagram/replan-flow.drawio), [projections](doc/diagram/projection.drawio), and [Coordinator/Engine interaction](doc/diagram/coordinator-engine-interaction.drawio).
 
 ## Repository layout
 
@@ -159,16 +159,16 @@ The README hero image is the animated architecture overview; its generator lives
 .
 ├── .github/               # Repository automation and CI workflows
 ├── .env.example           # Overrideable local connection and service settings
-├── AGENTS.md              # Design invariants and contributor review checklist
+├── AGENTS.md              # Contributor index, development rules, and review routes
 ├── coordinator/           # Go 1.25 Distributed Transaction Coordinator service
 ├── gatewayd/              # Go 1.25 Tool Registry Gateway and its Go tool-service SDK
 ├── db/                    # PostgreSQL migrations, bootstrap, and migration utilities
 ├── docker/                # Optional containerized PostgreSQL for local development
 ├── doc/
+│   ├── adr/               # Architecture decision records
 │   ├── animations/        # Animated architecture diagram and its generator
 │   ├── design/            # Architecture and mechanism specifications
-│   │   ├── adr/           # Architecture decision records
-│   │   └── diagrams/      # HTML and Draw.io diagrams
+│   ├── diagram/           # HTML and Draw.io diagrams
 │   └── plan/              # Implementation and rollout plans
 ├── spec/                  # TLA+ transaction-protocol model and TLC configurations
 ├── engine/                # TypeScript event store, projections, forks, and harness
@@ -185,6 +185,7 @@ The README hero image is the animated architecture overview; its generator lives
 Read [AGENTS.md](AGENTS.md) before proposing implementation work. In particular:
 
 - Keep repository documentation in English and use the established document locations.
+- Write and accept a proposed ADR before implementing a large architecture change.
 - Treat the event log as immutable ground truth.
 - Preserve the TypeScript-only canonical projection pipeline.
 - Add a replay test whenever planner, projection, or fold behavior changes.

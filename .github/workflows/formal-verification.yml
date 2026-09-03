@@ -6,14 +6,18 @@ on:
       - 'AGENTS.md'
       - '.github/workflows/formal-verification.yml'
       - 'spec/**'
+      - 'doc/adr/**'
       - 'doc/design/**'
+      - 'doc/diagram/**'
       - 'doc/plan/plan-001-tla-plus-specification.md'
   push:
     paths:
       - 'AGENTS.md'
       - '.github/workflows/formal-verification.yml'
       - 'spec/**'
+      - 'doc/adr/**'
       - 'doc/design/**'
+      - 'doc/diagram/**'
       - 'doc/plan/plan-001-tla-plus-specification.md'
   workflow_dispatch:
 

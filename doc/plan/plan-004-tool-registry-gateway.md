@@ -2,7 +2,7 @@
 
 - **Status:** Done
 - **Date:** 2026-08-25
-- **Implements:** [ADR-006](../design/adr/adr-006-tool-registry-gateway.md)
+- **Implements:** [ADR-006](../adr/adr-006-tool-registry-gateway.md)
 - **Specifies:** [09 gatewayd Tool Registry Gateway](../design/09-tool-registry-gateway.md), [06 validation harness §3.3](../design/06-validation-harness.md), [01 event log §3.2.1](../design/01-jit-dag-and-event-log.md)
 
 ## 1. Objective

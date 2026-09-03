@@ -3,9 +3,10 @@
 ## Documentation
 
 - Write all repository documentation in English.
-- Keep design documents in `doc/design/`, architecture decision records in `doc/design/adr/`, and planning documents in `doc/plan/`.
-- Record any decision with rejected alternatives as an ADR: `doc/design/adr/adr-NNN-short-slug.md`, numbered sequentially and never renumbered. A changed decision requires a new ADR that supersedes the old one. Remove the superseded ADR after restating everything that survives; Git history preserves the prior decision and numbering gaps are expected.
-- Store design diagrams in `doc/design/diagrams/`.
+- Keep design documents in `doc/design/`, architecture decision records in `doc/adr/`, and planning documents in `doc/plan/`.
+- Write a `Proposed` ADR before starting a large architecture change. Changes to component boundaries, ownership, protocols, persistence models, or cross-service contracts require the ADR to be accepted before implementation begins.
+- Record any decision with rejected alternatives as an ADR: `doc/adr/adr-NNN-short-slug.md`, numbered sequentially and never renumbered. A changed decision requires a new ADR that supersedes the old one. Remove the superseded ADR after restating everything that survives; Git history preserves the prior decision and numbering gaps are expected.
+- Store design diagrams in `doc/diagram/`.
 - Prefer self-contained HTML for architecture diagrams. Use Draw.io (`.drawio`) for focused mechanism diagrams that need to remain editable.
 - Keep related charts on one Draw.io sheet as labelled regions (`A. …`, `B. …`) on an enlarged page. Use another sheet only for a genuinely unrelated subsystem.
 - Every diagram must adapt to light and dark themes: use `background="none"` on Draw.io canvases and provide a Light/Dark/Auto toggle in standalone HTML. Keep the semantic colour palette; only canvas surfaces and neutral ink adapt to the theme. A monochrome diagram is a regression.
@@ -26,19 +27,19 @@ The linked design document or ADR is authoritative. The summaries below identify
 | Event log and storage | The log is immutable ground truth; projections are recomputable, safety-critical guards are synchronous, and database constraints enforce expressible invariants. | [Doc 01 §3](doc/design/01-jit-dag-and-event-log.md#3-event-log-storage-model), [Doc 08](doc/design/08-database-schema.md) |
 | Projection pipeline | Canonical context projection is deterministic, pure, versioned, and implemented once in TypeScript. | [Doc 01 §4](doc/design/01-jit-dag-and-event-log.md#4-surface-projection-and-linearization), [Doc 05 §2](doc/design/05-context-aggregation-and-offline-evaluation.md#2-projection-pipeline) |
 | Transactions and recovery | Deterministic admission rules govern TCC and pivot-saga execution; recovery and replanning preserve transaction boundaries. | [Doc 02](doc/design/02-transaction-model.md), [Doc 03](doc/design/03-replan-and-recovery.md), [Doc 07](doc/design/07-distributed-transaction-coordinator.md) |
-| Replanning and forks | Online replanning stays in the source stream; forks are offline, causal counterfactuals evaluated against one history. | [Doc 01 §5](doc/design/01-jit-dag-and-event-log.md#5-replanning-in-place-and-forking-for-offline-evaluation), [Doc 05 §3](doc/design/05-context-aggregation-and-offline-evaluation.md#3-counterfactual-evaluation-by-fork), [ADR-005](doc/design/adr/adr-005-lazy-causal-fork-semantics.md) |
+| Replanning and forks | Online replanning stays in the source stream; forks are offline, causal counterfactuals evaluated against one history. | [Doc 01 §5](doc/design/01-jit-dag-and-event-log.md#5-replanning-in-place-and-forking-for-offline-evaluation), [Doc 05 §3](doc/design/05-context-aggregation-and-offline-evaluation.md#3-counterfactual-evaluation-by-fork), [ADR-005](doc/adr/adr-005-lazy-causal-fork-semantics.md) |
 | Harness state and refine | Harness state contains versioned metadata and references; refine produces validated structured edits. | [Doc 04](doc/design/04-refine-and-harness-state.md) |
-| Validation and formal verification | Scenario oracles, replay properties, and formal models define the protocol's verification surface. | [Doc 06](doc/design/06-validation-harness.md), [ADR-003](doc/design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) |
-| Tool registry gateway | `gatewayd` publishes immutable tool views and routes one pinned attempt; registration and execution use the repository SDK and IDL contracts. | [Doc 09](doc/design/09-tool-registry-gateway.md), [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) |
-| Language and service boundaries | The TypeScript engine, Go coordinator, Go gateway, and PostgreSQL store remain separate components with schema-first shared contracts. | [ADR-001](doc/design/adr/adr-001-engine-language-split.md), [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) |
+| Validation and formal verification | Scenario oracles, replay properties, and formal models define the protocol's verification surface. | [Doc 06](doc/design/06-validation-harness.md), [ADR-003](doc/adr/adr-003-formal-verification-of-the-transaction-protocol.md) |
+| Tool registry gateway | `gatewayd` publishes immutable tool views and routes one pinned attempt; registration and execution use the repository SDK and IDL contracts. | [Doc 09](doc/design/09-tool-registry-gateway.md), [ADR-006](doc/adr/adr-006-tool-registry-gateway.md) |
+| Language and service boundaries | The TypeScript engine, Go coordinator, Go gateway, and PostgreSQL store remain separate components with schema-first shared contracts. | [ADR-001](doc/adr/adr-001-engine-language-split.md), [ADR-006](doc/adr/adr-006-tool-registry-gateway.md) |
 
 ### Component and contract routes
 
 | Component or contract | Repository location | Design route |
 |---|---|---|
-| TypeScript engine | `engine/` | [Doc 01](doc/design/01-jit-dag-and-event-log.md), [Doc 05](doc/design/05-context-aggregation-and-offline-evaluation.md), [ADR-001](doc/design/adr/adr-001-engine-language-split.md) |
-| Distributed Transaction Coordinator (Go 1.25) | `coordinator/` | [Doc 02](doc/design/02-transaction-model.md), [Doc 07](doc/design/07-distributed-transaction-coordinator.md), [ADR-001](doc/design/adr/adr-001-engine-language-split.md) |
-| `gatewayd` (Go 1.25) | `gatewayd/` | [Doc 09](doc/design/09-tool-registry-gateway.md), [ADR-006](doc/design/adr/adr-006-tool-registry-gateway.md) |
+| TypeScript engine | `engine/` | [Doc 01](doc/design/01-jit-dag-and-event-log.md), [Doc 05](doc/design/05-context-aggregation-and-offline-evaluation.md), [ADR-001](doc/adr/adr-001-engine-language-split.md) |
+| Distributed Transaction Coordinator (Go 1.25) | `coordinator/` | [Doc 02](doc/design/02-transaction-model.md), [Doc 07](doc/design/07-distributed-transaction-coordinator.md), [ADR-001](doc/adr/adr-001-engine-language-split.md) |
+| `gatewayd` (Go 1.25) | `gatewayd/` | [Doc 09](doc/design/09-tool-registry-gateway.md), [ADR-006](doc/adr/adr-006-tool-registry-gateway.md) |
 | Tool-service SDKs and shared IDLs | `gatewayd/sdk/`, `sdk/typescript/`, `idl/` | [Doc 09 §3](doc/design/09-tool-registry-gateway.md#3-registration-and-the-tool-view-contract), [Doc 08 §1](doc/design/08-database-schema.md#1-executable-boundary) |
 | PostgreSQL schema and migrations | `db/` | [Doc 08](doc/design/08-database-schema.md) |
 
@@ -54,8 +55,8 @@ Use these as routing checks, then review the linked specification. Reject a chan
 - Bypasses deterministic transaction admission, compensates backward across a pivot, replans across an open try, or restores absolute snapshots during compensation. See [Doc 02](doc/design/02-transaction-model.md), [Doc 03](doc/design/03-replan-and-recovery.md), and [Doc 07](doc/design/07-distributed-transaction-coordinator.md).
 - Stores prompt prose or raw memory in harness state, or turns refine into an unstructured prompt rewrite. See [Doc 04](doc/design/04-refine-and-harness-state.md).
 - Violates derived executor or event ownership, lets `gatewayd` append events or own retries, or hand-rolls the gateway registration protocol instead of using its SDK. See [Doc 01 §3.2.1](doc/design/01-jit-dag-and-event-log.md#321-which-executor-owns-a-vertex), [Doc 08 §3](doc/design/08-database-schema.md#3-write-time-guards), and [Doc 09](doc/design/09-tool-registry-gateway.md).
-- Changes generated shared types instead of their IDL source, or omits a conformance fixture for shared cross-language semantics. See [ADR-001](doc/design/adr/adr-001-engine-language-split.md), [Doc 08 §1](doc/design/08-database-schema.md#1-executable-boundary), and [Doc 09 §7](doc/design/09-tool-registry-gateway.md#7-the-two-routes-and-their-fixtures).
-- Moves business semantics or verification mocks into the production engine. See [Doc 05 §2.2](doc/design/05-context-aggregation-and-offline-evaluation.md#22-semantic-fold-framework-mechanism-domain-owned-meaning) and [Doc 06 §3.5](doc/design/06-validation-harness.md#35-phase-1-implementation-form).
+- Changes generated shared types instead of their IDL source, or omits a conformance fixture for shared cross-language semantics. See [ADR-001](doc/adr/adr-001-engine-language-split.md), [Doc 08 §1](doc/design/08-database-schema.md#1-executable-boundary), and [Doc 09 §7](doc/design/09-tool-registry-gateway.md#7-the-two-routes-and-their-fixtures).
+- Moves business semantics or verification mocks into the production engine. See [Doc 05 §2.2](doc/design/05-context-aggregation-and-offline-evaluation.md#22-semantic-fold-framework-mechanism-domain-owned-meaning) and [Doc 06 §3.5](doc/design/06-validation-harness.md#35-current-implementation-form).
 - Changes planner, projection, reducer, protocol, or harness behaviour without the required version update and replay or oracle coverage. See [Doc 01 §6](doc/design/01-jit-dag-and-event-log.md#6-replay-testing), [Doc 05](doc/design/05-context-aggregation-and-offline-evaluation.md), and [Doc 06](doc/design/06-validation-harness.md).
 - Patches a documentation section instead of rewriting it, leaves superseded content behind, or fails to update the formal-verification path filter when transaction semantics change.
 

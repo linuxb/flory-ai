@@ -13,13 +13,13 @@ Two problems emerged. First, the boundary restriction imports online recovery co
 
 ## Decision
 
-- `fork(source_stream, at_vertex_id, substitutions[], eval_up_to_seq) → new run`. The divergence point is a **vertex**, and it may be **any vertex** — planner or tool-caller, inside or outside a transaction bracket, above or below the pivot floor. Boundary rules ([03 §2.1](../03-replan-and-recovery.md)) govern online replanning only.
+- `fork(source_stream, at_vertex_id, substitutions[], eval_up_to_seq) → new run`. The divergence point is a **vertex**, and it may be **any vertex** — planner or tool-caller, inside or outside a transaction bracket, above or below the pivot floor. Boundary rules ([03 §2.1](../design/03-replan-and-recovery.md)) govern online replanning only.
 - **Causal invalidation.** Substituting the divergence vertex invalidates all its causal descendants, derived via `parent_refs`. They are never inherited; the fork regenerates that chain — new sub-DAG, new tool calls, new transaction events — under the substituted pins.
 - **Causal merge.** Events with no causal path from the divergence vertex (sibling branches, external inputs, webhooks) remain valid and are merged into the fork as inherited copies.
 - **Lazy evaluation.** A fork does not run to completion. Execution and merging proceed only as far as `eval_up_to_seq`, producing a fold comparable with the source at that position. `fold_mode` bounds liveness as before; blocked folds and mocked tool responses stand in for whatever the mode forbids.
-- **Inherited copies are read-only wherever they sit** — in the seed before `run/end-seed` or merged later. A fork never cancels or confirms an inherited `txn/try`; an inherited open bracket is mocked around or lazily terminated at, never mutated ([02 §4.4](../02-transaction-model.md)).
+- **Inherited copies are read-only wherever they sit** — in the seed before `run/end-seed` or merged later. A fork never cancels or confirms an inherited `txn/try`; an inherited open bracket is mocked around or lazily terminated at, never mutated ([02 §4.4](../design/02-transaction-model.md)).
 - `fork/created` provenance becomes `(source run_id, at_vertex_id, eval_up_to_seq, substitutions, fold_mode, evaluator pin, projector_version, harness_state_version)`.
-- **Retained from ADR-004, unchanged:** forks are offline-only; online replanning stays in place on the original stream and never creates a run ([01 §5.1](../01-jit-dag-and-event-log.md)); evidence is case-specific and never pooled into causal or population-level claims; the offline ladder is `recorded` → `model-live` → `reads-live` and `writes-live` is production; corpora are versioned explicit lists; offline evidence recommends, an operator decides.
+- **Retained from ADR-004, unchanged:** forks are offline-only; online replanning stays in place on the original stream and never creates a run ([01 §5.1](../design/01-jit-dag-and-event-log.md)); evidence is case-specific and never pooled into causal or population-level claims; the offline ladder is `recorded` → `model-live` → `reads-live` and `writes-live` is production; corpora are versioned explicit lists; offline evidence recommends, an operator decides.
 
 ## Rationale
 
@@ -35,9 +35,9 @@ A counterfactual is a causal question, so its mechanics must follow the causal g
 
 ### Accepted costs
 
-- The fork storage transaction must compute a causal slice instead of copying a frozen prefix, and inherited-try locking must key on provenance rather than `run/end-seed` position ([08 §4](../08-database-schema.md) documents the implemented eager-copy predecessor until the migration lands).
+- The fork storage transaction computes a causal slice instead of copying a frozen prefix, and inherited-try locking keys on provenance rather than `run/end-seed` position; [08 §4](../design/08-database-schema.md#4-fork-storage-transaction) specifies the implemented transaction.
 - Causal-independence detection is only as good as `parent_refs`; an under-declared dependency silently merges an event that should have been invalidated.
-- A no-substitution fork must still reproduce the source surface exactly (discipline 7d): with nothing substituted, nothing is invalidated and everything merges.
+- A no-substitution fork must still reproduce the source surface exactly ([01 §5.3](../design/01-jit-dag-and-event-log.md#53-pin_version-what-a-substitution-actually-changes)): with nothing substituted, nothing is invalidated and everything merges.
 
 ## Alternatives considered
 
@@ -49,7 +49,7 @@ A counterfactual is a causal question, so its mechanics must follow the causal g
 
 ## References
 
-- [JIT-DAG and event log](../01-jit-dag-and-event-log.md) §5.2
-- [Transaction model](../02-transaction-model.md) §4.4
-- [Replanning and recovery](../03-replan-and-recovery.md) §§2.1, 2.4, 5
-- [Context aggregation and offline evaluation](../05-context-aggregation-and-offline-evaluation.md) §3
+- [JIT-DAG and event log](../design/01-jit-dag-and-event-log.md) §5.2
+- [Transaction model](../design/02-transaction-model.md) §4.4
+- [Replanning and recovery](../design/03-replan-and-recovery.md) §§2.1, 2.4, 5
+- [Context aggregation and offline evaluation](../design/05-context-aggregation-and-offline-evaluation.md) §3

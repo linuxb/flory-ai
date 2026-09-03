@@ -2,7 +2,7 @@
 
 - **Status:** Active — S1 and S2 complete; S3 remains trigger-gated
 - **Date:** 2026-08-20
-- **Implements:** [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md)
+- **Implements:** [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md)
 - **Specifies:** [02 transaction model](../design/02-transaction-model.md), [03 replan and recovery](../design/03-replan-and-recovery.md)
 
 ## 1. Why now
@@ -144,7 +144,7 @@ command is `./spec/run-tlc.sh`; after all checks pass it also writes the ignored
 | Trace validation | Outside S1. S2 now validates real event logs with the Coordinator trace validator. |
 | Alloy structural search | Valuable for rule completeness, but the adversarial TLC model surfaces part of it first. S3. |
 | TLAPS | Optional even in S3. A half-finished proof provides no more assurance than a model check. |
-| Compensation algebra, R1–R11 as functions, world conservation arithmetic, projection purity | Verified against real code by the harness; see [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md) exclusions. |
+| Compensation algebra, R1–R11 as functions, world conservation arithmetic, projection purity | Verified against real code by the harness; see [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md) exclusions. |
 
 ## 5. A rejected shortcut
 
@@ -164,7 +164,7 @@ Implementation cost is not the constraint on this plan. Skill availability is.
 
 ## 7. Preconditions and the open decision
 
-Per [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md), the verification artifacts must have an owner and must be maintained with the implementation. Both conditions are now satisfied:
+Per [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md), the verification artifacts must have an owner and must be maintained with the implementation. Both conditions are now satisfied:
 
 1. **Named owner — resolved.** The Flory engine team owns `spec/`, its TLC workflow, and review of changes to the transaction model.
 2. **S2 capability — resolved.** The strengthened invariant closes for the explicit `N = 2` and `N = 3` configurations, and CI runs the digest-pinned Apalache checks with every transaction-protocol change.

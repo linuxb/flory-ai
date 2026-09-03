@@ -1,7 +1,7 @@
 # Context Aggregation and Offline Evaluation (05)
 
 > Status: Draft v0.1 | Depends on: [01-jit-dag-and-event-log](./01-jit-dag-and-event-log.md), [04-refine-and-harness-state](./04-refine-and-harness-state.md)
-> Diagram: [diagrams/projection.drawio](./diagrams/projection.drawio) — all charts live on one sheet.
+> Diagram: [diagram/projection.drawio](../diagram/projection.drawio) — all charts live on one sheet.
 
 ## 1. Why the Log Exists
 

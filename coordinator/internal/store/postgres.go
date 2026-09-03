@@ -121,7 +121,7 @@ type CancelMember struct {
 	RetryPolicy    generated.RetryPolicy
 }
 
-// ClaimCancelMember claims the next inverse operation in reverse event order.
+// ClaimCancelMember claims the next inverse operation in reverse dependency order.
 func (store *PostgresStore) ClaimCancelMember(ctx context.Context, worker, runID, scopeID string, lease time.Duration) (*CancelMember, error) {
 	var member CancelMember
 	var raw []byte
@@ -208,6 +208,40 @@ func (store *PostgresStore) ExpiredScopes(ctx context.Context) (map[string][]str
 			return nil, err
 		}
 		result[runID] = append(result[runID], scopeID)
+	}
+	return result, rows.Err()
+}
+
+// ScopeCancellation identifies a fenced scope whose inverse work can be resumed.
+type ScopeCancellation struct {
+	RunID          string
+	ScopeID        string
+	IdempotencyKey string
+}
+
+// StuckCancellations returns cancelling scopes that have no member protected by
+// a live lease. The empty-member case is included so a crash before the terminal
+// txn/cancel event can still close the scope.
+func (store *PostgresStore) StuckCancellations(ctx context.Context) ([]ScopeCancellation, error) {
+	rows, err := store.pool.Query(ctx, `SELECT s.run_id, s.scope_id, s.cancel_idempotency_key
+        FROM txn_scope s
+        WHERE s.state = 'cancelling' AND s.cancel_idempotency_key IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM scope_cancel_member m
+              WHERE m.run_id = s.run_id AND m.scope_id = s.scope_id AND NOT m.completed AND m.lease_until > now()
+          )
+        ORDER BY s.run_id, s.scope_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []ScopeCancellation{}
+	for rows.Next() {
+		var cancellation ScopeCancellation
+		if err := rows.Scan(&cancellation.RunID, &cancellation.ScopeID, &cancellation.IdempotencyKey); err != nil {
+			return nil, err
+		}
+		result = append(result, cancellation)
 	}
 	return result, rows.Err()
 }

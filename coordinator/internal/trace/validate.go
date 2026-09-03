@@ -10,6 +10,7 @@ import (
 type Event struct {
 	StreamSeq int64          `json:"stream_seq"`
 	EventType string         `json:"event_type"`
+	VertexID  string         `json:"vertex_id,omitempty"`
 	ScopeID   string         `json:"scope_id,omitempty"`
 	Ignorable bool           `json:"ignorable,omitempty"`
 	Inherited bool           `json:"inherited,omitempty"`
@@ -35,6 +36,9 @@ func Validate(events []Event) error {
 				continue
 			}
 			return fmt.Errorf("unknown non-ignorable event type %q at stream_seq %d", event.EventType, event.StreamSeq)
+		}
+		if event.EventType == "budget/charged" && event.VertexID == "" {
+			return fmt.Errorf("budget/charged at stream_seq %d must identify its planner vertex", event.StreamSeq)
 		}
 		if event.EventType == "txn/try" && event.Inherited {
 			inheritedTryScopes[event.ScopeID] = true

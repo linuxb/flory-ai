@@ -1,8 +1,8 @@
 # Plan 003: Distributed Transaction Coordinator
 
-- **Status:** Done
+- **Status:** Active — runtime delivered; complete S12 duplicate-delivery scenario pending
 - **Date:** 2026-08-22
-- **Implements:** [ADR-001](../design/adr/adr-001-engine-language-split.md), [ADR-003](../design/adr/adr-003-formal-verification-of-the-transaction-protocol.md)
+- **Implements:** [ADR-001](../adr/adr-001-engine-language-split.md), [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md)
 - **Specifies:** [02 transaction model](../design/02-transaction-model.md), [07 Coordinator architecture](../design/07-distributed-transaction-coordinator.md)
 
 ## 1. Objective

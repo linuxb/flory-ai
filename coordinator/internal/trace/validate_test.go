@@ -34,6 +34,15 @@ func TestValidateFailsClosedAndAcceptsIgnorableUnknown(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresBudgetChargeVertex(t *testing.T) {
+	if err := Validate([]Event{{StreamSeq: 1, EventType: "budget/charged", Payload: map[string]any{"category": "llm"}}}); err == nil {
+		t.Fatal("expected budget charge without planner vertex to be rejected")
+	}
+	if err := Validate([]Event{{StreamSeq: 1, EventType: "budget/charged", VertexID: "planner-1", Payload: map[string]any{"category": "llm"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCrossLanguageConformanceFixture(t *testing.T) {
 	_, source, _, _ := runtime.Caller(0)
 	raw, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../../test/fixtures/event-log-conformance.json"))

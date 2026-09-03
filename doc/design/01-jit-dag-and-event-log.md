@@ -76,11 +76,12 @@ The transaction bracket state is **not a separate log** — `txn/*` events are o
 
 | Projection | Key columns and indexes | Query it serves |
 |---|---|---|
-| `txn_scope` | `scope_id` PK, `state`, `pivot_vertex_id`, `savepoint_seq`, `opened_seq`, `closed_seq`; partial unique `(scope_id) WHERE is_pivot` | "May this scope's pivot fire?" and "is there an open bracket at this replan boundary?" |
-| `txn_bracket` | one row per try: `state`, `deadline_at`, `idempotency_key`; **partial index `WHERE state = 'tried'`**; unique `(idempotency_key)` | orphan sweep `WHERE state='tried' AND deadline_at < now()`; timer rebuild after restart |
+| `txn_scope` | `scope_id` PK, `state`, `pivot_vertex_id`, `savepoint_seq`, `opened_seq`, `closed_seq`; partial unique `(scope_id) WHERE is_pivot`; partial index for `state = 'cancelling'` | "May this scope's pivot fire?", "is there an open bracket at this replan boundary?", and "which interrupted cancellations are eligible for takeover?" |
+| `txn_bracket` | one row per try: `state`, `deadline_at`, `idempotency_key`; partial deadline index `WHERE state = 'sealed'`; unique `(idempotency_key)` | first-entry orphan sweep for expired sealed tries |
+| `scope_cancel_member` | one row per inverse action: `completed`, `dependency_depth`, `claimed_by`, `lease_until`; partial readiness and live-lease indexes `WHERE NOT completed` | cancellation progress, expired-lease takeover, and terminal-completion admission |
 | `work_queue` | `vertex_id`, `ready_at`, `claimed_by`; claimed with `FOR UPDATE SKIP LOCKED` | the Distributed Transaction Coordinator claiming executable vertices |
 
-The partial index on `txn_bracket` matters operationally: open brackets are a small hot set while closed ones are cold history, so the sweep's cost stays independent of total log size. It is also the crash-recovery mechanism — the coordinator holds no timers in memory, it re-reads open brackets by deadline on restart.
+The partial indexes keep both sweep sets small: sealed brackets are the deadline hot set, and incomplete cancellation members are the recovery hot set. On restart the Coordinator reconstructs work by reading expired sealed brackets plus `cancelling` scopes with no effective member lease. It never depends on an in-memory timer or cursor for correctness.
 
 ### 3.1.2 Invariants pushed into the database
 
@@ -89,7 +90,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | Discipline | Database mechanism |
 |---|---|
 | Append-only (§3.3 inv. 1) | Application roles have no `UPDATE`/`DELETE` grant on `event_log`; controlled security-definer append functions are their only write path |
-| Event ownership ([AGENTS.md](../../AGENTS.md) #29) | `BEFORE INSERT` trigger checks the connection's `session_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Coordinator cannot append `subgraph/*` |
+| Event ownership (§3.2.1) | `BEFORE INSERT` trigger checks the connection's `session_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Coordinator cannot append `subgraph/*` |
 | Idempotency ([02 §2](./02-transaction-model.md)) | `UNIQUE (idempotency_key)` on `txn_bracket` — a duplicate try becomes a constraint violation instead of a duplicated side effect |
 | One pivot per scope (R3) | partial unique index on the pivot column; a second line of defence behind the freeze-time check |
 | No cancel after pivot (I3) | `BEFORE INSERT` trigger rejects a `txn/cancel` when the scope projection records `pivot-passed` |
@@ -101,7 +102,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | Event type | Meaning | Permitted writer |
 |---|---|---|
 | `run/start`, `run/end` | Run lifecycle | engine |
-| `subgraph/proposed` | Complete planner sub-DAG proposal; the proposed gateway contract adds the immutable `tool_view_ref` and `tool_view_digest` used for admission ([09 §3](./09-tool-registry-gateway.md)) | engine (planner output) |
+| `subgraph/proposed` | Complete planner sub-DAG proposal, including the immutable `tool_view_ref` and `tool_view_digest` used for admission ([09 §3](./09-tool-registry-gateway.md)) | engine (planner output) |
 | `subgraph/frozen` | Check-rules passed; all vertex rows are atomically appended | engine |
 | `subgraph/rejected` | Check-rules rejection and reasons | engine |
 | `vertex/created` | Vertex definition: role, tool, parameters, and transaction attributes | engine during freeze |
@@ -111,7 +112,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | `replan/boundary` | In-place replan: selected `boundary_seq`, planner vertex, reason, cancelled scopes. No new run is created (§5.1) | engine |
 | `fork/created` | **Offline evaluation only** (§5.2): source run, `at_vertex_id`, `eval_up_to_seq`, seed length, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` | engine |
 | `run/end-seed` | First own event of a fork, closing its inherited seed; every inherited copy — in the seed or merged later — is read-only (§5.2) | engine |
-| `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | engine/executor |
+| `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | Distributed Transaction Coordinator |
 | `budget/charged` | One completed LLM thought call: provider, protocol, sanitized endpoint, requested and returned model, measured duration, normalized input/output/cache/reasoning token usage, and an optional cost estimate tied to its exact pricing snapshot | engine |
 
 The engine appends `vertex/started` before the network request. A successful response appends `budget/charged` and `vertex/succeeded` together; a transport or provider failure appends `vertex/failed`. The charge contains provider-reported usage rather than a local tokenizer estimate. Its optional `estimated_cost` is explicitly an estimate: it records currency, price reference, price tier, and all per-million-token rates used in the calculation, so a later provider price change cannot rewrite historical economics. If no trustworthy pricing snapshot is configured, usage is still recorded and `estimated_cost` is omitted.
@@ -176,7 +177,7 @@ The function is pure. The same log prefix and harness-state version produce the 
 
 ## 5. Replanning In Place, and Forking for Offline Evaluation
 
-Flory deliberately **splits** what dsh unifies. dsh makes resume, fork, and replay one primitive because a session is a cheap local object whose identity carries no external meaning. A Flory run is a **business process** — one order, one replenishment — so run identity has business meaning, and the mechanisms must be kept apart. The current decision and rejected alternatives are recorded in [ADR-005](./adr/adr-005-lazy-causal-fork-semantics.md).
+Flory deliberately **splits** what dsh unifies. dsh makes resume, fork, and replay one primitive because a session is a cheap local object whose identity carries no external meaning. A Flory run is a **business process** — one order, one replenishment — so run identity has business meaning, and the mechanisms must be kept apart. The current decision and rejected alternatives are recorded in [ADR-005](../adr/adr-005-lazy-causal-fork-semantics.md).
 
 Three mechanisms, three purposes:
 
@@ -217,7 +218,7 @@ The mechanics of a fork operate on the principle of **Causal Chain Evaluation**:
 
 Inherited events are **read-only copies** wherever they sit: in particular a fork never cancels or confirms an inherited `txn/try`, because that hold belongs to a live source run — an inherited open bracket is history to mock around or terminate lazily at, never to mutate ([02 §4.4](./02-transaction-model.md), [03 §2.4](./03-replan-and-recovery.md)).
 
-See region E of [diagrams/projection.drawio](./diagrams/projection.drawio) for the causal branch-and-merge graph.
+See region E of [diagram/projection.drawio](../diagram/projection.drawio) for the causal branch-and-merge graph.
 
 This architecture ensures that forks perfectly isolate the causal impact of a single counterfactual change, without being artificially constrained by production recovery boundaries like pivots.
 

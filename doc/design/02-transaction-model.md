@@ -148,7 +148,7 @@ Scope B: savepoint S1 (scope entry) = "paid, inventory confirmed"
 
 On P2 failure, compensate Scope B back to S1. The planner then has authority at a coherent savepoint: it can choose another carrier, another warehouse, or a refund workflow. A refund is a new forward business action, not transaction rollback. The single-pivot rule guarantees a planner-usable savepoint between irreversible actions.
 
-See page 1 of [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio).
+See page 1 of [diagram/txn-boundary.drawio](../diagram/txn-boundary.drawio).
 
 ### 3.6 Rule-set revision history
 
@@ -206,11 +206,11 @@ Scope note — the main source of confusion in earlier drafts: D2's scenario has
 
 If an external system breaks isolation itself — e.g. an oversell makes physical stock lower than recorded holds — that is a reconciliation failure, not a transaction failure: Flory emits an L4 suspension plus a reconciliation task to the log.
 
-See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Parallel pivot walkthrough" (this worked example with data).
+See [diagram/txn-boundary.drawio](../diagram/txn-boundary.drawio): page 2 "Parallel pivot walkthrough" (this worked example with data).
 
 ### 4.4 Orphan try detection
 
-**In a live run**, scan for sealed `txn/try` events with no later scope confirm or completed scope cancel after `try_timeout_s`. Request one idempotent cancellation for the owning scope. Crash recovery uses the same sweep — it needs no marker of its own, because a resumed run re-projects its own log and every bracket in it belongs to that run ([01 §5.1](./01-jit-dag-and-event-log.md)).
+**In a live run**, one sweep handles both entry and recovery. It first finds `open` scopes containing a sealed bracket whose `try_timeout_s` deadline has elapsed, then atomically requests one idempotent scope cancellation. It also finds `cancelling` scopes for which no incomplete cancellation member has an effective `lease_until > now()` and resumes their remaining inverse operations. This includes a scope with no remaining member work, so a crash immediately before the terminal `txn/cancel {phase: completed}` append is recoverable. A live member lease prevents takeover; an expired lease is permission to retry the same idempotent inverse operation. No correctness-critical timer or cancellation cursor exists only in memory.
 
 **In a fork**, the sweep is inverted into a prohibition. Every inherited `txn/try` — copied in the seed before `run/end-seed` or merged later as a causally independent event — belongs to a live parent run, so the fork must **never** cancel or confirm it: doing so would release a real hold out from under a real order. Inherited copies are read-only wherever they sit; `run/end-seed` merely closes the initial seed ([01 §5.2](./01-jit-dag-and-event-log.md)). A fork that inherits an open bracket neither clears it nor needs to avoid it — divergence may sit anywhere — it evaluates around the bracket with mocked responses or terminates lazily ([03 §2.4](./03-replan-and-recovery.md)).
 
@@ -226,5 +226,5 @@ See [diagrams/txn-boundary.drawio](./diagrams/txn-boundary.drawio): page 2 "Para
 - Parent/child savepoint semantics and partial-commit visibility for nested transaction scopes.
 - A fallback for channel APIs that cannot reserve resources, such as locally recording a simulated try and delaying execution.
 - The reconciliation fallback protocol when a pivot status-query interface is unavailable.
-- **Check-rule completeness.** R1–R11 were derived by hand, so the rule set has no completeness argument: a plan admitted by all eleven may still reach a dead state. [ADR-003](./adr/adr-003-formal-verification-of-the-transaction-protocol.md) attacks this from two directions — modeling the planner as an adversary bounded only by check-rules, so any invariant violation names a missing rule, and a bounded Alloy search for admissible-but-dead DAG shapes.
+- **Check-rule completeness.** R1–R11 were derived by hand, so the rule set has no completeness argument: a plan admitted by all eleven may still reach a dead state. [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md) attacks this from two directions — modeling the planner as an adversary bounded only by check-rules, so any invariant violation names a missing rule, and a bounded Alloy search for admissible-but-dead DAG shapes.
 - **Parameter-general proof of parallel-pivot safety (§4.3).** Stage S2 checks invariant I1 inductively for explicit two- and three-branch configurations, removing the execution-length bound for those finite parameter sets. A proof quantified over arbitrary branch counts remains open; scenario and model checks must not be reported as that stronger result.

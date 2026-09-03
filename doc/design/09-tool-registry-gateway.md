@@ -2,7 +2,7 @@
 
 > Status: Accepted
 > Depends on: [02 — Transaction Model](./02-transaction-model.md), [05 — Context Aggregation and Offline Evaluation](./05-context-aggregation-and-offline-evaluation.md), [07 — Distributed Transaction Coordinator](./07-distributed-transaction-coordinator.md)
-> Decision record: [ADR-006 — Introduce gatewayd as the Tool Registry and Execution Gateway](./adr/adr-006-tool-registry-gateway.md)
+> Decision record: [ADR-006 — Introduce gatewayd as the Tool Registry and Execution Gateway](../adr/adr-006-tool-registry-gateway.md)
 > Implementation: Go 1.25, `gatewayd/`
 
 ## 1. Purpose and Boundary
@@ -16,7 +16,7 @@ It is an independently deployable Go 1.25 service in its own module. Sharing a l
 
 `gatewayd` does not own planning, transaction admission, retries, event appends, compensation policy, or projection semantics. It validates registrations and routes exactly one requested attempt to an upstream tool service. It writes nothing to the event log.
 
-The deployment relationship is shown in [the deployment architecture](./diagrams/deployment-architecture.html).
+The deployment relationship is shown in [the deployment architecture](../diagram/deployment-architecture.html).
 
 ## 2. Roles and Request Flow
 

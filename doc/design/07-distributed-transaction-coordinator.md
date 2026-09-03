@@ -1,12 +1,12 @@
 # Distributed Transaction Coordinator Architecture (07)
 
-> Status: Active v0.2 | Depends on: [01-jit-dag-and-event-log](./01-jit-dag-and-event-log.md), [02-transaction-model](./02-transaction-model.md), [ADR-001](./adr/adr-001-engine-language-split.md)
+> Status: Active v0.2 | Depends on: [01-jit-dag-and-event-log](./01-jit-dag-and-event-log.md), [02-transaction-model](./02-transaction-model.md), [ADR-001](../adr/adr-001-engine-language-split.md)
 
 ## 1. Overview
 
 The Distributed Transaction Coordinator is Flory's execution and transaction-safety service. The TypeScript Engine plans and projects; the Coordinator claims executable vertices, calls adapters, and enforces TCC and pivot-saga rules. Go 1.25 is an implementation choice recorded in ADR-001, not part of the component's identity or public protocol.
 
-See [coordinator-engine-interaction.drawio](./diagrams/coordinator-engine-interaction.drawio) for the service boundary and event flow.
+See [coordinator-engine-interaction.drawio](../diagram/coordinator-engine-interaction.drawio) for the service boundary and event flow.
 
 ## 2. Runtime Contract
 
@@ -32,7 +32,7 @@ The executor calls an adapter with a frozen idempotency key and deterministic re
 
 ### 3.4 Orphan Sweeper
 
-The sweeper finds sealed brackets past their deadline and requests cancellation for the owning scope. It races safely with confirm through row-locked compare-and-set functions. Restart recovery reads projections and expired leases; no correctness-critical timer exists only in memory.
+The sweeper polls two recovery sets. An `open` scope with a sealed bracket past its deadline enters cancellation through the row-locked scope compare-and-set function. A `cancelling` scope with no effective member lease is a recoverable interruption; the sweeper passes its recorded cancellation idempotency key back to the same scope-cancellation loop, which claims the remaining inverse work or appends the terminal completed event when none remains. A live lease prevents takeover, while an expired lease permits an idempotent retry. Confirm and cancellation still race through the scope fence, and no correctness-critical timer or cancellation cursor exists only in memory.
 
 ## 4. Adapter Boundary
 

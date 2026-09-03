@@ -3,7 +3,7 @@
 **Owner:** Flory engine team
 
 This directory contains the Stage S1 executable model required by
-[ADR-003](../doc/design/adr/adr-003-formal-verification-of-the-transaction-protocol.md).
+[ADR-003](../doc/adr/adr-003-formal-verification-of-the-transaction-protocol.md).
 It is a verification artifact only. Neither the TLA+ tools nor this model are
 runtime dependencies of the TypeScript Engine or Distributed Transaction Coordinator.
 

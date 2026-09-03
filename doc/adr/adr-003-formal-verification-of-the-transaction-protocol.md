@@ -4,16 +4,16 @@
 - **Date:** 2026-08-20
 - **Deciders:** Flory engine team
 - **Related:** [ADR-001](./adr-001-engine-language-split.md) (the Go coordinator is the component specified here), [ADR-005](./adr-005-lazy-causal-fork-semantics.md) (replan and offline-fork isolation enter the model)
-- **Implemented by:** [Plan 001](../../plan/plan-001-tla-plus-specification.md), which stages this scope and holds the preconditions
+- **Implemented by:** [Plan 001](../plan/plan-001-tla-plus-specification.md), which stages this scope and holds the preconditions
 
 ## Context
 
-Flory's central claim is that JIT planning can be made transactionally safe ([06 §1](../06-validation-harness.md)). The load-bearing part of that claim is a concurrency protocol: TCC brackets, a pivot barrier across parallel branches, delta-based compensation, a backtrack floor, and an orphan-try sweep ([02](../02-transaction-model.md), [03](../03-replan-and-recovery.md)).
+Flory's central claim is that JIT planning can be made transactionally safe ([06 §1](../design/06-validation-harness.md)). The load-bearing part of that claim is a concurrency protocol: TCC brackets, a pivot barrier across parallel branches, delta-based compensation, a backtrack floor, and an orphan-try sweep ([02](../design/02-transaction-model.md), [03](../design/03-replan-and-recovery.md)).
 
 The validation harness tests this protocol by **sampling**: scenario S7 exercises one interleaving of two conflicting branches, S11 one crash point. But two of the design's key claims are statements of **unreachability** and **termination**:
 
-- "The state *A has passed its pivot while B still requires rollback* is unreachable by construction" ([02 §4.3](../02-transaction-model.md)).
-- "Every failure episode eventually terminates" — S1 now checks this for the bounded two- and three-branch protocol, deriving the `E = 2` cap used by S3c ([06 §6](../06-validation-harness.md)). Unbounded assurance remains S2 work.
+- "The state *A has passed its pivot while B still requires rollback* is unreachable by construction" ([02 §4.3](../design/02-transaction-model.md)).
+- "Every failure episode eventually terminates" — S1 now checks this for the bounded two- and three-branch protocol, deriving the `E = 2` cap used by S3c ([06 §6](../design/06-validation-harness.md)). Unbounded assurance remains S2 work.
 
 Tests can demonstrate presence, never absence. No number of passing scenarios establishes unreachability, and no scenario suite derives a termination bound. This is a structural gap in the evidence, not a coverage gap.
 
@@ -42,7 +42,7 @@ An LLM cannot be modeled — it may emit anything. Attempting to characterize it
 
 > For **any** plan the model could emit that check-rules admits, the transaction invariants hold.
 
-This is [02 §3.2](../02-transaction-model.md) and discipline 14 — the safety boundary is check-rules, not the model's good behaviour — restated as a machine-checkable proposition. **Any assumption of reasonable planner behaviour introduced into the specification invalidates the entire result**, and reviewers must reject such assumptions.
+This is [02 §3.4](../design/02-transaction-model.md#34-deterministic-check-rules) — the safety boundary is check-rules, not the model's good behaviour — restated as a machine-checkable proposition. **Any assumption of reasonable planner behaviour introduced into the specification invalidates the entire result**, and reviewers must reject such assumptions.
 
 A corollary governs how counterexamples are read. If a check reports "a plan admitted by check-rules violates an invariant", the defect is **in the rule set, not the engine**, and the counterexample names the missing rule. R9 was found by hand during design discussion; this mechanism finds the next R9 without relying on someone thinking of it.
 
@@ -62,7 +62,7 @@ A corollary governs how counterexamples are read. If a check reports "a plan adm
 
 Parameterization: branch count `N`, SKU count `M`, unit quantity `K`, DAG depth, and replan count. TLC uses small constants with symmetry reduction. Apalache checks Init inclusion, one-step inductive closure, and safety implication for explicit `N = 2` and `N = 3` configurations. Induction removes the execution-length bound; it does not turn those finite configurations into a proof for arbitrary `N`.
 
-L2 is the item that produces a design answer rather than confidence: [03 §6](../03-replan-and-recovery.md) currently proposes an episode-level replan cap with no principled value. A liveness counterexample exhibits the shortest non-terminating cycle, and its length gives the bound.
+L2 is the item that produces a design answer rather than confidence: [03 §6](../design/03-replan-and-recovery.md) currently proposes an episode-level replan cap with no principled value. A liveness counterexample exhibits the shortest non-terminating cycle, and its length gives the bound.
 
 ## Scope: what is deliberately excluded
 
@@ -72,7 +72,7 @@ L2 is the item that produces a design answer rather than confidence: [03 §6](..
 | Check-rules R1–R11 as functions | T-A exhaustive table-driven fixtures | Pure functions over a proposal graph. Testing the real code is *stronger* than modeling an idealized rule engine. |
 | World conservation as arithmetic (O1) | property tests over the sandbox ledger | Already exactly asserted against the real implementation. |
 | Projection purity, prompt determinism | T-A replay diff, permutation tests | Determinism of pure functions is directly testable. |
-| Plan quality, greedy-versus-wider, JIT payoff | [06 §8](../06-validation-harness.md) policy validation | Optimization questions with no invariant to state. |
+| Plan quality, greedy-versus-wider, JIT payoff | [06 §8](../design/06-validation-harness.md) policy validation | Optimization questions with no invariant to state. |
 
 ## Rationale
 
@@ -97,7 +97,7 @@ Alloy searches over **structures**, not executions. The question "does there exi
 
 ### Why deterministic simulation is mandatory rather than optional
 
-TLA+ verifies the protocol; the coordinator's implementation can still race. Simulation explores interleavings of the **real code**. Flory is already most of the way there: [06 §4](../06-validation-harness.md) requires faults to be a pure function of `(seed, tool, attempt_no)`, so only the scheduler needs to become seeded and enumerable. For I6-class bugs — timing races in implementation detail rather than protocol design — simulation is likely to find more than the model checker.
+TLA+ verifies the protocol; the coordinator's implementation can still race. Simulation explores interleavings of the **real code**. Flory is already most of the way there: [06 §4](../design/06-validation-harness.md) requires faults to be a pure function of `(seed, tool, attempt_no)`, so only the scheduler needs to become seeded and enumerable. For I6-class bugs — timing races in implementation detail rather than protocol design — simulation is likely to find more than the model checker.
 
 ## Alternatives considered
 
@@ -124,13 +124,13 @@ TLA+ verifies the protocol; the coordinator's implementation can still race. Sim
 ### Ongoing obligations
 
 - **Both engines run in CI when introduced.** S1 runs TLC on every transaction-module change. Apalache joins the same workflow at its S2 trigger; a specification not mechanically checked on every change is stale within a quarter.
-- **Counterexamples become scenarios.** Any counterexample found is added to [06 §6](../06-validation-harness.md) as a numbered scenario, so the harness inherits the finding permanently.
+- **Counterexamples become scenarios.** Any counterexample found is added to [06 §6](../design/06-validation-harness.md) as a numbered scenario, so the harness inherits the finding permanently.
 - **Invariant violations are read as rule-set gaps first.** Per the corollary above, the first hypothesis for a violated invariant is a missing check-rule, not an engine defect.
 
 ### Gained
 
 - Unreachability and conservation claims move from prose to machine-checked induction for the declared two- and three-branch configurations, with the parameter boundary stated explicitly.
-- The oscillation bound is derived rather than guessed, closing [03 §6](../03-replan-and-recovery.md) and un-blocking S3c.
+- The oscillation bound is derived rather than guessed, closing [03 §6](../design/03-replan-and-recovery.md) and un-blocking S3c.
 - A mechanism that discovers missing check-rules without depending on someone imagining the failure.
 
 ### Accepted costs

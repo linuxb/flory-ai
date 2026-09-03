@@ -289,7 +289,8 @@ func (service *Service) executeWithRetry(ctx context.Context, runID, vertexID, t
 	return model.OperationResponse{Outcome: model.OutcomePermanentFailure, Error: "retry policy exhausted"}, policy.MaxAttempts, nil
 }
 
-// Sweep starts scope-level cancellation for expired sealed brackets.
+// Sweep starts cancellation for expired sealed brackets and resumes fenced
+// cancellations whose member leases are no longer live.
 func (service *Service) Sweep(ctx context.Context) error {
 	expired, err := service.store.ExpiredScopes(ctx)
 	if err != nil {
@@ -304,6 +305,15 @@ func (service *Service) Sweep(ctx context.Context) error {
 			if err := service.cancelScope(ctx, runID, scopeID, key); err != nil {
 				return err
 			}
+		}
+	}
+	stuck, err := service.store.StuckCancellations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, cancellation := range stuck {
+		if err := service.cancelScope(ctx, cancellation.RunID, cancellation.ScopeID, cancellation.IdempotencyKey); err != nil {
+			return err
 		}
 	}
 	return nil

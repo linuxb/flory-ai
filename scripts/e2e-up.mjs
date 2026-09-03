@@ -6,11 +6,14 @@
 // downstream can resolve a contract to plan or execute against.
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
+import {readFile} from 'node:fs/promises';
 import {createServer} from 'node:net';
 import {setTimeout as delay} from 'node:timers/promises';
 
 const gatewayHttp = process.env.GATEWAY_BASE_URL ?? 'http://127.0.0.1:8092';
 const gatewayGrpc = process.env.GATEWAYD_GRPC_ADDR ?? '127.0.0.1:8093';
+const expectedToolView = JSON.parse(await readFile(new URL('../test/fixtures/tool-view-ecommerce.json', import.meta.url), 'utf8'));
+const expectedToolCount = expectedToolView.tools.length;
 const children = [];
 let shuttingDown = false;
 
@@ -34,7 +37,7 @@ async function shutdown(code) {
 }
 
 /** Polls a URL until it answers, so a stage starts only once the one below it is up. */
-async function waitFor(name, url, attempts = 100) {
+async function waitFor(name, url, attempts = 300) {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
         try {
             const response = await fetch(url);
@@ -100,17 +103,18 @@ start('sandbox', 'npx', ['tsx', 'test/sandbox/server.ts'], {
 });
 await waitFor('sandbox world', `http://${process.env.SANDBOX_ADDR ?? '127.0.0.1'}:${process.env.SANDBOX_PORT ?? 8090}/healthz`);
 
-// Registration is asynchronous, so the topology is only ready once the gateway has admitted something.
+// Registration is asynchronous, so the topology is ready only after the complete
+// recorded fixture has been admitted. A non-empty intermediate view is not enough.
 for (let attempt = 0; ; attempt += 1) {
     const response = await fetch(`${gatewayHttp}/v1/tool-view`);
     if (response.ok) {
         const view = await response.json();
-        if (view.tool_count > 0) {
+        if (view.tool_count === expectedToolCount) {
             process.stdout.write(`tool view published: ${view.tool_view_digest} (${view.tool_count} tools)\n`);
             break;
         }
     }
-    if (attempt > 100) throw new Error('the gateway published no tools; check the registration logs above');
+    if (attempt > 100) throw new Error(`the gateway did not publish all ${expectedToolCount} fixture tools; check the registration logs above`);
     await delay(100);
 }
 

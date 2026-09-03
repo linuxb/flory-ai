@@ -101,8 +101,10 @@ jobs:
           GATEWAY_BASE_URL: http://127.0.0.1:8092
         run: |
           npm run e2e:up &
+          expected_tool_count=$(node -p "require('./test/fixtures/tool-view-ecommerce.json').tools.length")
           for attempt in $(seq 1 120); do
-            if curl -sf http://127.0.0.1:8092/v1/tool-view | grep -q tool_view_digest; then break; fi
+            if curl -sf http://127.0.0.1:8092/v1/tool-view | grep -Eq "\"tool_count\":${expected_tool_count}"; then break; fi
             sleep 1
           done
+          curl -sf http://127.0.0.1:8092/v1/tool-view | grep -Eq "\"tool_count\":${expected_tool_count}"
           npx vitest run test/conformance/gateway-e2e.test.ts

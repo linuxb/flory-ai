@@ -1,8 +1,7 @@
 # gatewayd Tool Registry Gateway (09)
 
-> Status: Accepted
+> Status: Active v1.0
 > Depends on: [02 — Transaction Model](./02-transaction-model.md), [05 — Context Aggregation and Offline Evaluation](./05-context-aggregation-and-offline-evaluation.md), [07 — Distributed Transaction Coordinator](./07-distributed-transaction-coordinator.md)
-> Decision record: [ADR-006 — Introduce gatewayd as the Tool Registry and Execution Gateway](../adr/adr-006-tool-registry-gateway.md)
 > Implementation: Go 1.25, `gatewayd/`
 
 ## 1. Purpose and Boundary
@@ -141,3 +140,22 @@ Three fixtures hold that claim up:
 - **Dual-path execution.** The same attempt through the direct adapter and the gateway adapter yields identical outcomes across all four outcome classes, and identical upstream payloads — an equivalence proved on outcomes alone would hide a difference in what the tool was asked to do.
 
 The validation harness runs on the gateway route end to end: the mock commerce world is four tool services built on the SDK, registering exactly as a production service does ([06 §3.3](./06-validation-harness.md)).
+
+## 8. Design Rationale, Consequences, and Rejected Alternatives
+
+The Engine and Coordinator need one versioned tool contract for planning, deterministic admission, execution, compensation, replay, and offline evaluation. Process-local configuration or parallel manifests can drift so that planning validates one contract while execution routes another. A content-addressed tool view makes the bytes themselves the identity and keeps live registry I/O outside pure checking, projection, and historical replay. Routing exactly one attempt preserves a single transaction authority: only the executor can decide whether retry is legal after considering idempotency, TCC state, and pivot state.
+
+The chosen split has deliberate consequences. Dynamic registration no longer requires an Engine or Coordinator rollout, historical views remain resolvable after the live registry changes, and both executors consume the same frozen contract. In exchange, the gateway is an availability dependency for discovery and routing, callers must fail closed, immutable views require durable blob storage, and the Go and TypeScript canonical encoders must remain byte-identical through shared fixtures. A new tool-service language therefore requires a conforming SDK rather than a hand-written protocol client.
+
+Rejected alternatives remain part of the gateway design:
+
+- **A static repository registry or checked-in manifest alongside the gateway** creates either deployment coupling or a second catalog that can disagree with admitted live services. Tests may record a published view, but must verify its digest against the live output.
+- **Gateway-owned retries or transaction events** creates a second transaction authority. A post-dispatch transport failure remains `unknown`; the gateway cannot safely authorize a duplicate side effect.
+- **Live registry queries during checking, projection, replay, or recorded evaluation** introduce I/O and replace historical evidence with current mutable state.
+- **A time-travel mutable registry** duplicates history already preserved by immutable content-addressed views.
+- **gRPC on the north surface** is incompatible with MCP's JSON-RPC contract. The deliberately small hand-written north surface also preserves Flory's closed fail-before-dispatch refusal vocabulary; gRPC and generated SDKs remain the south-side choice for cross-language service equivalence.
+- **Service-specific registration implementations** can diverge on lease recovery, heartbeat, health, or admission and make a service appear registered while unroutable. The shared SDK owns the entire service-side lifecycle.
+- **Coordinator ownership of every execution event** assigns read-only, unscoped work to a transaction service that neither executes nor governs it.
+- **Execution ownership by worker convention** races on row claiming. The partition is derived from the vertex payload and enforced by the database at both queue and append boundaries.
+- **A separate event vocabulary for Orchestrator reads** couples every projection and oracle to executor identity instead of outcome meaning.
+- **Local-filesystem view storage** does not survive a stateless gateway, while a hand-written cloud-storage client weakens the durability boundary. A `BlobStore` interface with a supported GCS-compatible implementation keeps storage replaceable without reimplementing it.

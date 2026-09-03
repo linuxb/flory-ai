@@ -185,8 +185,8 @@ The README hero image is the animated architecture overview; its generator lives
 Read [AGENTS.md](AGENTS.md) before proposing implementation work. In particular:
 
 - Keep repository documentation in English and use the established document locations.
-- Write and accept a proposed ADR before implementing a large architecture change.
+- Propose and accept an ADR before implementing a large architecture change; then merge the accepted content into the authoritative design documents and remove every reference to the accepted ADR.
 - Treat the event log as immutable ground truth.
 - Preserve the TypeScript-only canonical projection pipeline.
 - Add a replay test whenever planner, projection, or fold behavior changes.
-- Record decisions with rejected alternatives as a new ADR.
+- Preserve rejected alternatives in the design document when an ADR is accepted.

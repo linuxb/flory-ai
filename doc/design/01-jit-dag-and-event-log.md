@@ -177,7 +177,7 @@ The function is pure. The same log prefix and harness-state version produce the 
 
 ## 5. Replanning In Place, and Forking for Offline Evaluation
 
-Flory deliberately **splits** what dsh unifies. dsh makes resume, fork, and replay one primitive because a session is a cheap local object whose identity carries no external meaning. A Flory run is a **business process** — one order, one replenishment — so run identity has business meaning, and the mechanisms must be kept apart. The current decision and rejected alternatives are recorded in [ADR-005](../adr/adr-005-lazy-causal-fork-semantics.md).
+Flory deliberately **splits** what dsh unifies. dsh makes resume, fork, and replay one primitive because a session is a cheap local object whose identity carries no external meaning. A Flory run is a **business process** — one order, one replenishment — so run identity has business meaning, and the mechanisms must be kept apart.
 
 Three mechanisms, three purposes:
 
@@ -255,6 +255,19 @@ A fork's fold may be evaluated at four increasing levels of liveness. The ladder
 A fork produces a **paired counterfactual on one history**: the same task and observations with named pins changed. Its result explains that case and nothing broader. ToB e-commerce runs differ in catalog, inventory, prices, channel rules, and external timing, so two unrelated runs are not parallel comparison units.
 
 Corpus evaluation therefore preserves the individual source/fork pair and its provenance. It may group case-level results descriptively by task type or failure class after folding each stream independently, but it must not pool them into a causal estimate or claim that one configuration is globally better. Forks support historical explanation, regression detection, operator what-ifs, and evidence for a human promotion decision; they do not authorize production changes automatically ([05 §4](./05-context-aggregation-and-offline-evaluation.md)).
+
+### 5.6 Rationale, costs, and rejected fork semantics
+
+A counterfactual is a causal question, so the fork follows the causal graph rather than storage order. Invalidating descendants and merging independent events is the minimum coherent meaning of “what if this pin differed”: keeping an effect after replacing its cause constructs a history that could never have happened. Production replan boundaries do not apply because offline modes perform no writes; safety instead comes from the write ceiling and the provenance-based rule that inherited work is immutable. Laziness bounds cost and compares source and fork at the same declared position.
+
+This choice gains mid-bracket and tool-caller counterfactuals, causally coherent histories, bounded evaluation through `eval_up_to_seq`, and prompt-only blocked folds. Its costs are a causal-slice computation in the storage transaction, dependence on complete `parent_refs`, and provenance-aware protection for inherited transaction brackets. A no-substitution fork remains a mandatory identity test: nothing is invalidated, every independent event merges, and the surface must match the source exactly.
+
+The following alternatives are rejected:
+
+- **Restrict forks to legal online replan boundaries.** Pivot floors and open-bracket constraints protect live writes but have no offline safety value and would exclude the most useful counterfactual sites.
+- **Merge the full source tail under substituted pins.** This preserves descendants whose cause changed and therefore evaluates a causally impossible history.
+- **Evaluate eagerly to run completion.** Cost becomes unbounded and the source and fork stop at different positions, so the comparison loses a common denominator.
+- **Treat unrelated business runs as parallel samples.** Different catalog, inventory, price, channel, and timing conditions make them different cases; only a source/fork pair on one history is a causal comparison unit.
 
 ## 6. Replay Testing
 

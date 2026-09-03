@@ -2,7 +2,7 @@
 
 - **Status:** Active — runtime delivered; complete S12 duplicate-delivery scenario pending
 - **Date:** 2026-08-22
-- **Implements:** [ADR-001](../adr/adr-001-engine-language-split.md), [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md)
+- **Implements:** [00 service boundaries](../design/00-overview.md#31-service-and-language-boundaries), [02 transaction model](../design/02-transaction-model.md), [06 formal verification design](../design/06-validation-harness.md#12-formal-verification-design)
 - **Specifies:** [02 transaction model](../design/02-transaction-model.md), [07 Coordinator architecture](../design/07-distributed-transaction-coordinator.md)
 
 ## 1. Objective

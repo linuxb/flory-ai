@@ -350,7 +350,61 @@ Phases 0 through 2 require no API key and no model access, which is the point: r
 - **SagaLLM** validates plans with an independent validation agent. The harness deliberately does the opposite: §2.2 exists to prove the deterministic rule engine catches what a model reviewer would be trusted to catch, so that no test result ever depends on a model's self-discipline.
 - Chaos-engineering practice contributes the fault taxonomy, but with one inversion: production chaos is random by design, whereas this injector is seeded and table-driven, because a transaction bug that cannot be reproduced cannot be fixed.
 
-## 12. Open Questions
+## 12. Formal Verification Design
+
+Scenario tests sample interleavings, but the transaction protocol also makes unreachability and termination claims: a pivot must not pass while a parallel branch still requires rollback, cancellation must not cross a passed pivot, holds must be conserved, and every bounded failure episode must terminate. Passing scenarios cannot establish absence, so the protocol has a machine-checked complement.
+
+One TLA+ specification family is checked by two engines:
+
+- **TLC** performs explicit-state exploration, counterexample discovery, and liveness checking under declared fairness assumptions, using small constants and symmetry only where sound.
+- **Apalache** checks strengthened inductive invariants for explicit `N = 2` and `N = 3` branch configurations. Induction removes the execution-length bound for those configured finite bounds; it is not a proof for arbitrary branch counts or quantities.
+
+Three complements are mandatory. Real event-log traces are validated as protocol behaviours; the runtime is exercised under seeded deterministic schedules to expose implementation races; and Alloy is reserved for bounded structural search for a DAG that satisfies R1–R11 yet still reaches a dead state. TLAPS may be used for at most the pivot-barrier theorem, but is not required. Verification tools remain repository artifacts and must never become runtime dependencies.
+
+### 12.1 Planner model and interpretation of counterexamples
+
+The planner is **demonic nondeterminism constrained only by deterministic admission rules**. At each planner step the model may propose any sub-DAG that R1–R11 admit. No assumption of “reasonable” model behaviour is permitted: such an assumption would make the result conditional on something the system cannot enforce and invalidates the verification claim.
+
+The resulting proposition matches the architecture boundary: for any plan an LLM could emit that the rule engine admits, the modeled transaction invariants hold. When a counterexample shows an admitted plan violating an invariant, reviewers investigate a missing or insufficient admission rule first; the counterexample names the structural gap that must become both a rule and a permanent numbered scenario.
+
+### 12.2 Checked and excluded properties
+
+| ID | Property | Method |
+|---|---|---|
+| I1 | no reachable state has one branch past its pivot while another requires whole-scope rollback | Apalache induction; optional TLAPS |
+| I2 | hold conservation and no amplification | Apalache induction |
+| I3 | no `txn/cancel` after `txn/pivot-passed` in one scope | Apalache induction |
+| I4 | at most one pivot takes effect per scope | Apalache induction |
+| I5 | a scope pivot occurs at most once across replans | Apalache induction |
+| I6 | sweep/confirm exclusion under their row-locked race | TLC then Apalache |
+| I7 | an offline fork appends no transaction event for inherited work | Apalache induction |
+| L1 | every scope eventually commits, cancels, or reaches L4 suspension | TLC with fairness |
+| L2 | every bounded failure episode terminates; the shortest lasso derives the replan cap | TLC with fairness |
+
+Branch count, SKU count, quantity, DAG depth, and replan count remain explicit parameters. Parameter coverage, specification-to-code conformance, and invariant completeness are independent gaps and must not be conflated with execution-depth closure.
+
+Concrete algebra and pure implementation behaviour are deliberately verified against real code instead of idealized models: delta-compensation commutativity uses property tests over reducers and registration validation; R1–R11 use exhaustive fixtures; world conservation reads the sandbox ledger; projection purity and prompt determinism use replay and permutation tests; and plan quality or greedy-versus-wider economics use the offline evaluation discipline in §8.
+
+### 12.3 Why this tool split is retained
+
+TLC is retained because liveness and short counterexamples are its strength; Apalache closes execution-length reasoning for each explicit finite configuration; trace validation narrows the specification/implementation gap; deterministic simulation targets races in real coordinator code; and Alloy attacks structural rule completeness rather than execution order. The append-only event vocabulary makes trace reconciliation unusually direct because the modeled states map to `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed`, and `replan/boundary`.
+
+The following substitutes are rejected:
+
+- **TLC alone** leaves a bounded execution depth and cannot justify inductive safety claims.
+- **TLAPS as the primary path** risks a half-finished proof that supplies no assurance; it remains optional for one theorem.
+- **P** adds systematic testing without exceeding TLC's exploration or the real runtime simulator's implementation proximity.
+- **Ivy** requires a restrictive reformulation without removing the implementation-trace gap.
+- **Coq or Isabelle** maximizes assurance about a model while leaving code conformance open unless the project accepts a much larger verified-extraction commitment.
+- **Jepsen-style randomized testing as a substitute** conflicts with reproducibility and targets isolation anomalies rather than saga invariants. Targeted infrastructure chaos may still complement the deterministic harness.
+
+### 12.4 Preconditions, obligations, and accepted costs
+
+Formal work must precede the implementation stage whose design it is meant to change; a post-hoc specification is useful for regression but not as an upstream design instrument. The engine team owns `spec/`, must keep at least one maintainer able to run and strengthen it, and must transfer that ownership before accepting a transaction-protocol change. Inductive invariant strengthening is a required skill, not a schedule placeholder.
+
+TLC and Apalache run in CI for every transaction source-document or formal-model change. Every discovered counterexample becomes a harness scenario. Trace validation samples real behaviours and therefore bounds but does not eliminate model/code divergence. The accepted costs are CI time, maintenance of the specification beside the runtime, explicit finite parameter limits, and the TLA+/Apalache and Alloy toolchains.
+
+## 13. Open Questions
 
 - **Forward-closure bound (resolved contradiction, new question).** [03 §2.2](./03-replan-and-recovery.md) step 2 now requires driving a post-pivot scope forward to closure rather than searching upward past the floor. Unresolved: how long forward closure may be attempted before the run is declared L4. Too short and a recoverable run is suspended for a human; too long and an unrecoverable run holds resources indefinitely. The harness currently asserts only that L4 is eventually reached, not when, so S10 cannot yet distinguish a correct bound from an arbitrary one.
 - **L2 reachability.** As specified, L2 is reachable only through structural infeasibility of the replan boundary; consecutive replan failures route L1 directly to L3 (03 §3). Whether an intermediate count-based L1 → L2 step was intended is unresolved. The harness asserts the literal specification, so if the intent was different, S3 will fail and expose it — the desired outcome, but it should be a deliberate decision rather than a surprise.

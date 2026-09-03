@@ -47,6 +47,35 @@ The current deployment view is [diagram/deployment-architecture.html](../diagram
 
 The [animated architecture overview](../animations/architecture-dark.gif) in the README walks the same components through one transaction scope, from planning to the pivot and its confirmations; its generator is [doc/animations/src](../animations/src). The [conceptual architecture overview](../diagram/architecture.html) remains a higher-level companion. Focused mechanism diagrams are editable Draw.io files: [transaction boundaries](../diagram/txn-boundary.drawio), [replanning flow](../diagram/replan-flow.drawio), [projection and offline evaluation](../diagram/projection.drawio), and [Coordinator/Engine interaction](../diagram/coordinator-engine-interaction.drawio).
 
+### 3.1 Service and language boundaries
+
+Flory uses two services and one database because its planner and transaction runtime have different correctness and operating constraints:
+
+- The **TypeScript Engine** owns the planner loop, event vocabulary, canonical projection pipeline (`surface`, `slice`, `fold`, `linearize`, `assemble`), check-rules, prompt assembly, refine loop, model adapters, replay tests, and historical recomputation.
+- The **Go 1.25 Distributed Transaction Coordinator** owns transaction brackets, timeout sweeping, orphan recovery, retry scheduling, effectful tool execution, and adapters that belong in existing Go infrastructure. [07](./07-distributed-transaction-coordinator.md) specifies its runtime boundary.
+- The **Go 1.25 Tool Registry Gateway** is a separate service and module. It publishes immutable tool views and routes one pinned attempt without taking transaction authority. [09](./09-tool-registry-gateway.md) specifies that boundary.
+- **PostgreSQL** holds the append-only event log, harness metadata, synchronous transaction projections, and work queues, and allocates per-run write order.
+- **The event log and shared IDLs are the component boundary.** Components do not import or call another component's internals. PostgreSQL work claiming provides handoff; a message broker is not introduced until measured load requires one.
+- **Canonical projection semantics have exactly one implementation, in TypeScript.** Operational folds such as unmatched-try scans, sweeps, and readiness checks may live with their owning runtime, but no other component reimplements planner context projection.
+
+### 3.2 Boundary rationale, costs, and alternatives
+
+TypeScript is used for the Engine because the log is a tagged union whose readers must fail closed. Exhaustive discriminated-union handling makes a new event type a compiler-visible obligation; pure immutable transformations fit the projection pipeline; one runtime-schema system covers proposal, refine, and harness-state validation; and model streaming and structured-output support are first-class. Replay testing and batch recomputation stay in TypeScript because a second projector would make edge-case agreement and `projector_version` attribution unverifiable. Scale comes from sharding by `run_id` or pushing suitable folds into SQL, not porting the projector.
+
+Go is used for the Coordinator because it is a timer-dense, long-running service that holds many deadline-bearing brackets and touches inventory and money. Context cancellation, timers, goroutines, profiling, and the existing Go operating practice reduce recovery and incident risk. Its interface is narrow and data-oriented, and it does not call models, so it gives up none of the Engine's TypeScript ecosystem advantages. The gateway shares the Go toolchain for operational consistency but remains a separate ownership and deployment boundary.
+
+The split is affordable because services share no mutable in-process state and need no internal coordination protocol: the append-only log is truth, PostgreSQL allocates order, and schema-first contracts define exchanged data. The accepted costs are two build pipelines, dependency ecosystems, and deployment units; mandatory IDL regeneration; and cross-language golden fixtures, including fail-closed unknown-event handling and canonical tool-view encoding. The gains are independently scalable planner and execution services, compiler-enforced log exhaustiveness, and a money-critical runtime that the infrastructure team can operate without adding a broker, workflow engine, or datastore.
+
+This split assumes an engine team of roughly three or more people plus an infrastructure team already operating Go services. With only one or two engineers building a new deployment, a single TypeScript service behind a narrow executor interface is preferable until real load justifies extraction; the boundary contracts in this design must still be preserved.
+
+Rejected alternatives remain part of the design:
+
+- A **single TypeScript service** is simpler and remains the small-team fallback, but is not the selected deployment because the transaction runtime benefits materially from established Go operability.
+- A **single Go service** loses compiler-enforced exhaustiveness for the Engine's extensible event vocabulary and makes the pure projection and model-facing layers harder to keep concise and immutable.
+- A **second Go projector for batch work** creates two sources of projection semantics and is rejected even if it appears faster.
+- **Python** adds a third application ecosystem without a unique advantage at this boundary.
+- **Kafka or a fixed-workflow orchestrator** adds infrastructure while PostgreSQL already supplies atomic append, ordering, and `SKIP LOCKED` claiming; a fixed workflow also cannot express planner-generated transaction structure.
+
 ## 4. Five Design Principles
 
 1. **The log is the source of truth (inspired by dsh).** The event log is the sole source of truth for both the DAG and the transaction brackets — there is no separate transaction log. Vertex rows are append-only and are never rewritten in place; all derived state (the current DAG, planner context, and token accounting) is a recomputable pure-function projection, **pure within one run and deliberately not across runs** ([01 §3.3](./01-jit-dag-and-event-log.md)). Consequently, `visible to planner ⇔ reconstructible from log` is enforced by runtime assertions, not convention.

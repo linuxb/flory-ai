@@ -1,14 +1,11 @@
 # Architecture Decision Records
 
-Each ADR records one decision: its context, the decision itself, the rationale, the consequences, and the alternatives that were rejected and why. A rejected alternative is as valuable as the chosen one — it stops the same debate from reopening without new information.
+This directory holds architecture proposals while they are under review. Each proposal records one prospective decision: its context, proposed decision, rationale, consequences, and the alternatives rejected and why.
 
-Naming: `adr-NNN-short-slug.md`, numbered sequentially and never renumbered. Status is one of `Proposed`, `Accepted`, or `Deprecated`. Amend an accepted ADR only to correct a factual error; a changed decision means a new ADR that supersedes it — the superseded ADR is then removed from the tree (the new ADR restates whatever survives; git history preserves the rest), so numbering gaps are expected.
+Naming is `adr-NNN-short-slug.md`. Number proposals sequentially and never reuse or renumber an identifier. A large architecture change must begin as `Proposed`, and implementation may begin only after acceptance.
 
-Write ADRs in English. Design specifications belong in [`../design/`](../design/); plans belong in [`../plan/`](../plan/).
+Acceptance is a migration, not a permanent document status. In the accepting change, merge every surviving decision, rationale, consequence, and rejected alternative into the existing authoritative documents in [`../design/`](../design/), update plans and contributor routes to cite those documents, and remove every repository reference to the accepted ADR. The merged ADR may then be deleted immediately; Git history remains the review record and numbering gaps are expected.
 
-| ADR | Title | Status |
-|---|---|---|
-| [001](./adr-001-engine-language-split.md) | Engine language split — TypeScript engine, Go coordinator | Accepted |
-| [003](./adr-003-formal-verification-of-the-transaction-protocol.md) | Formal verification of the transaction protocol — TLA+ with TLC and Apalache | Accepted |
-| [005](./adr-005-lazy-causal-fork-semantics.md) | Forks are lazy causal counterfactuals at any vertex | Accepted |
-| [006](./adr-006-tool-registry-gateway.md) | Tool Registry and execution gateway | Accepted |
+Write proposals in English. Implementation and rollout plans belong in [`../plan/`](../plan/). The index below lists only active proposals; accepted decisions are discoverable through the design documents and Git history.
+
+There are currently no active ADR proposals.

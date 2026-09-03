@@ -74,19 +74,22 @@ jobs:
           done
       - run: npm ci
       - run: npm run db:setup
-      - run: npm run verify
-      - name: Verify the Tool Registry Gateway
-        working-directory: gatewayd
-        env:
-          STORAGE_EMULATOR_HOST: http://localhost:4443
-          GATEWAYD_BLOB_BUCKET: flory-tool-views
-        run: go vet ./... && go test -race ./...
+      # Run the Coordinator integration suite before the storage suite creates
+      # unrelated ready work in the shared CI database. ProcessOne intentionally
+      # claims globally, so its scenario database must begin with an empty queue.
       - name: Verify the Distributed Transaction Coordinator
         working-directory: coordinator
         env:
           FLORY_INTEGRATION: '1'
           ENGINE_DATABASE_URL: postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory
           COORDINATOR_DATABASE_URL: postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory
+        run: go vet ./... && go test -race ./...
+      - run: npm run verify
+      - name: Verify the Tool Registry Gateway
+        working-directory: gatewayd
+        env:
+          STORAGE_EMULATOR_HOST: http://localhost:4443
+          GATEWAYD_BLOB_BUCKET: flory-tool-views
         run: go vet ./... && go test -race ./...
       # The end-to-end suite runs against a live topology: the gateway in front of
       # four tool services that register themselves through the SDK.

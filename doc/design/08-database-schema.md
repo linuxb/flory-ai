@@ -37,7 +37,7 @@ Scope cancellation uses two `txn/cancel` phases. `requested` fences the whole sc
 
 ## 4. Fork Storage Transaction
 
-The TypeScript engine implements the lazy causal fork of [ADR-005](../adr/adr-005-lazy-causal-fork-semantics.md) and [01 §5.2](./01-jit-dag-and-event-log.md) — `fork(source_stream, at_vertex_id, substitutions[], eval_up_to_seq)` — in one database transaction:
+The TypeScript engine implements the lazy causal fork of [01 §5.2](./01-jit-dag-and-event-log.md) — `fork(source_stream, at_vertex_id, substitutions[], eval_up_to_seq)` — in one database transaction:
 
 1. Lock the source `run` row and validate that `eval_up_to_seq` names a recorded source position.
 2. Resolve the divergence vertex `at_vertex_id` — **any** vertex, with no planner, bracket, or pivot-floor restriction — and validate that every substitution names one of its pinned events.

@@ -2,7 +2,7 @@
 
 - **Status:** Active — S1 and S2 complete; S3 remains trigger-gated
 - **Date:** 2026-08-20
-- **Implements:** [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md)
+- **Implements:** [06 formal verification design](../design/06-validation-harness.md#12-formal-verification-design)
 - **Specifies:** [02 transaction model](../design/02-transaction-model.md), [03 replan and recovery](../design/03-replan-and-recovery.md)
 
 ## 1. Why now
@@ -13,7 +13,7 @@ The repository currently contains documentation and no engine code. That makes t
 
 | Blocked question | Where | What the spec produces |
 |---|---|---|
-| Oscillation bound — how many replans may one episode contain | [03 §6](../design/03-replan-and-recovery.md), [06 §12](../design/06-validation-harness.md) | **Resolved:** the L2 lasso has two replan transitions, yielding `E = 2`; S3c is now specified to pass. |
+| Oscillation bound — how many replans may one episode contain | [03 §6](../design/03-replan-and-recovery.md), [06 §13](../design/06-validation-harness.md#13-open-questions) | **Resolved:** the L2 lasso has two replan transitions, yielding `E = 2`; S3c is now specified to pass. |
 | Is the parallel-pivot dead state truly unreachable | [02 §6](../design/02-transaction-model.md) | A machine-checked invariant replacing a prose argument. |
 | Is the R1–R11 rule set complete | [02 §6](../design/02-transaction-model.md) | Counterexamples that name missing rules. |
 
@@ -28,7 +28,7 @@ The plan deliberately separates *specification as a design instrument* — cheap
 | Stage | Trigger | Scope | Skill required |
 |---|---|---|---|
 | **S1 — complete** | no engine code exists | TLC only. Invariants I1, I3. Liveness **L2** derived the oscillation bound. Constants `N ∈ {2,3}`, `K = 3`; symmetry is used for safety only because TLC warns against it for liveness. | Ordinary TLA+, learnable in weeks |
-| **S2 — complete** | start of Distributed Transaction Coordinator implementation (ADR-001 Phase 2) | I2 and I4–I7 in `CoordinatorS2.tla`; Apalache inductive checks for explicit `N = 2` and `N = 3`; real-log trace validation in the Coordinator | Inductive invariant strengthening |
+| **S2 — complete** | start of Distributed Transaction Coordinator implementation | I2 and I4–I7 in `CoordinatorS2.tla`; Apalache inductive checks for explicit `N = 2` and `N = 3`; real-log trace validation in the Coordinator | Inductive invariant strengthening |
 | **S3** | first production traffic with real logs | Alloy structural search for admissible-but-dead DAG shapes. Optional TLAPS for I1 | Specialist |
 
 Stage triggers are objective events, not availability. S2 is required at the moment coordinator implementation begins; "when we have time" is not a trigger.
@@ -144,7 +144,7 @@ command is `./spec/run-tlc.sh`; after all checks pass it also writes the ignored
 | Trace validation | Outside S1. S2 now validates real event logs with the Coordinator trace validator. |
 | Alloy structural search | Valuable for rule completeness, but the adversarial TLC model surfaces part of it first. S3. |
 | TLAPS | Optional even in S3. A half-finished proof provides no more assurance than a model check. |
-| Compensation algebra, R1–R11 as functions, world conservation arithmetic, projection purity | Verified against real code by the harness; see [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md) exclusions. |
+| Compensation algebra, R1–R11 as functions, world conservation arithmetic, projection purity | Verified against real code by the harness; see [06 §12.2](../design/06-validation-harness.md#122-checked-and-excluded-properties). |
 
 ## 5. A rejected shortcut
 
@@ -164,7 +164,7 @@ Implementation cost is not the constraint on this plan. Skill availability is.
 
 ## 7. Preconditions and the open decision
 
-Per [ADR-003](../adr/adr-003-formal-verification-of-the-transaction-protocol.md), the verification artifacts must have an owner and must be maintained with the implementation. Both conditions are now satisfied:
+The ownership and maintenance obligations in [06 §12.4](../design/06-validation-harness.md#124-preconditions-obligations-and-accepted-costs) are now satisfied:
 
 1. **Named owner — resolved.** The Flory engine team owns `spec/`, its TLC workflow, and review of changes to the transaction model.
 2. **S2 capability — resolved.** The strengthened invariant closes for the explicit `N = 2` and `N = 3` configurations, and CI runs the digest-pinned Apalache checks with every transaction-protocol change.

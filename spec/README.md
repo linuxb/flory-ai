@@ -2,8 +2,8 @@
 
 **Owner:** Flory engine team
 
-This directory contains the Stage S1 executable model required by
-[ADR-003](../doc/adr/adr-003-formal-verification-of-the-transaction-protocol.md).
+This directory contains the Stage S1 executable model required by the
+[formal verification design](../doc/design/06-validation-harness.md#12-formal-verification-design).
 It is a verification artifact only. Neither the TLA+ tools nor this model are
 runtime dependencies of the TypeScript Engine or Distributed Transaction Coordinator.
 
@@ -54,7 +54,7 @@ model of the admission boundary, not a proof of the real R1-R11 functions;
 those pure functions remain harness tests.
 
 Nested-scope expansion and Alloy structural search remain in the later stage
-defined in ADR-003. S2 hold conservation, pivot uniqueness, sweep/confirm
+defined in [Doc 06 §12](../doc/design/06-validation-harness.md#12-formal-verification-design). S2 hold conservation, pivot uniqueness, sweep/confirm
 exclusion, fork isolation, and protocol-shape safety are checked by
 `CoordinatorS2.tla` with Apalache for explicit two- and three-branch
 configurations. S2 real-log validation lives in `coordinator/cmd/trace-validator`;

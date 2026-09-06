@@ -34,6 +34,7 @@ func reserveContract() *gatewayv1.ToolContract {
 		TimeoutMs:         15000,
 		RetryConstraints:  &gatewayv1.RetryConstraints{MaxAttempts: 3, InitialBackoffMs: 100, MultiplierMilli: 2000, MaxBackoffMs: 5000},
 		Owner:             "inventory-team",
+		AllowedRoles:      []string{"*"},
 	}
 }
 
@@ -50,6 +51,7 @@ func checkContract() *gatewayv1.ToolContract {
 		TimeoutMs:         5000,
 		RetryConstraints:  &gatewayv1.RetryConstraints{MaxAttempts: 3, InitialBackoffMs: 100, MultiplierMilli: 2000, MaxBackoffMs: 5000},
 		Owner:             "inventory-team",
+		AllowedRoles:      []string{"*"},
 	}
 }
 

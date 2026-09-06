@@ -17,7 +17,7 @@ try {
     throw new Error(`cannot connect to ${owner.database} at ${owner.host}:${owner.port} as ${owner.role} (${detail}). Run \`npm run db:bootstrap\` first if the role or database does not exist yet.`);
 }
 try {
-    for (const role of ['engine_role', 'coordinator_role']) {
+    for (const role of ['engine_role', 'coordinator_role', 'gateway_role']) {
         const exists = await client.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [role]);
         if (exists.rowCount === 0) throw new Error(`application role ${role} does not exist; run \`npm run db:bootstrap\` to provision the Flory roles`);
     }

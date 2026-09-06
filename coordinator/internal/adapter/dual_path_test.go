@@ -17,9 +17,10 @@ import (
 // compared on what actually reached the tool service and not only on what the
 // Coordinator was told afterwards.
 type upstream struct {
-	mutex    sync.Mutex
-	payloads [][]byte
-	respond  func(request map[string]any) map[string]any
+	mutex      sync.Mutex
+	payloads   [][]byte
+	identities []string
+	respond    func(request map[string]any) map[string]any
 }
 
 func (service *upstream) record(body []byte) {
@@ -32,6 +33,12 @@ func (service *upstream) count() int {
 	service.mutex.Lock()
 	defer service.mutex.Unlock()
 	return len(service.payloads)
+}
+
+func (service *upstream) recordIdentity(identity string) {
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	service.identities = append(service.identities, identity)
 }
 
 // startDirectUpstream serves the execute contract the direct adapter speaks.
@@ -54,6 +61,7 @@ func startDirectUpstream(t *testing.T, service *upstream) *httptest.Server {
 func startGatewayUpstream(t *testing.T, service *upstream, refusal map[string]any) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		service.recordIdentity(request.Header.Get("X-Flory-Workflow-Identity"))
 		var envelope struct {
 			ID     int64 `json:"id"`
 			Params struct {
@@ -201,6 +209,7 @@ func TestGatewayRefusalsMapOntoTheExecutorVocabulary(t *testing.T) {
 		"unknown-tool-view":        model.OutcomePermanentFailure,
 		"unknown-tool":             model.OutcomePermanentFailure,
 		"version-absent-from-view": model.OutcomePermanentFailure,
+		"authorization-denied":     model.OutcomePermanentFailure,
 		"schema-violation":         model.OutcomePermanentFailure,
 		"route-unhealthy":          model.OutcomeRetryableFailure,
 	}
@@ -220,6 +229,19 @@ func TestGatewayRefusalsMapOntoTheExecutorVocabulary(t *testing.T) {
 				t.Fatalf("%s reached the tool service %d times; a refusal is decided before dispatch", reason, service.count())
 			}
 		})
+	}
+}
+
+func TestGatewayRouteForwardsTheRecordedWorkflowIdentity(t *testing.T) {
+	service := &upstream{respond: succeeding}
+	gateway := NewGatewayClient(startGatewayUpstream(t, service, nil).URL, nil)
+	request := attempt()
+	request.AuthorizationIdentity = map[string]any{"version": "1", "run_id": request.RunID, "signature": "signed"}
+	if _, err := gateway.Execute(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(service.identities) != 1 || service.identities[0] == "" {
+		t.Fatalf("workflow identity headers=%v", service.identities)
 	}
 }
 

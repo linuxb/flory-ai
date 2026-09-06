@@ -16,6 +16,7 @@ function readContract(): Contract {
         timeoutMs: 5000,
         retry: defaultRetry(),
         owner: 'inventory-team',
+        allowedRoles: ['*'],
     };
 }
 

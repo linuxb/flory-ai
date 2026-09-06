@@ -3,6 +3,8 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/linuxb/flory-ai/gatewayd/internal/authn"
 	"github.com/linuxb/flory-ai/gatewayd/internal/blob"
 	gatewayv1 "github.com/linuxb/flory-ai/gatewayd/internal/pb/flory/gateway/v1"
 	"github.com/linuxb/flory-ai/gatewayd/internal/registry"
@@ -55,6 +58,7 @@ func reserveContract() *gatewayv1.ToolContract {
 		TimeoutMs:         5000,
 		RetryConstraints:  &gatewayv1.RetryConstraints{MaxAttempts: 3, InitialBackoffMs: 100, MultiplierMilli: 2000, MaxBackoffMs: 5000},
 		Owner:             "inventory-team",
+		AllowedRoles:      []string{"*"},
 	}
 }
 
@@ -77,13 +81,21 @@ func newHarness(t *testing.T, contracts ...*gatewayv1.ToolContract) *harness {
 }
 
 func (test *harness) call(t *testing.T, method string, params any) (map[string]any, *rpcError) {
+	return test.callAs(t, authn.Principal{}, method, params)
+}
+
+func (test *harness) callAs(t *testing.T, principal authn.Principal, method string, params any) (map[string]any, *rpcError) {
 	t.Helper()
 	encoded, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
 	recorder := httptest.NewRecorder()
-	test.server.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(encoded)))
+	request := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(encoded))
+	if principal.Source != "" {
+		request = request.WithContext(authn.WithPrincipal(request.Context(), principal))
+	}
+	test.server.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("HTTP status %d", recorder.Code)
 	}
@@ -95,6 +107,72 @@ func (test *harness) call(t *testing.T, method string, params any) (map[string]a
 		t.Fatalf("decode response: %v", err)
 	}
 	return response.Result, response.Error
+}
+
+func TestRBACFiltersDiscoveryAndRefusesBeforeDispatch(t *testing.T) {
+	contract := reserveContract()
+	contract.AllowedRoles = []string{"inventory-reader"}
+	test := newHarness(t, contract)
+	result, failure := test.callAs(t, authn.Principal{Source: "bearer", Roles: []string{"order-operator"}}, "tools/list", map[string]any{})
+	if failure != nil {
+		t.Fatalf("tools/list: %v", failure)
+	}
+	if tools, _ := result["tools"].([]any); len(tools) != 0 {
+		t.Fatalf("unauthorised discovery returned %d tools", len(tools))
+	}
+	_, failure = test.callAs(t, authn.Principal{Source: "bearer", Roles: []string{"order-operator"}}, "tools/call", map[string]any{
+		"name": "inventory.check", "arguments": map[string]any{"not_the_schema": true},
+		"_meta": map[string]any{"tool_version": "1.0.0", "tool_view_digest": currentDigest(t, test)},
+	})
+	if reason := reasonOf(t, failure); reason != ReasonAuthorizationDenied {
+		t.Fatalf("reason=%q", reason)
+	}
+	if test.dispatcher.count() != 0 {
+		t.Fatal("authorization denial reached the tool service")
+	}
+}
+
+func TestRunIdentityIsIssuedOnlyToTheAuthenticatedOrchestratorAndBindsTheRun(t *testing.T) {
+	test := newHarness(t, reserveContract())
+	_, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := authn.NewSigner("test-key", private, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	test.server.ConfigureAuthorization(signer, map[string]bool{"spiffe://flory.local/orchestrator": true})
+	result, failure := test.callAs(t, authn.Principal{Issuer: "https://issuer.example", Subject: "alice", Roles: []string{"reader"}, Revision: 7,
+		Source: "bearer", SPIFFEID: "spiffe://flory.local/orchestrator"}, "tools/list", map[string]any{"run_id": "run-1"})
+	if failure != nil {
+		t.Fatal(failure)
+	}
+	meta, _ := result["_meta"].(map[string]any)
+	encoded, err := json.Marshal(meta["authorization_identity"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identity authn.WorkflowIdentity
+	if err := json.Unmarshal(encoded, &identity); err != nil {
+		t.Fatal(err)
+	}
+	principal, err := signer.Verify(identity)
+	if err != nil || principal.RunID != "run-1" || principal.Revision != 7 {
+		t.Fatalf("issued principal=%+v err=%v", principal, err)
+	}
+	_, failure = test.callAs(t, authn.Principal{Issuer: "https://issuer.example", Subject: "alice", Roles: []string{"reader"}, Source: "bearer",
+		SPIFFEID: "spiffe://flory.local/not-orchestrator"}, "tools/list", map[string]any{"run_id": "run-3"})
+	if reason := reasonOf(t, failure); reason != ReasonAuthorizationDenied {
+		t.Fatalf("untrusted issuer reason=%q", reason)
+	}
+	_, failure = test.callAs(t, authn.Principal{Source: "workflow", RunID: "run-1", Roles: []string{"*"}}, "tools/call", map[string]any{
+		"name": "inventory.check", "arguments": map[string]any{"sku": "SKU-1"},
+		"_meta": map[string]any{"run_id": "run-2", "tool_version": "1.0.0", "tool_view_digest": currentDigest(t, test)},
+	})
+	if reason := reasonOf(t, failure); reason != ReasonAuthorizationDenied {
+		t.Fatalf("wrong-run reason=%q", reason)
+	}
 }
 
 func reasonOf(t *testing.T, failure *rpcError) string {
@@ -147,6 +225,14 @@ func TestToolsListPublishesTransactionMetadataWithoutDerivedAttributes(t *testin
 	}
 	if transaction["effect_class"] != "none" {
 		t.Fatalf("effect_class = %v", transaction["effect_class"])
+	}
+	rbacMetadata, isMap := metadata["flory_rbac"].(map[string]any)
+	if !isMap {
+		t.Fatalf("metadata carries no flory_rbac: %v", metadata)
+	}
+	roles, _ := rbacMetadata["allowed_roles"].([]any)
+	if len(roles) != 1 || roles[0] != "*" {
+		t.Fatalf("allowed_roles = %v", roles)
 	}
 	if _, declared := transaction["is_pivot"]; declared {
 		t.Fatal("flory_transaction declares is_pivot, which is derived from effect_class")

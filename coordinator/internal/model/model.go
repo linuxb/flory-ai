@@ -45,16 +45,17 @@ type ToolPin struct {
 // what it was before the gateway existed. That is what lets the dual-path
 // fixture compare byte-identical upstream payloads across both routes.
 type OperationRequest struct {
-	RunID          string         `json:"run_id"`
-	VertexID       string         `json:"vertex_id"`
-	ScopeID        string         `json:"scope_id,omitempty"`
-	AttemptNo      int            `json:"attempt_no"`
-	Tool           string         `json:"tool"`
-	ToolVersion    string         `json:"tool_version,omitempty"`
-	ToolViewDigest string         `json:"tool_view_digest,omitempty"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	DeadlineMS     int64          `json:"deadline_ms,omitempty"`
-	Input          map[string]any `json:"input"`
+	RunID                 string         `json:"run_id"`
+	VertexID              string         `json:"vertex_id"`
+	ScopeID               string         `json:"scope_id,omitempty"`
+	AttemptNo             int            `json:"attempt_no"`
+	Tool                  string         `json:"tool"`
+	ToolVersion           string         `json:"tool_version,omitempty"`
+	ToolViewDigest        string         `json:"tool_view_digest,omitempty"`
+	IdempotencyKey        string         `json:"idempotency_key,omitempty"`
+	DeadlineMS            int64          `json:"deadline_ms,omitempty"`
+	Input                 map[string]any `json:"input"`
+	AuthorizationIdentity map[string]any `json:"authorization_identity,omitempty"`
 }
 
 // OperationOutcome classifies an adapter result without transport-specific errors.

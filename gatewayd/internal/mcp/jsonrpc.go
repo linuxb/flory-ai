@@ -39,6 +39,8 @@ const (
 	ReasonSchemaViolation = "schema-violation"
 	// ReasonRouteUnhealthy means no instance was routable before dispatch.
 	ReasonRouteUnhealthy = "route-unhealthy"
+	// ReasonAuthorizationDenied means the authenticated identity had no matching role.
+	ReasonAuthorizationDenied = "authorization-denied"
 )
 
 type rpcRequest struct {
@@ -70,6 +72,10 @@ func refuse(reason, format string, arguments ...any) *rpcError {
 
 func invalidParams(format string, arguments ...any) *rpcError {
 	return &rpcError{Code: codeInvalidParams, Message: fmt.Sprintf(format, arguments...)}
+}
+
+func internalError(format string, arguments ...any) *rpcError {
+	return &rpcError{Code: codeInternalError, Message: fmt.Sprintf(format, arguments...)}
 }
 
 // writeResponse emits one JSON-RPC response.

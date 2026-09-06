@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"expvar"
 	"log/slog"
 	"net/http"
@@ -53,7 +55,7 @@ func main() {
 // adapter remains selectable for a gateway-less debugging session and for the
 // dual-path fixture that proves the two routes agree, but no scenario runs on it.
 func selectAdapter(logger *slog.Logger) adapter.Client {
-	transport := &http.Client{Timeout: 15 * time.Second}
+	transport := gatewayHTTPClient(logger)
 	if mode := environment("ADAPTER_MODE", "gateway"); mode == "direct" {
 		base := environment("ADAPTER_BASE_URL", "http://127.0.0.1:8090")
 		logger.Warn("routing tool calls directly, bypassing contract pinning and argument validation", "adapter", base)
@@ -62,6 +64,31 @@ func selectAdapter(logger *slog.Logger) adapter.Client {
 	base := environment("GATEWAY_BASE_URL", "http://127.0.0.1:8092")
 	logger.Info("routing tool calls through the gateway", "gateway", base)
 	return adapter.NewGatewayClient(base, transport)
+}
+
+func gatewayHTTPClient(logger *slog.Logger) *http.Client {
+	certificatePath, keyPath, caPath := os.Getenv("COORDINATOR_MTLS_CERT_FILE"), os.Getenv("COORDINATOR_MTLS_KEY_FILE"), os.Getenv("GATEWAYD_CA_FILE")
+	if certificatePath == "" && keyPath == "" && caPath == "" {
+		return &http.Client{Timeout: 15 * time.Second}
+	}
+	certificate, err := tls.LoadX509KeyPair(certificatePath, keyPath)
+	if err != nil {
+		logger.Error("Coordinator mTLS certificate unavailable", "error", err)
+		os.Exit(1)
+	}
+	raw, err := os.ReadFile(caPath)
+	if err != nil {
+		logger.Error("Gateway CA unavailable", "error", err)
+		os.Exit(1)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(raw) {
+		logger.Error("Gateway CA contains no certificates")
+		os.Exit(1)
+	}
+	return &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{certificate}, RootCAs: roots,
+	}}}
 }
 
 func healthHandler() http.Handler {

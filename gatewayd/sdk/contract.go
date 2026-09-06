@@ -54,6 +54,7 @@ type Contract struct {
 	TimeoutMS    uint32
 	Retry        Retry
 	Owner        string
+	AllowedRoles []string
 }
 
 // EffectClass is a tool's side-effect classification.
@@ -153,7 +154,8 @@ func (contract Contract) Build(routeID string) (*gatewayv1.ToolContract, error) 
 			MultiplierMilli:  retry.MultiplierMilli,
 			MaxBackoffMs:     retry.MaxBackoffMS,
 		},
-		Owner: contract.Owner,
+		Owner:        contract.Owner,
+		AllowedRoles: append([]string(nil), contract.AllowedRoles...),
 	}, nil
 }
 

@@ -73,6 +73,7 @@ export function baseContract(toolId: string, overrides: Partial<Contract>): Cont
         timeoutMs: 5000,
         retry: defaultRetry(),
         owner: 'flory-sandbox',
+        allowedRoles: ['order-operator'],
         ...overrides,
     };
 }

@@ -35,4 +35,4 @@ One immutable tool view is built from admitted registrations, stored by content 
 
 ## 5. Exclusions
 
-Gateway authentication and authorization, multi-tenant view namespacing, durable registration across a gateway restart, and upstream protocols beyond gRPC and the SDK's HTTP execute bridge.
+Gateway authentication and authorization were delivered separately by [Plan 005](./plan-005-gateway-owned-rbac.md). Multi-tenant view namespacing, durable registration across a gateway restart, and upstream protocols beyond gRPC and the SDK's HTTP execute bridge remain excluded from this plan.

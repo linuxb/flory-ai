@@ -1,5 +1,6 @@
 import {loadToolRegistry, parseToolView, type ToolViewDocument, type ToolViewIdentity} from './tool-view.js';
 import type {ToolRegistry} from './check-rules.js';
+import type {AuthorizationIdentity} from './generated/event-log.js';
 
 /** The four-outcome vocabulary both executors reason with. */
 export type AttemptOutcome = 'succeeded' | 'retryable-failure' | 'permanent-failure' | 'unknown';
@@ -21,6 +22,7 @@ export interface AttemptPin {
     attempt: number;
     idempotencyKey?: string;
     deadlineMs?: number;
+    authorizationIdentity?: AuthorizationIdentity;
 }
 
 /** A resolved tool view together with the registry the checker consumes. */
@@ -28,6 +30,13 @@ export interface ResolvedToolView {
     identity: ToolViewIdentity;
     document: ToolViewDocument;
     registry: ToolRegistry;
+    authorizationIdentity?: AuthorizationIdentity;
+}
+
+/** Authentication supplied to discovery without decoding the user's JWT. */
+export interface DiscoveryAuthorization {
+    bearerToken: string;
+    runId?: string;
 }
 
 /**
@@ -81,15 +90,22 @@ export class GatewayClient {
      * Pass a digest to resolve an exact historical view; pass nothing to take the current one, whose identity the
      * caller then records in `subgraph/proposed` so a later replay resolves the same contract by reference.
      */
-    async resolveToolView(toolViewDigest?: string): Promise<ResolvedToolView> {
-        const result = await this.send('tools/list', toolViewDigest ? {tool_view_digest: toolViewDigest} : {});
-        const meta = result['_meta'] as (ToolViewIdentity & {tool_view_document?: string}) | undefined;
+    async resolveToolView(toolViewDigest?: string, authorization?: DiscoveryAuthorization): Promise<ResolvedToolView> {
+        const params: Record<string, unknown> = toolViewDigest ? {tool_view_digest: toolViewDigest} : {};
+        if (authorization?.runId) params.run_id = authorization.runId;
+        const result = await this.send('tools/list', params, authorization?.bearerToken ? {Authorization: `Bearer ${authorization.bearerToken}`} : undefined);
+        const meta = result['_meta'] as (ToolViewIdentity & {tool_view_document?: string; authorization_identity?: AuthorizationIdentity}) | undefined;
         if (!meta?.tool_view_digest) throw new Error('gateway: tools/list returned no tool-view identity');
         if (!meta.tool_view_document) throw new Error('gateway: tools/list returned no canonical document to verify');
         // Verify rather than trust: the digest is re-derived here from the bytes the gateway served, so a gateway that
         // served the wrong view -- for any reason -- fails closed instead of quietly changing what was planned against.
         const {document} = parseToolView(meta.tool_view_document, meta.tool_view_digest);
-        return {identity: {tool_view_ref: meta.tool_view_ref, tool_view_digest: meta.tool_view_digest}, document, registry: loadToolRegistry(document)};
+        return {
+            identity: {tool_view_ref: meta.tool_view_ref, tool_view_digest: meta.tool_view_digest},
+            document,
+            registry: loadToolRegistry(document),
+            ...(meta.authorization_identity ? {authorizationIdentity: meta.authorization_identity} : {}),
+        };
     }
 
     /**
@@ -100,29 +116,34 @@ export class GatewayClient {
      * retried on its own would make that decision somewhere it cannot be made correctly.
      */
     async call(name: string, args: Record<string, unknown>, pin: AttemptPin): Promise<AttemptResult> {
-        const result = await this.send('tools/call', {
-            name,
-            arguments: args,
-            _meta: {
-                run_id: pin.runId,
-                vertex_id: pin.vertexId,
-                scope_id: pin.scopeId ?? '',
-                tool_version: pin.toolVersion,
-                tool_view_digest: pin.toolViewDigest,
-                attempt: pin.attempt,
-                idempotency_key: pin.idempotencyKey ?? '',
-                deadline_ms: pin.deadlineMs ?? 0,
+        const headers = pin.authorizationIdentity ? {'X-Flory-Workflow-Identity': Buffer.from(JSON.stringify(pin.authorizationIdentity), 'utf8').toString('base64url')} : undefined;
+        const result = await this.send(
+            'tools/call',
+            {
+                name,
+                arguments: args,
+                _meta: {
+                    run_id: pin.runId,
+                    vertex_id: pin.vertexId,
+                    scope_id: pin.scopeId ?? '',
+                    tool_version: pin.toolVersion,
+                    tool_view_digest: pin.toolViewDigest,
+                    attempt: pin.attempt,
+                    idempotency_key: pin.idempotencyKey ?? '',
+                    deadline_ms: pin.deadlineMs ?? 0,
+                },
             },
-        });
+            headers,
+        );
         const structured = result['structuredContent'] as AttemptResult | undefined;
         if (!structured?.outcome) throw new Error(`gateway: tools/call for ${name} returned no outcome`);
         return structured;
     }
 
-    private async send(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    private async send(method: string, params: Record<string, unknown>, extraHeaders?: Record<string, string>): Promise<Record<string, unknown>> {
         const response = await this.fetchImpl(`${this.baseUrl}/mcp`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', ...extraHeaders},
             body: JSON.stringify({jsonrpc: '2.0', id: this.nextId++, method, params}),
         });
         if (!response.ok) throw new Error(`gateway: ${method} returned HTTP ${response.status}`);

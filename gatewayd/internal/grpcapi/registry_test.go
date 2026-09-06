@@ -63,6 +63,7 @@ func contract(toolID string) *gatewayv1.ToolContract {
 		TimeoutMs:         5000,
 		RetryConstraints:  &gatewayv1.RetryConstraints{MaxAttempts: 3, InitialBackoffMs: 100, MultiplierMilli: 2000, MaxBackoffMs: 5000},
 		Owner:             "inventory-team",
+		AllowedRoles:      []string{"*"},
 	}
 }
 

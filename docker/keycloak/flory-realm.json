@@ -1,0 +1,49 @@
+{
+    "realm": "flory",
+    "enabled": true,
+    "accessTokenLifespan": 120,
+    "clients": [
+        {
+            "clientId": "flory-test",
+            "secret": "flory-test-secret",
+            "enabled": true,
+            "publicClient": false,
+            "directAccessGrantsEnabled": true,
+            "protocol": "openid-connect",
+            "protocolMappers": [
+                {
+                    "name": "flory-gateway-audience",
+                    "protocol": "openid-connect",
+                    "protocolMapper": "oidc-audience-mapper",
+                    "config": {
+                        "included.client.audience": "flory-gateway",
+                        "access.token.claim": "true",
+                        "id.token.claim": "false"
+                    }
+                }
+            ]
+        }
+    ],
+    "users": [
+        {
+            "id": "11111111-1111-4111-8111-111111111111",
+            "username": "alice",
+            "firstName": "Alice",
+            "lastName": "Local",
+            "email": "alice@flory.local",
+            "emailVerified": true,
+            "enabled": true,
+            "credentials": [{"type": "password", "value": "alice-local-password", "temporary": false}]
+        },
+        {
+            "id": "22222222-2222-4222-8222-222222222222",
+            "username": "bob",
+            "firstName": "Bob",
+            "lastName": "Local",
+            "email": "bob@flory.local",
+            "emailVerified": true,
+            "enabled": true,
+            "credentials": [{"type": "password", "value": "bob-local-password", "temporary": false}]
+        }
+    ]
+}

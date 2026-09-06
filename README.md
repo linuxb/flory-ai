@@ -28,7 +28,7 @@ This repository contains the architecture and design baseline plus an executable
 
 - **TypeScript engine:** owns the planner loop, canonical context-projection pipeline, check rules, prompt assembly, refine loop, model adapters, and replay testing.
 - **Distributed Transaction Coordinator:** owns transaction scopes, runtime barriers, timeout handling, tool execution, and business-adapter orchestration. Its current implementation uses Go 1.25.
-- **`gatewayd`:** publishes immutable, content-addressed tool views and routes exactly one requested tool call, without taking ownership of planning, retries, or transaction events. It speaks MCP to the executors and gRPC to tool services.
+- **`gatewayd`:** authenticates OIDC identities, owns business-role mappings, publishes immutable role-scoped tool views, and routes exactly one requested tool call without taking ownership of planning, retries, or transaction events. It speaks authenticated MCP to executors, gRPC to tool services, and mTLS HTTP to RBAC administrators.
 - **Tool-service SDK:** what a tool service embeds to declare its contracts, register them, heartbeat, and serve execution. Available for Go and TypeScript from one generated contract.
 - **PostgreSQL:** stores the append-only event log and metadata-only harness state, and allocates the write-order sequence.
 - **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own. Execution events belong to the vertex's executor: read-only vertices are the Orchestrator's, everything else is the Coordinator's, and the database enforces the split.
@@ -74,6 +74,21 @@ npm run db:setup
 
 Stop it with `npm run db:down`, which preserves the volume. To discard the local data as well, run
 `docker compose -f docker/compose.yml down -v`.
+
+### Local OIDC and RBAC
+
+The local identity provider is Keycloak, but it contains no business roles or role mapper. Its short-lived tokens prove only a stable `(issuer, subject)` and the configured audience. Business roles and bindings are created through the Gateway's mTLS administration API and stored in PostgreSQL.
+
+```sh
+npm run db:up
+npm run db:setup
+npm run rbac:pki
+npm run oidc:up
+```
+
+The generated CA, service certificates, and Ed25519 keyring live under the gitignored `.cache/rbac-e2e/` directory. The local issuer is `http://127.0.0.1:8180/realms/flory`; insecure HTTP is a local-test exception and production configuration accepts HTTPS only. Run `npm run test:rbac` for the complete revoke-and-resume scenario, and stop Keycloak with `npm run oidc:down`.
+
+`gatewayd` enables RBAC by default and therefore refuses to start without its OIDC, PostgreSQL, signing-key, and TLS configuration. `scripts/e2e-up.mjs` explicitly disables RBAC only for the older contract-routing fixture; it is not a production deployment example.
 
 ### Verifying
 

@@ -31,6 +31,28 @@ afterAll(async () => {
 });
 
 describe('PostgreSQL event store', () => {
+    it('projects the signed run authorization identity without retaining the JWT', async () => {
+        const run = await engine.createRun();
+        const identity = {
+            version: '1' as const,
+            key_id: 'test-key',
+            issuer: 'https://issuer.example',
+            subject: 'alice',
+            roles: ['order-operator'],
+            subject_revision: 4,
+            run_id: run,
+            authenticated_at: new Date().toISOString(),
+            signature: 'test-signature',
+        };
+        await engine.appendEvents(run, [{event_type: 'run/start', payload: {schema_version: 'v1', authorization_identity: identity}}]);
+        const client = new Client({connectionString: coordinatorUrl});
+        await client.connect();
+        const projected = await client.query<{identity: typeof identity}>('SELECT identity FROM run_authorization WHERE run_id=$1', [run]);
+        await client.end();
+        expect(projected.rows[0]?.identity).toEqual(identity);
+        expect(JSON.stringify((await engine.readStream(run))[0]?.payload)).not.toContain('Bearer');
+    });
+
     it('allocates contiguous sequences and rolls an invalid append back', async () => {
         const run = await engine.createRun();
         const scopeId = randomUUID();

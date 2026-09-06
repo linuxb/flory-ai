@@ -49,6 +49,10 @@
             "then": {"required": ["ignorable"], "properties": {"ignorable": {"const": true}}}
         },
         {
+            "if": {"properties": {"event_type": {"const": "run/start"}}, "required": ["event_type"]},
+            "then": {"properties": {"payload": {"$ref": "#/$defs/runStartPayload"}}}
+        },
+        {
             "if": {"properties": {"event_type": {"const": "subgraph/proposed"}}, "required": ["event_type"]},
             "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphProposedPayload"}}}
         },
@@ -80,6 +84,30 @@
     "additionalProperties": false,
     "$defs": {
         "toolViewDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "authorizationIdentity": {
+            "type": "object",
+            "required": ["version", "key_id", "issuer", "subject", "roles", "subject_revision", "run_id", "authenticated_at", "signature"],
+            "properties": {
+                "version": {"const": "1"},
+                "key_id": {"type": "string", "minLength": 1},
+                "issuer": {"type": "string", "minLength": 1},
+                "subject": {"type": "string", "minLength": 1},
+                "roles": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+                "subject_revision": {"type": "integer", "minimum": 0},
+                "run_id": {"type": "string", "format": "uuid"},
+                "authenticated_at": {"type": "string", "format": "date-time"},
+                "signature": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+        },
+        "runStartPayload": {
+            "type": "object",
+            "properties": {
+                "schema_version": {"type": "string", "minLength": 1},
+                "authorization_identity": {"$ref": "#/$defs/authorizationIdentity"}
+            },
+            "additionalProperties": true
+        },
         "subgraphProposedPayload": {
             "type": "object",
             "required": ["tool_view_ref", "tool_view_digest"],

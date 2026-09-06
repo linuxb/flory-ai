@@ -62,6 +62,8 @@ export interface Contract {
     timeoutMs: number;
     retry?: Retry;
     owner: string;
+    /** Business roles authorised to discover and execute the tool. Use `*` for a public tool. */
+    allowedRoles: readonly string[];
 }
 
 const EFFECT_CLASSES: Record<EffectClass, WireEffectClass> = {
@@ -115,6 +117,7 @@ export function buildContract(contract: Contract, routeId: string): ToolContract
             maxBackoffMs: retry.maxBackoffMs,
         }),
         owner: contract.owner,
+        allowedRoles: [...contract.allowedRoles],
     });
 }
 
@@ -130,6 +133,7 @@ export function contractViolation(contract: Contract): string | null {
     for (const [field, value] of Object.entries({toolId: contract.toolId, toolVersion: contract.toolVersion, owner: contract.owner})) {
         if (!value.trim()) return `${field} is required`;
     }
+    if (contract.allowedRoles.length === 0 || contract.allowedRoles.some((role) => !role.trim())) return 'allowedRoles must contain non-empty roles';
     if (!schemaIsObject(contract.inputSchema)) return 'input_schema must be a JSON object';
     if (!schemaIsObject(contract.outputSchema)) return 'output_schema must be a JSON object';
     if (contract.timeoutMs <= 0) return 'timeout_ms is required';

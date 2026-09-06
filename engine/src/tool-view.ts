@@ -39,6 +39,7 @@ export interface ToolViewTool {
     timeout_ms: number;
     retry_constraints: ToolViewRetry;
     owner: string;
+    allowed_roles: string[];
 }
 
 /** One complete published tool view. */

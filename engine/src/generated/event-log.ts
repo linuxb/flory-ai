@@ -31,6 +31,17 @@ export interface RetryPolicy {
     multiplier: number;
     max_backoff_ms: number;
 }
+export interface AuthorizationIdentity {
+    version: '1';
+    key_id: string;
+    issuer: string;
+    subject: string;
+    roles: string[];
+    subject_revision: number;
+    run_id: string;
+    authenticated_at: string;
+    signature: string;
+}
 export interface TransactionSpec {
     effect_class: EffectClass;
     mode: TransactionMode;

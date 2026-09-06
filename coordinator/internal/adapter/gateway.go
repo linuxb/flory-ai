@@ -3,6 +3,7 @@ package adapter
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -65,6 +66,7 @@ var refusalOutcomes = map[string]model.OperationOutcome{
 	"unknown-tool-view":        model.OutcomePermanentFailure,
 	"unknown-tool":             model.OutcomePermanentFailure,
 	"version-absent-from-view": model.OutcomePermanentFailure,
+	"authorization-denied":     model.OutcomePermanentFailure,
 	"schema-violation":         model.OutcomePermanentFailure,
 	// The contract is intact and only the route is down, so another attempt at
 	// this same operation is legal -- which remains the Coordinator's call.
@@ -109,6 +111,13 @@ func (client *GatewayClient) Execute(ctx context.Context, request model.Operatio
 		return model.OperationResponse{}, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
+	if request.AuthorizationIdentity != nil {
+		encoded, err := json.Marshal(request.AuthorizationIdentity)
+		if err != nil {
+			return model.OperationResponse{}, err
+		}
+		httpRequest.Header.Set("X-Flory-Workflow-Identity", base64.RawURLEncoding.EncodeToString(encoded))
+	}
 	response, err := client.client.Do(httpRequest)
 	if err != nil {
 		return model.OperationResponse{}, err

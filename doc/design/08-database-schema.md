@@ -6,7 +6,7 @@
 
 The executable storage core lives in [`db/migrations/`](../../db/migrations/), with its canonical wire schema in [`idl/event-log.schema.json`](../../idl/event-log.schema.json). The schema is the only event contract. TypeScript and Go contract models are generated from it; neither language owns an independent event definition.
 
-PostgreSQL has three development roles. `flory` owns migrations. `engine_role` creates runs and appends engine-owned events. `coordinator_role` appends coordinator-owned events. Both application roles can read projections, but neither can insert, update, or delete base tables directly. They call security-definer append functions, whose triggers inspect `session_user` so the original service identity remains enforceable through the controlled write path.
+PostgreSQL has four development roles. `flory` owns migrations. `engine_role` creates runs and appends engine-owned events. `coordinator_role` appends coordinator-owned events. `gateway_role` reads and mutates only the Gateway-owned RBAC schema through security-definer functions and has no event-log write privilege. The Engine and Coordinator can read the run authorization projection but cannot mutate RBAC data. Application roles cannot insert, update, or delete event-log base tables directly; controlled append functions and their triggers inspect `session_user` so the original service identity remains enforceable through the write path.
 
 ## 2. Ground-Truth Tables
 
@@ -22,6 +22,11 @@ The migrations create synchronous safety projections and recoverable operational
 | `txn_bracket` | Globally unique idempotency key, sealed half-open state, deadline, inverse/confirm operations, frozen input, and retry policy |
 | `work_queue` | Parent references, deterministic readiness time, attempt count, and recoverable Coordinator lease claimed with `FOR UPDATE SKIP LOCKED` |
 | `scope_cancel_member` | Recoverable inverse-operation work materialized for one requested scope cancellation; dependency depth makes descendants reverse before ancestors without using sequence order |
+| `gateway_rbac_role` | Gateway-owned, revisioned role catalogue and enabled state; `*` is reserved and never stored |
+| `gateway_rbac_subject` | Enabled state and CAS revision for an OIDC `(issuer, subject)` identity |
+| `gateway_rbac_subject_role` | Append-preserved binding history with explicit grant and revoke times; only non-revoked bindings authorize new work |
+| `gateway_rbac_audit` | Append-only, idempotency-keyed administrative audit committed in the same transaction as each role mutation |
+| `run_authorization` | Synchronous projection of the signed authorization identity in `run/start`, readable by executors for later Gateway calls |
 
 No application role receives `UPDATE` or `DELETE` access to `event_log`. Shadowing is represented only by a new `subgraph/shadowed` event.
 
@@ -34,6 +39,8 @@ An insert trigger locks the scope and rejects `txn/cancel` after pivot admission
 `admit_pivot` locks an open scope, verifies that every required try is sealed, moves the scope to `pivot-inflight`, and appends `vertex/started` atomically. `resolve_pivot_absent` is the only transition back to `open`, and is called only after an adapter status query proves that the irreversible effect did not happen. Once `txn/pivot-passed` is appended, only forward confirmation and retry remain.
 
 Scope cancellation uses two `txn/cancel` phases. `requested` fences the whole scope and materializes inverse work for all sealed members. Workers claim those members idempotently; `completed` is accepted only when none remain. No per-try cancel event exists.
+
+Gateway RBAC mutations use security-definer functions with advisory transaction locks and `expected_revision` compare-and-swap. The same transaction appends the actor SPIFFE ID, request ID, idempotency key, target, and before/after revisions to `gateway_rbac_audit`; repeating an idempotency key returns the recorded result. Live subject lookup joins only enabled roles and active bindings. `run/start` synchronously projects its Gateway-signed `authorization_identity` into `run_authorization`, so a Coordinator restart can resume using the frozen role set without receiving the original JWT and without consulting current bindings.
 
 ## 4. Fork Storage Transaction
 

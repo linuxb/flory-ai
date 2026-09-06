@@ -262,6 +262,10 @@ func (service *Service) cancelScope(ctx context.Context, runID, scopeID, key str
 }
 
 func (service *Service) executeWithRetry(ctx context.Context, runID, vertexID, tool, key string, input map[string]any, policy generated.RetryPolicy, pin model.ToolPin) (model.OperationResponse, int, error) {
+	identity, err := service.store.WorkflowIdentity(ctx, runID)
+	if err != nil {
+		return model.OperationResponse{}, 0, err
+	}
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
 		if delay := model.Backoff(policy, attempt); delay > 0 {
 			timer := time.NewTimer(delay)
@@ -274,6 +278,7 @@ func (service *Service) executeWithRetry(ctx context.Context, runID, vertexID, t
 		}
 		response, err := service.adapter.Execute(ctx, model.OperationRequest{
 			RunID: runID, VertexID: vertexID, AttemptNo: attempt, Tool: tool, ToolVersion: pin.Version, ToolViewDigest: pin.ViewDigest, IdempotencyKey: key, Input: input,
+			AuthorizationIdentity: identity,
 		})
 		if err != nil {
 			return model.OperationResponse{}, attempt, err

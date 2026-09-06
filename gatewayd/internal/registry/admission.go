@@ -11,6 +11,8 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -21,6 +23,8 @@ import (
 
 // supportedProtocols lists the upstream adapters gatewayd can route to.
 var supportedProtocols = map[string]bool{"grpc": true}
+
+var rolePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 // Violation is one registration rejection from the closed G1-G8 vocabulary.
 type Violation struct {
@@ -106,6 +110,14 @@ func validateIdentity(tool toolview.Tool) *Violation {
 	if tool.Retry.MultiplierMilli < 1000 {
 		return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, "retry_constraints.multiplier_milli must be at least 1000")
 	}
+	if len(tool.AllowedRoles) == 0 {
+		return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, "allowed_roles must not be empty; use * for a public tool")
+	}
+	for _, role := range tool.AllowedRoles {
+		if role != "*" && !rolePattern.MatchString(role) {
+			return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, "allowed role %q is invalid", role)
+		}
+	}
 	if _, err := CompileSchema(tool.ToolID+".input", string(tool.InputSchema)); err != nil {
 		return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, "%v", err)
 	}
@@ -113,6 +125,26 @@ func validateIdentity(tool toolview.Tool) *Violation {
 		return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, "%v", err)
 	}
 	return nil
+}
+
+func rolesCover(required, offered []string) bool {
+	offeredWildcard := sort.SearchStrings(offered, "*") < len(offered) && offered[sort.SearchStrings(offered, "*")] == "*"
+	if sort.SearchStrings(required, "*") < len(required) && required[sort.SearchStrings(required, "*")] == "*" {
+		return offeredWildcard
+	}
+	if offeredWildcard {
+		return true
+	}
+	available := make(map[string]struct{}, len(offered))
+	for _, role := range offered {
+		available[role] = struct{}{}
+	}
+	for _, role := range required {
+		if _, found := available[role]; !found {
+			return false
+		}
+	}
+	return true
 }
 
 // validateEffectClass enforces G4: the declared effect class must agree with the

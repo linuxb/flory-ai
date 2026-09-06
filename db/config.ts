@@ -17,6 +17,8 @@ export const databaseUrl = process.env.DATABASE_URL ?? 'postgresql://flory:flory
 export const enginePassword = process.env.ENGINE_DB_PASSWORD ?? 'engine-dev-password';
 /** Login password for the Coordinator application role. */
 export const coordinatorPassword = process.env.COORDINATOR_DB_PASSWORD ?? 'coordinator-dev-password';
+/** Login password for the Gateway RBAC application role. */
+export const gatewayPassword = process.env.GATEWAY_DB_PASSWORD ?? 'gateway-dev-password';
 
 /** The database owner and target database named by {@link databaseUrl}. */
 export interface OwnerTarget {
@@ -60,6 +62,8 @@ function withCredentials(role: string, password: string): string {
 export const engineDatabaseUrl = process.env.ENGINE_DATABASE_URL ?? withCredentials('engine_role', enginePassword);
 /** Coordinator-role connection, following {@link databaseUrl}'s host, port, and database by default. */
 export const coordinatorDatabaseUrl = process.env.COORDINATOR_DATABASE_URL ?? withCredentials('coordinator_role', coordinatorPassword);
+/** Gateway-owned RBAC connection; it has no event-log write privileges. */
+export const gatewayDatabaseUrl = process.env.GATEWAYD_DATABASE_URL ?? withCredentials('gateway_role', gatewayPassword);
 
 /**
  * Connection used to provision cluster-level objects: the owner role, the application roles, and the

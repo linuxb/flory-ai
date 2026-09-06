@@ -1,31 +1,34 @@
 # gatewayd Tool Registry Gateway (09)
 
-> Status: Active v1.0
+> Status: Active v2.0
 > Depends on: [02 — Transaction Model](./02-transaction-model.md), [05 — Context Aggregation and Offline Evaluation](./05-context-aggregation-and-offline-evaluation.md), [07 — Distributed Transaction Coordinator](./07-distributed-transaction-coordinator.md)
 > Implementation: Go 1.25, `gatewayd/`
 
 ## 1. Purpose and Boundary
 
-`gatewayd` is the deployment boundary for dynamic tool registration, immutable tool-view publication, and one-attempt execution routing. It has two surfaces:
+`gatewayd` is the deployment boundary for user authentication, business-role authorization, dynamic tool registration, immutable tool-view publication, and one-attempt execution routing. It has three surfaces:
 
-- **North**, MCP `tools/list` and `tools/call` over JSON-RPC 2.0, consumed by both the Agent Orchestrator and the Distributed Transaction Coordinator.
+- **North**, authenticated MCP `tools/list` and `tools/call` over JSON-RPC 2.0, consumed by both the Agent Orchestrator and the Distributed Transaction Coordinator.
 - **South**, a gRPC registration and execution contract, spoken by tool services through the SDK.
+- **Administration**, an mTLS-only HTTP API that maintains Gateway-owned roles and OIDC-subject bindings in PostgreSQL.
 
 It is an independently deployable Go 1.25 service in its own module. Sharing a language and toolchain with the Distributed Transaction Coordinator creates no internal API boundary: neither module imports the other, and they communicate only through their public contracts.
 
-`gatewayd` does not own planning, transaction admission, retries, event appends, compensation policy, or projection semantics. It validates registrations and routes exactly one requested attempt to an upstream tool service. It writes nothing to the event log.
+`gatewayd` does not own planning, transaction admission, retries, event appends, compensation policy, or projection semantics. It validates registrations, resolves current business roles, signs run-scoped authorization snapshots, and routes exactly one requested attempt to an upstream tool service. Its database role cannot append to the event log.
 
 The deployment relationship is shown in [the deployment architecture](../diagram/deployment-architecture.html).
 
 ## 2. Roles and Request Flow
 
-1. A tool service declares its contracts and registers them through the SDK.
+1. A tool service declares its contracts and role policy and registers them through the SDK.
 2. `gatewayd` validates each registration, builds the canonical tool view from every admitted contract, stores it in blob storage, and publishes its content-addressed reference and digest.
-3. Before planning or replanning, the Agent Orchestrator resolves one immutable tool view over `tools/list`, verifies the digest against the document it was served, and records both in `subgraph/proposed`.
-4. `checkSubDag(proposal, toolView)` performs deterministic admission without network I/O.
-5. After a subgraph is frozen, its executor claims a ready vertex and calls `tools/call` with the exact tool-view digest, tool version, attempt number, and idempotency key.
-6. `gatewayd` resolves that frozen contract and routes one attempt to a healthy registered instance.
-7. The executor appends `vertex/*` events, and the Coordinator appends `txn/*` events, deciding whether another attempt is legal.
+3. For an external request, `gatewayd` verifies the OIDC JWT, obtains `(issuer, subject)`, and reads the subject's current enabled roles from PostgreSQL. JWT role-like claims are ignored.
+4. Before planning or replanning, the Agent Orchestrator resolves a role-scoped immutable tool view over `tools/list`, verifies the digest against the document it was served, and records both in `subgraph/proposed`.
+5. When creating a run, the authenticated Orchestrator also supplies its mTLS identity and the run ID. `gatewayd` signs the current role set as a run-bound authorization identity, which the Orchestrator records in `run/start`.
+6. `checkSubDag(proposal, toolView)` performs deterministic admission without network I/O.
+7. After a subgraph is frozen, its executor claims a ready vertex and calls `tools/call` with the exact tool-view digest, tool version, attempt number, idempotency key, and run authorization identity.
+8. `gatewayd` verifies the caller and authorization before schema validation, resolves that frozen contract, and routes one attempt to a healthy registered instance.
+9. The executor appends `vertex/*` events, and the Coordinator appends `txn/*` events, deciding whether another attempt is legal.
 
 Which executor makes the call depends on the vertex, not on the gateway: a tool-caller vertex with `effect_class: none` and no scope belongs to the Orchestrator, and every other one to the Coordinator ([01 §3.2.1](./01-jit-dag-and-event-log.md)). The gateway does not know or care which one is calling; caller authority is enforced by the event log's ownership constraints.
 
@@ -41,6 +44,7 @@ The registration contract is `flory.gateway.v1.ToolContract` in [`idl/proto/`](.
 - `effect_class`, `mode`, `idempotency_key_path`, `idempotent_retryable`, timeout limits, and retry constraints;
 - compensation and confirmation tool references where the selected mode requires them;
 - a resource footprint and write set, and an owner.
+- a non-empty `allowed_roles` policy; `*` denotes a public tool.
 
 `is_pivot` and `compensable` have no field. They are derived from `effect_class` and the declared undo path exactly as specified in [02 §2.1](./02-transaction-model.md#21-derived-attributes-are-never-declared), and the schema gives a service nothing to declare that could disagree with what they are derived from. That obligation is therefore discharged structurally rather than by a runtime check.
 
@@ -52,12 +56,12 @@ Registration admission uses a closed vocabulary, `AdmissionCode`, reported ident
 
 | Code | Rule |
 |---|---|
-| G1 | Required identity fields are present, and both schemas compile |
+| G1 | Required identity fields and `allowed_roles` are present, role identifiers are valid, and both schemas compile |
 | G2 | `mode: tcc` declares a complete try-confirm-cancel triple with a positive `try_timeout_s`, and both companions are registered and `idempotent_retryable` |
 | G3 | `mode: saga` declares a registered, `idempotent_retryable` `compensate_tool` |
 | G4 | The declared `effect_class` agrees with the declared undo path: a read may not carry a bracket, an irreversible tool may not declare one, and a reversible tool with no undo path must be registered irreversible |
 | G5 | A compensating tool is delta-based; snapshot restore is refused outright |
-| G6 | Every referenced companion exists in the same view |
+| G6 | Every referenced companion exists in the same view and its `allowed_roles` covers every role allowed to invoke the original operation |
 | G7 | A published `(tool_id, tool_version)` is immutable: an identical re-registration is idempotent, a differing body is refused |
 | G8 | A companion reference is not self-referential |
 
@@ -91,6 +95,9 @@ To carry Flory's transaction semantics over standard MCP without breaking protoc
       "confirm_tool": "inventory.confirm",
       "cancel_tool": "inventory.release",
       "try_timeout_s": 900
+    },
+    "flory_rbac": {
+      "allowed_roles": ["order-operator"]
     }
   }
 }
@@ -102,11 +109,33 @@ The response's `_meta` carries `tool_view_ref`, `tool_view_digest`, and the cano
 
 A tool view is a canonical, content-addressed JSON document. Object keys are sorted, only the escapes JSON requires are applied, and every number is an integer — a float has no canonical text form, so retry multipliers are integer thousandths. The digest covers every semantic field, including `route_id`, and excludes instance membership and health. Two independent implementations of this encoding exist, in Go and TypeScript, and a shared fixture asserts they agree byte for byte: a digest one side cannot reproduce would make every pinned contract unresolvable.
 
+### 3.3 Role-Based Access Control (RBAC)
+
+Authentication and authorization deliberately have separate authorities:
+
+```text
+OIDC Provider: (JWT signature, iss, sub, aud, exp, nbf) -> identity
+Gateway RBAC:  (issuer, subject) -> roles
+Tool Registry: tool -> allowed_roles
+```
+
+OIDC Discovery must return an issuer exactly equal to the configured issuer. Production issuers and `jwks_uri` values use HTTPS. The gateway caches discovered JWKS according to HTTP freshness metadata, refreshes once through singleflight for a stale set or unknown `kid`, and fails authentication if it cannot obtain one unique valid key. The accepted algorithms are an explicit deployment allowlist. Verification consumes only the signed header and `iss`, `sub`, `aud`, `exp`, and `nbf` identity claims; `roles`, `groups`, realm roles, and custom authorization claims are ignored even when correctly signed.
+
+The Gateway-owned PostgreSQL store keys a subject by `(issuer, subject)` and maintains the role catalogue, enabled state, subject bindings, revisions, grant and revoke times, and an append-only audit trail. Security-definer functions apply each administrative mutation and its audit record atomically, use `expected_revision` compare-and-swap, and replay a repeated idempotency key without another mutation. The caller is authenticated only by a client certificate issued by the configured CA whose sole URI SAN is an allowlisted SPIFFE ID; a certificate CN, an HTTP-supplied actor, and a JWT management role convey no administrative authority.
+
+Role names are case-sensitive exact strings. `allowed_roles` is normalized into a sorted, duplicate-free list and included in the Tool View v2 digest and MCP `metadata.flory_rbac`. At least one role must be declared; `*` is reserved for public tools and cannot be assigned to a subject. Each non-public role must exist and be enabled when a contract is admitted. Confirm, cancel, compensate, and pivot status-query companions must cover every role allowed to invoke the original operation, so recovery cannot be authorized less broadly than the effect it closes.
+
+For an external call or a new run, `gatewayd` queries the current enabled bindings directly; it does not use a local role cache. An unknown or disabled subject and a subject with no roles authenticate successfully but receive an empty authorization set. The role-scoped view contains only tools whose `allowed_roles` intersects that set, which keeps unavailable tools out of the planner vocabulary. A binding change does not republish the global tool view; a tool policy change is a new immutable contract and therefore a new digest.
+
+Long-running work uses a different time boundary. A run-creation request requires a valid user JWT, an allowlisted Orchestrator SPIFFE identity, and a run ID. The gateway signs an Ed25519 identity containing its format version and key ID, `(issuer, subject)`, normalized roles, the subject revision, run ID, and authentication time. `run/start` retains that signed, non-secret identity but never the JWT or Authorization header. Subsequent Orchestrator and Coordinator calls require an allowlisted internal SPIFFE identity, a valid retained Gateway signing key, and an identity whose run ID matches the attempted run. They use the frozen roles without consulting current bindings.
+
+Consequently, disabling a role or replacing a subject's bindings affects the next external call and every new run immediately, including calls made with an otherwise unexpired JWT. It does not strand an already admitted run: normal execution and its confirm, cancel, compensate, and status-query recovery keep the signed snapshot. Emergency termination of existing work is a separate run-cancellation or authorization-identity denylist mechanism, not ordinary role revocation.
+
 ## 4. Execution Contract
 
-An executor sends one logical attempt per `tools/call`. The request carries `run_id`, `vertex_id`, transaction scope, `tool_version`, `tool_view_digest`, `attempt`, `idempotency_key`, validated arguments, and a deadline.
+An executor sends one logical attempt per `tools/call`. The request carries `run_id`, `vertex_id`, transaction scope, `tool_version`, `tool_view_digest`, `attempt`, `idempotency_key`, validated arguments, and a deadline. Caller-supplied roles are never accepted: an external request is authorized from its JWT identity and the live Gateway mapping, while an internal request carries the signed run identity and mTLS service identity.
 
-Everything before dispatch fails closed, in this order: resolve the pinned view, find that exact version inside it, validate the arguments against its frozen input schema, then confirm a route is healthy. Each refusal carries a reason from a closed vocabulary — `unknown-tool-view`, `unknown-tool`, `version-absent-from-view`, `schema-violation`, `route-unhealthy` — and each means the attempt was never dispatched, which is what lets a caller treat it as decisive rather than as an ambiguous outcome needing a status query. The gateway never selects a newer version than the one requested.
+Everything before dispatch fails closed, in this order: authenticate the caller, resolve the pinned view, find that exact version inside it, authorize the verified roles against the tool's registered `allowed_roles`, validate the arguments against its frozen input schema, then confirm a route is healthy. Each refusal carries a reason from a closed vocabulary — `unknown-tool-view`, `unknown-tool`, `version-absent-from-view`, `authorization-denied`, `schema-violation`, `route-unhealthy` — and each means the attempt was never dispatched, which is what lets a caller treat it as decisive rather than as an ambiguous outcome needing a status query. The gateway never selects a newer version than the one requested.
 
 A companion call — confirm, cancel, compensate, or a pivot status query — carries the try's digest and no version of its own. G6 guarantees the companion exists in that same published view, so it resolves there by name.
 
@@ -117,6 +146,8 @@ The gateway performs no retries. Not on a timeout, not on a transport error, not
 - Publication is atomic: the blob is written before the current-view pointer is swapped, so a reader observes either the previous complete view or the next complete one, and a resolvable digest always has a document behind it.
 - Tool-view resolution fails closed on an unknown digest or a malformed contract, and every read re-derives the digest before trusting the document.
 - A gateway outage blocks new discovery and routed execution for both executors, but does not corrupt already recorded history.
+- OIDC Discovery, JWKS, signature, claim, mTLS, and role-store failures all fail closed before registry lookup or dispatch. A stale JWKS set is not used after its freshness lifetime when refresh fails.
+- Retained Ed25519 public keys keep existing run identities recoverable across Gateway restarts and signing-key rotation. Removing a verification key deliberately rejects identities signed by that key.
 - Executors record routing and upstream failures through the existing `vertex/failed` vocabulary; `gatewayd` appends nothing.
 - Health has two independent inputs: the gateway's own gRPC health probe and the instance's self-report on each heartbeat. Both must agree before an instance is routable, because a process can believe it is serving while nothing can reach it, and can be reachable while knowing it is not ready.
 - Deregistration and lease expiry withdraw a **route**, never a contract. The published view and its digest are unchanged, so a subgraph frozen against them still resolves and the call fails as unroutable rather than as unknown.
@@ -143,7 +174,7 @@ The validation harness runs on the gateway route end to end: the mock commerce w
 
 ## 8. Design Rationale, Consequences, and Rejected Alternatives
 
-The Engine and Coordinator need one versioned tool contract for planning, deterministic admission, execution, compensation, replay, and offline evaluation. Process-local configuration or parallel manifests can drift so that planning validates one contract while execution routes another. A content-addressed tool view makes the bytes themselves the identity and keeps live registry I/O outside pure checking, projection, and historical replay. Routing exactly one attempt preserves a single transaction authority: only the executor can decide whether retry is legal after considering idempotency, TCC state, and pivot state.
+The Engine and Coordinator need one versioned tool contract for planning, deterministic admission, execution, compensation, replay, and offline evaluation. Process-local configuration or parallel manifests can drift so that planning validates one contract while execution routes another. A content-addressed tool view makes the bytes themselves the identity and keeps live registry I/O outside pure checking, projection, and historical replay. Routing exactly one attempt preserves a single transaction authority: only the executor can decide whether retry is legal after considering idempotency, TCC state, and pivot state. Keeping business-role mapping in the gateway makes the OIDC provider replaceable and prevents provider-specific role claims from becoming an execution contract. Freezing roles at run admission gives recovery a stable authorization basis without weakening immediate revocation for new work.
 
 The chosen split has deliberate consequences. Dynamic registration no longer requires an Engine or Coordinator rollout, historical views remain resolvable after the live registry changes, and both executors consume the same frozen contract. In exchange, the gateway is an availability dependency for discovery and routing, callers must fail closed, immutable views require durable blob storage, and the Go and TypeScript canonical encoders must remain byte-identical through shared fixtures. A new tool-service language therefore requires a conforming SDK rather than a hand-written protocol client.
 
@@ -159,3 +190,6 @@ Rejected alternatives remain part of the gateway design:
 - **Execution ownership by worker convention** races on row claiming. The partition is derived from the vertex payload and enforced by the database at both queue and append boundaries.
 - **A separate event vocabulary for Orchestrator reads** couples every projection and oracle to executor identity instead of outcome meaning.
 - **Local-filesystem view storage** does not survive a stateless gateway, while a hand-written cloud-storage client weakens the durability boundary. A `BlobStore` interface with a supported GCS-compatible implementation keeps storage replaceable without reimplementing it.
+- **OIDC-provider roles or JWT role claims** couple business policy to an identity provider and make equivalent identities authorize differently across issuers. The provider proves identity only; the Gateway mapping is authoritative.
+- **Caller-supplied roles** are unauthenticated authorization input and are never part of either MCP request shape.
+- **Rechecking live bindings during an existing run** lets an ordinary administrative revoke prevent mandatory cancel, compensate, or confirm work and strand resources. The run identity freezes roles; emergency interruption is a separate control.

@@ -20,6 +20,7 @@ function view(): ToolViewDocument {
                 timeout_ms: 5000,
                 retry_constraints: {max_attempts: 3, initial_backoff_ms: 100, multiplier_milli: 2000, max_backoff_ms: 5000},
                 owner: 'inventory-team',
+                allowed_roles: ['*'],
             },
         ],
     };

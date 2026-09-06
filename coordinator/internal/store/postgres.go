@@ -81,6 +81,23 @@ func (store *PostgresStore) Append(ctx context.Context, runID string, events ...
 	return err
 }
 
+// WorkflowIdentity returns the Gateway-signed run authorization snapshot, when present.
+func (store *PostgresStore) WorkflowIdentity(ctx context.Context, runID string) (map[string]any, error) {
+	var raw []byte
+	err := store.pool.QueryRow(ctx, `SELECT identity FROM run_authorization WHERE run_id=$1`, runID).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var identity map[string]any
+	if err := json.Unmarshal(raw, &identity); err != nil {
+		return nil, err
+	}
+	return identity, nil
+}
+
 // EnsureScope creates the operational scope once, deriving members from frozen vertices.
 func (store *PostgresStore) EnsureScope(ctx context.Context, runID, scopeID string) error {
 	if scopeID == "" {

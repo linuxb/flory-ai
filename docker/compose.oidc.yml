@@ -1,0 +1,13 @@
+name: flory-oidc
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.3
+    command: start-dev --import-realm --hostname=http://127.0.0.1:8180
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: local-admin-only
+    ports:
+      - "127.0.0.1:8180:8080"
+    volumes:
+      - ./keycloak/flory-realm.json:/opt/keycloak/data/import/flory-realm.json:ro

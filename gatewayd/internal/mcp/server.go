@@ -12,6 +12,7 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/linuxb/flory-ai/gatewayd/internal/authn"
 	"github.com/linuxb/flory-ai/gatewayd/internal/blob"
 	gatewayv1 "github.com/linuxb/flory-ai/gatewayd/internal/pb/flory/gateway/v1"
 	"github.com/linuxb/flory-ai/gatewayd/internal/registry"
@@ -38,8 +39,16 @@ type Server struct {
 	// historical caches views resolved from blob storage by digest, because a
 	// frozen subgraph keeps calling the same digest long after it stopped being
 	// current, and recompiling its schemas per attempt would be pure waste.
-	historicalMutex sync.Mutex
-	historical      map[string]*resolvedView
+	historicalMutex       sync.Mutex
+	historical            map[string]*resolvedView
+	signer                *authn.Signer
+	orchestratorSPIFFEIDs map[string]bool
+}
+
+// ConfigureAuthorization enables run-identity issuance for authenticated Orchestrators.
+func (server *Server) ConfigureAuthorization(signer *authn.Signer, orchestratorSPIFFEIDs map[string]bool) {
+	server.signer = signer
+	server.orchestratorSPIFFEIDs = orchestratorSPIFFEIDs
 }
 
 type resolvedView struct {
@@ -89,6 +98,7 @@ func (server *Server) dispatch(ctx context.Context, request rpcRequest) (any, *r
 
 type listParams struct {
 	ToolViewDigest string `json:"tool_view_digest"`
+	RunID          string `json:"run_id"`
 }
 
 func (server *Server) toolsList(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
@@ -102,29 +112,46 @@ func (server *Server) toolsList(ctx context.Context, raw json.RawMessage) (any, 
 	if failure != nil {
 		return nil, failure
 	}
+	principal, authenticated := authn.PrincipalFrom(ctx)
+	if !authenticated {
+		principal = authn.Principal{Roles: []string{"*"}, Source: "legacy-test"}
+	}
+	view, failure = server.scopeView(ctx, view, principal.Roles)
+	if failure != nil {
+		return nil, failure
+	}
 	tools := make([]map[string]any, 0, len(view.published.Document.Tools))
 	for _, tool := range view.published.Document.Tools {
 		entry := map[string]any{
 			"name":        tool.ToolID,
 			"inputSchema": json.RawMessage(tool.InputSchema),
-			"metadata":    map[string]any{"flory_transaction": tool.Metadata()},
+			"metadata": map[string]any{
+				"flory_transaction": tool.Metadata(),
+				"flory_rbac":        tool.RBACMetadata(),
+			},
 		}
 		if tool.Description != "" {
 			entry["description"] = tool.Description
 		}
 		tools = append(tools, entry)
 	}
+	meta := map[string]any{
+		"tool_view_ref": view.published.Ref, "tool_view_digest": view.published.Digest,
+		"tool_view_document": string(view.published.Canonical),
+	}
+	if params.RunID != "" {
+		if server.signer == nil || principal.Source != "bearer" || !server.orchestratorSPIFFEIDs[principal.SPIFFEID] {
+			return nil, refuse(ReasonAuthorizationDenied, "run identity issuance requires a bearer-authenticated user and an authorised Orchestrator mTLS identity")
+		}
+		identity, err := server.signer.Issue(principal, params.RunID)
+		if err != nil {
+			return nil, refuse(ReasonAuthorizationDenied, "cannot issue workflow identity: %v", err)
+		}
+		meta["authorization_identity"] = identity
+	}
 	return map[string]any{
 		"tools": tools,
-		"_meta": map[string]any{
-			"tool_view_ref":    view.published.Ref,
-			"tool_view_digest": view.published.Digest,
-			// The canonical document, verbatim. The tools array above is a rendering
-			// for a model; this is the byte sequence the digest was taken over, so a
-			// caller can re-derive the digest instead of trusting the gateway's word
-			// for what it served -- which is what content addressing is for.
-			"tool_view_document": string(view.published.Canonical),
-		},
+		"_meta": meta,
 	}, nil
 }
 
@@ -169,6 +196,16 @@ func (server *Server) toolsCall(ctx context.Context, raw json.RawMessage) (any, 
 	if failure != nil {
 		return nil, failure
 	}
+	principal, authenticated := authn.PrincipalFrom(ctx)
+	if !authenticated {
+		principal = authn.Principal{Roles: []string{"*"}, Source: "legacy-test"}
+	}
+	if principal.RunID != "" && principal.RunID != params.Meta.RunID {
+		return nil, refuse(ReasonAuthorizationDenied, "workflow identity is bound to run %s", principal.RunID)
+	}
+	if !authn.Allows(principal.Roles, tool.AllowedRoles) {
+		return nil, refuse(ReasonAuthorizationDenied, "identity is not authorised for %s@%s", tool.ToolID, tool.ToolVersion)
+	}
 	arguments := params.Arguments
 	if len(arguments) == 0 {
 		arguments = json.RawMessage(`{}`)
@@ -212,6 +249,30 @@ func (server *Server) toolsCall(ctx context.Context, raw json.RawMessage) (any, 
 		return outcomeResult(gatewayv1.Outcome_OUTCOME_UNKNOWN, "", fmt.Sprintf("upstream transport failure: %v", err)), nil
 	}
 	return outcomeResult(response.GetOutcome(), response.GetResult(), response.GetError()), nil
+}
+
+func (server *Server) scopeView(ctx context.Context, source *resolvedView, roles []string) (*resolvedView, *rpcError) {
+	tools := make([]toolview.Tool, 0, len(source.published.Document.Tools))
+	for _, tool := range source.published.Document.Tools {
+		if authn.Allows(roles, tool.AllowedRoles) {
+			tools = append(tools, tool)
+		}
+	}
+	published, err := toolview.Build(tools)
+	if err != nil {
+		return nil, internalError("scope tool view: %v", err)
+	}
+	if err := server.blobs.Put(ctx, published.Ref, published.Canonical); err != nil {
+		return nil, internalError("store scoped tool view: %v", err)
+	}
+	schemas := map[registry.Key]*jsonschema.Schema{}
+	for _, tool := range published.Document.Tools {
+		schema, ok := source.schemas[registry.Key{ToolID: tool.ToolID, ToolVersion: tool.ToolVersion}]
+		if ok {
+			schemas[registry.Key{ToolID: tool.ToolID, ToolVersion: tool.ToolVersion}] = schema
+		}
+	}
+	return &resolvedView{published: published, schemas: schemas}, nil
 }
 
 func lookupPinned(view *resolvedView, name, version string) (toolview.Tool, *rpcError) {

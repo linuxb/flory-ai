@@ -55,6 +55,11 @@ type alwaysRoutable struct{}
 
 func (alwaysRoutable) Routable(string) bool { return true }
 
+// RoleCatalog is the Gateway-owned authority for role identifiers used by contracts.
+type RoleCatalog interface {
+	RoleEnabled(context.Context, string) (bool, error)
+}
+
 type record struct {
 	tool      toolview.Tool
 	canonical []byte
@@ -75,6 +80,7 @@ type Registry struct {
 	mutex   sync.Mutex
 	store   blob.Store
 	health  RouteHealth
+	roles   RoleCatalog
 	records map[Key]*record
 	current atomic.Pointer[View]
 }
@@ -83,11 +89,15 @@ type Registry struct {
 //
 // A nil health treats every route as routable, which is what unit tests of pure
 // admission want; the running gateway passes its instance table.
-func New(store blob.Store, health RouteHealth) *Registry {
+func New(store blob.Store, health RouteHealth, roles ...RoleCatalog) *Registry {
 	if health == nil {
 		health = alwaysRoutable{}
 	}
-	return &Registry{store: store, health: health, records: map[Key]*record{}}
+	var catalogue RoleCatalog
+	if len(roles) > 0 {
+		catalogue = roles[0]
+	}
+	return &Registry{store: store, health: health, roles: catalogue, records: map[Key]*record{}}
 }
 
 // Current returns the published view, or nil before anything is admitted.
@@ -139,6 +149,24 @@ func (registry *Registry) Register(ctx context.Context, contracts []*gatewayv1.T
 		if violation := ValidateStructure(tool); violation != nil {
 			registry.records[key] = &record{tool: tool, canonical: canonical, state: gatewayv1.ToolState_TOOL_STATE_REJECTED, code: violation.Code, detail: violation.Detail}
 			continue
+		}
+		if registry.roles != nil {
+			unknown := ""
+			for _, role := range tool.AllowedRoles {
+				enabled, err := registry.roles.RoleEnabled(ctx, role)
+				if err != nil {
+					return nil, fmt.Errorf("registry: resolve role %s: %w", role, err)
+				}
+				if !enabled {
+					unknown = role
+					break
+				}
+			}
+			if unknown != "" {
+				registry.records[key] = &record{tool: tool, canonical: canonical, state: gatewayv1.ToolState_TOOL_STATE_REJECTED,
+					code: gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT, detail: fmt.Sprintf("allowed role %s does not exist or is disabled", unknown)}
+				continue
+			}
 		}
 		registry.records[key] = &record{tool: tool, canonical: canonical, state: gatewayv1.ToolState_TOOL_STATE_PENDING}
 	}
@@ -272,6 +300,10 @@ func (registry *Registry) resolveCompanions(tool toolview.Tool) *Violation {
 		// version ordering, and guessing wrong would publish a recovery path that
 		// was never validated.
 		for _, candidate := range resolved {
+			if !rolesCover(tool.AllowedRoles, candidate.AllowedRoles) {
+				return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_UNRESOLVED_COMPANION,
+					"companion %s@%s does not allow every role authorised for %s@%s", companion, candidate.ToolVersion, tool.ToolID, tool.ToolVersion)
+			}
 			// "Proven idempotent" in design document 09 section 3.1 means declared:
 			// the gateway cannot prove idempotency, it can only refuse to publish a
 			// recovery path that never claimed to be safe to retry.

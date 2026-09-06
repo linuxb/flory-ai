@@ -31,6 +31,18 @@ type RetryPolicy struct {
 	MaxBackoffMS     int64   `json:"max_backoff_ms"`
 }
 
+type AuthorizationIdentity struct {
+	Version string `json:"version"`
+	KeyID string `json:"key_id"`
+	Issuer string `json:"issuer"`
+	Subject string `json:"subject"`
+	Roles []string `json:"roles"`
+	SubjectRevision int64 `json:"subject_revision"`
+	RunID string `json:"run_id"`
+	AuthenticatedAt string `json:"authenticated_at"`
+	Signature string `json:"signature"`
+}
+
 type TransactionSpec struct {
 	EffectClass    EffectClass     `json:"effect_class"`
 	Mode           TransactionMode `json:"mode"`

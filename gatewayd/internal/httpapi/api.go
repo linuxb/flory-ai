@@ -7,12 +7,11 @@ import (
 	"expvar"
 	"net/http"
 
-	"github.com/linuxb/flory-ai/gatewayd/internal/mcp"
 	"github.com/linuxb/flory-ai/gatewayd/internal/registry"
 )
 
 // New builds the gateway's HTTP handler.
-func New(mcpServer *mcp.Server, toolRegistry *registry.Registry) http.Handler {
+func New(mcpServer http.Handler, toolRegistry *registry.Registry, admin ...RBACAdminConfig) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("POST /mcp", mcpServer)
 	mux.HandleFunc("GET /v1/tool-view", func(writer http.ResponseWriter, _ *http.Request) {
@@ -54,6 +53,9 @@ func New(mcpServer *mcp.Server, toolRegistry *registry.Registry) http.Handler {
 		writer.WriteHeader(http.StatusNoContent)
 	})
 	mux.Handle("GET /metrics", expvar.Handler())
+	if len(admin) > 0 {
+		mountRBACAdmin(mux, admin[0])
+	}
 	return mux
 }
 

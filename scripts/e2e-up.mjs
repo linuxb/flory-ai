@@ -90,6 +90,9 @@ await requireFreePort('the sandbox world', process.env.SANDBOX_ADDR ?? '127.0.0.
 process.stdout.write(`starting gatewayd (blob backend: ${backend})\n`);
 start('gatewayd', 'go', ['-C', 'gatewayd', 'run', './cmd/gatewayd'], {
     GATEWAYD_BLOB_BACKEND: backend,
+    // This older contract/routing harness deliberately has no identity provider.
+    // The RBAC E2E owns the authenticated production-default path.
+    GATEWAYD_RBAC_ENABLED: 'false',
     GATEWAYD_HTTP_ADDR: new URL(gatewayHttp).host,
     GATEWAYD_GRPC_ADDR: gatewayGrpc,
 });

@@ -10,7 +10,7 @@ import (
 
 // Version is the tool-view document format version, carried inside the digest
 // so a format change cannot be mistaken for a contract change.
-const Version = "1"
+const Version = "2"
 
 // Transaction is the declared transaction contract of one tool.
 //
@@ -63,6 +63,7 @@ type Tool struct {
 	TimeoutMS         uint32          `json:"timeout_ms"`
 	Retry             Retry           `json:"retry_constraints"`
 	Owner             string          `json:"owner"`
+	AllowedRoles      []string        `json:"allowed_roles,omitempty"`
 }
 
 // Document is one complete published tool view.
@@ -186,7 +187,8 @@ func FromProto(contract *gatewayv1.ToolContract) (Tool, error) {
 			MultiplierMilli:  retry.GetMultiplierMilli(),
 			MaxBackoffMS:     retry.GetMaxBackoffMs(),
 		},
-		Owner: contract.GetOwner(),
+		Owner:        contract.GetOwner(),
+		AllowedRoles: sortedUnique(contract.GetAllowedRoles()),
 	}, nil
 }
 
@@ -200,6 +202,7 @@ func Build(tools []Tool) (Published, error) {
 	for index := range ordered {
 		ordered[index].Footprint = sortedCopy(ordered[index].Footprint)
 		ordered[index].Writes = sortedCopy(ordered[index].Writes)
+		ordered[index].AllowedRoles = sortedUnique(ordered[index].AllowedRoles)
 	}
 	sort.Slice(ordered, func(first, second int) bool {
 		if ordered[first].ToolID != ordered[second].ToolID {
@@ -280,6 +283,11 @@ func (tool Tool) Metadata() map[string]any {
 	return metadata
 }
 
+// RBACMetadata is the flory_rbac extension carried in an MCP listing.
+func (tool Tool) RBACMetadata() map[string]any {
+	return map[string]any{"allowed_roles": tool.AllowedRoles}
+}
+
 func rawSchema(text string) (json.RawMessage, error) {
 	if text == "" {
 		return nil, fmt.Errorf("missing schema")
@@ -302,4 +310,17 @@ func sortedCopy(values []string) []string {
 	copy(copied, values)
 	sort.Strings(copied)
 	return copied
+}
+
+func sortedUnique(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	result := make([]string, 0, len(seen))
+	for value := range seen {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }

@@ -154,7 +154,8 @@
                             "multiplier_milli": 2000,
                             "max_backoff_ms": 5000
                         },
-                        "owner": "inventory-team"
+                        "owner": "inventory-team",
+                        "allowed_roles": ["*"]
                     },
                     {
                         "tool_id": "inventory.release",
@@ -193,7 +194,8 @@
                             "multiplier_milli": 2000,
                             "max_backoff_ms": 5000
                         },
-                        "owner": "inventory-team"
+                        "owner": "inventory-team",
+                        "allowed_roles": ["*"]
                     },
                     {
                         "tool_id": "inventory.reserve",
@@ -242,13 +244,14 @@
                             "multiplier_milli": 2000,
                             "max_backoff_ms": 5000
                         },
-                        "owner": "inventory-team"
+                        "owner": "inventory-team",
+                        "allowed_roles": ["*"]
                     }
                 ]
             },
-            "canonical": "{\"tool_view_version\":\"1\",\"tools\":[{\"adapter\":{\"operation\":\"flory.gateway.v1.ToolExecutionService/Execute\",\"protocol\":\"grpc\"},\"compensation_style\":\"not-compensating\",\"description\":\"Commit the delta its matching reserve held\",\"footprint\":[\"inventory:{sku}\"],\"input_schema\":{\"properties\":{\"order_id\":{\"type\":\"string\"}},\"required\":[\"order_id\"],\"type\":\"object\"},\"output_schema\":{\"type\":\"object\"},\"owner\":\"inventory-team\",\"retry_constraints\":{\"initial_backoff_ms\":100,\"max_attempts\":3,\"max_backoff_ms\":5000,\"multiplier_milli\":2000},\"route_id\":\"inventory\",\"timeout_ms\":5000,\"tool_id\":\"inventory.confirm\",\"tool_version\":\"1.0.0\",\"txn\":{\"effect_class\":\"bufferable\",\"idempotency_key_path\":\"$.order_id\",\"idempotent_retryable\":true,\"mode\":\"plain\"},\"writes\":[\"inventory:{sku}\"]},{\"adapter\":{\"operation\":\"flory.gateway.v1.ToolExecutionService/Execute\",\"protocol\":\"grpc\"},\"compensation_style\":\"delta\",\"description\":\"Release exactly the delta its matching reserve added\",\"footprint\":[\"inventory:{sku}\"],\"input_schema\":{\"properties\":{\"order_id\":{\"type\":\"string\"}},\"required\":[\"order_id\"],\"type\":\"object\"},\"output_schema\":{\"type\":\"object\"},\"owner\":\"inventory-team\",\"retry_constraints\":{\"initial_backoff_ms\":100,\"max_attempts\":3,\"max_backoff_ms\":5000,\"multiplier_milli\":2000},\"route_id\":\"inventory\",\"timeout_ms\":5000,\"tool_id\":\"inventory.release\",\"tool_version\":\"1.0.0\",\"txn\":{\"effect_class\":\"bufferable\",\"idempotency_key_path\":\"$.order_id\",\"idempotent_retryable\":true,\"mode\":\"plain\"},\"writes\":[\"inventory:{sku}\"]},{\"adapter\":{\"operation\":\"flory.gateway.v1.ToolExecutionService/Execute\",\"protocol\":\"grpc\"},\"compensation_style\":\"not-compensating\",\"description\":\"Reserve inventory for an order\",\"footprint\":[\"inventory:{sku}\"],\"input_schema\":{\"additionalProperties\":false,\"properties\":{\"order_id\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"},\"sku\":{\"type\":\"string\"}},\"required\":[\"sku\",\"quantity\"],\"type\":\"object\"},\"output_schema\":{\"type\":\"object\"},\"owner\":\"inventory-team\",\"retry_constraints\":{\"initial_backoff_ms\":100,\"max_attempts\":3,\"max_backoff_ms\":5000,\"multiplier_milli\":2000},\"route_id\":\"inventory\",\"timeout_ms\":15000,\"tool_id\":\"inventory.reserve\",\"tool_version\":\"1.0.0\",\"txn\":{\"cancel_tool\":\"inventory.release\",\"confirm_tool\":\"inventory.confirm\",\"effect_class\":\"reversible\",\"idempotency_key_path\":\"$.order_id\",\"idempotent_retryable\":true,\"mode\":\"tcc\",\"try_timeout_s\":900},\"writes\":[\"inventory:{sku}\"]}]}",
-            "digest": "sha256:0cb4ca768d9627b842045d6fbe12f581d86ca27670af3f805ef06bb24cdb56af",
-            "ref": "tool-views/sha256-0cb4ca768d9627b842045d6fbe12f581d86ca27670af3f805ef06bb24cdb56af.json"
+            "canonical": "{\"tool_view_version\":\"1\",\"tools\":[{\"adapter\":{\"operation\":\"flory.gateway.v1.ToolExecutionService/Execute\",\"protocol\":\"grpc\"},\"allowed_roles\":[\"*\"],\"compensation_style\":\"not-compensating\",\"description\":\"Commit the delta its matching reserve held\",\"footprint\":[\"inventory:{sku}\"],\"input_schema\":{\"properties\":{\"order_id\":{\"type\":\"string\"}},\"required\":[\"order_id\"],\"type\":\"object\"},\"output_schema\":{\"type\":\"object\"},\"owner\":\"inventory-team\",\"retry_constraints\":{\"initial_backoff_ms\":100,\"max_attempts\":3,\"max_backoff_ms\":5000,\"multiplier_milli\":2000},\"route_id\":\"inventory\",\"timeout_ms\":5000,\"tool_id\":\"inventory.confirm\",\"tool_version\":\"1.0.0\",\"txn\":{\"effect_class\":\"bufferable\",\"idempotency_key_path\":\"$.order_id\",\"idempotent_retryable\":true,\"mode\":\"plain\"},\"writes\":[\"inventory:{sku}\"]},{\"adapter\":{\"operation\":\"flory.gateway.v1.ToolExecutionService/Execute\",\"protocol\":\"grpc\"},\"allowed_roles\":[\"*\"],\"compensation_style\":\"delta\",\"description\":\"Release exactly the delta its matching reserve added\",\"footprint\":[\"inventory:{sku}\"],\"input_schema\":{\"properties\":{\"order_id\":{\"type\":\"string\"}},\"required\":[\"order_id\"],\"type\":\"object\"},\"output_schema\":{\"type\":\"object\"},\"owner\":\"inventory-team\",\"retry_constraints\":{\"initial_backoff_ms\":100,\"max_attempts\":3,\"max_backoff_ms\":5000,\"multiplier_milli\":2000},\"route_id\":\"inventory\",\"timeout_ms\":5000,\"tool_id\":\"inventory.release\",\"tool_version\":\"1.0.0\",\"txn\":{\"effect_class\":\"bufferable\",\"idempotency_key_path\":\"$.order_id\",\"idempotent_retryable\":true,\"mode\":\"plain\"},\"writes\":[\"inventory:{sku}\"]},{\"adapter\":{\"operation\":\"flory.gateway.v1.ToolExecutionService/Execute\",\"protocol\":\"grpc\"},\"allowed_roles\":[\"*\"],\"compensation_style\":\"not-compensating\",\"description\":\"Reserve inventory for an order\",\"footprint\":[\"inventory:{sku}\"],\"input_schema\":{\"additionalProperties\":false,\"properties\":{\"order_id\":{\"type\":\"string\"},\"quantity\":{\"type\":\"integer\"},\"sku\":{\"type\":\"string\"}},\"required\":[\"sku\",\"quantity\"],\"type\":\"object\"},\"output_schema\":{\"type\":\"object\"},\"owner\":\"inventory-team\",\"retry_constraints\":{\"initial_backoff_ms\":100,\"max_attempts\":3,\"max_backoff_ms\":5000,\"multiplier_milli\":2000},\"route_id\":\"inventory\",\"timeout_ms\":15000,\"tool_id\":\"inventory.reserve\",\"tool_version\":\"1.0.0\",\"txn\":{\"cancel_tool\":\"inventory.release\",\"confirm_tool\":\"inventory.confirm\",\"effect_class\":\"reversible\",\"idempotency_key_path\":\"$.order_id\",\"idempotent_retryable\":true,\"mode\":\"tcc\",\"try_timeout_s\":900},\"writes\":[\"inventory:{sku}\"]}]}",
+            "digest": "sha256:9d34a51df48319b154b7a192ab3bc2fc5a1afe5865b2ce860284c616dcce4cca",
+            "ref": "tool-views/sha256-9d34a51df48319b154b7a192ab3bc2fc5a1afe5865b2ce860284c616dcce4cca.json"
         }
     ]
 }

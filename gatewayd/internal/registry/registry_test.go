@@ -25,6 +25,7 @@ func contract(toolID string) *gatewayv1.ToolContract {
 		TimeoutMs:         5000,
 		RetryConstraints:  &gatewayv1.RetryConstraints{MaxAttempts: 3, InitialBackoffMs: 100, MultiplierMilli: 2000, MaxBackoffMs: 5000},
 		Owner:             "inventory-team",
+		AllowedRoles:      []string{"*"},
 	}
 }
 
@@ -86,6 +87,37 @@ func expectRejected(t *testing.T, contracts []*gatewayv1.ToolContract, toolID st
 	}
 	if status.GetCode() != code {
 		t.Fatalf("%s rejected with %s (%s), want %s", toolID, status.GetCode(), status.GetDetail(), code)
+	}
+}
+
+type roleCatalog map[string]bool
+
+func (catalog roleCatalog) RoleEnabled(_ context.Context, role string) (bool, error) {
+	return role == "*" || catalog[role], nil
+}
+
+func TestRegistryRejectsUnknownRoles(t *testing.T) {
+	toolRegistry := New(blob.NewMemory(), nil, roleCatalog{"reader": true})
+	built := contract("inventory.check")
+	built.AllowedRoles = []string{"operator"}
+	status := stateOf(t, register(t, toolRegistry, built), built.ToolId)
+	if status.GetState() != gatewayv1.ToolState_TOOL_STATE_REJECTED || status.GetCode() != gatewayv1.AdmissionCode_ADMISSION_CODE_MALFORMED_CONTRACT {
+		t.Fatalf("unknown role status: %+v", status)
+	}
+}
+
+func TestCompanionMustCoverTheTryRoles(t *testing.T) {
+	reserve := tccContract()
+	reserve.AllowedRoles = []string{"operator"}
+	confirm := compensator("inventory.confirm")
+	confirm.AllowedRoles = []string{"finance"}
+	cancel := compensator("inventory.release")
+	cancel.AllowedRoles = []string{"operator"}
+	toolRegistry := New(blob.NewMemory(), nil)
+	statuses := register(t, toolRegistry, reserve, confirm, cancel)
+	status := stateOf(t, statuses, reserve.ToolId)
+	if status.GetState() != gatewayv1.ToolState_TOOL_STATE_PENDING {
+		t.Fatalf("unsafe recovery permissions were admitted: %+v", status)
 	}
 }
 

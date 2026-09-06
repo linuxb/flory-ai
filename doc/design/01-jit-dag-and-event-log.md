@@ -117,7 +117,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 
 The engine appends `vertex/started` before the network request. A successful response appends `budget/charged` and `vertex/succeeded` together; a transport or provider failure appends `vertex/failed`. The charge contains provider-reported usage rather than a local tokenizer estimate. Its optional `estimated_cost` is explicitly an estimate: it records currency, price reference, price tier, and all per-million-token rates used in the calculation, so a later provider price change cannot rewrite historical economics. If no trustworthy pricing snapshot is configured, usage is still recorded and `estimated_cost` is omitted.
 
-Event payloads retain only normalized metadata and SHA-256 input/output digests. They never contain authorization headers, API keys, raw prompts, raw completions, query parameters, or provider response envelopes. Raw model material, when retention is enabled, follows the blob-reference boundary described in §7.
+Event payloads retain only normalized metadata and SHA-256 input/output digests. They never contain authorization headers, API keys, raw JWTs, raw prompts, raw completions, query parameters, or provider response envelopes. `run/start` may contain the Gateway-signed, non-secret authorization identity described in [09 §3.3](./09-tool-registry-gateway.md#33-role-based-access-control-rbac); it freezes issuer, subject, roles, revision, run ID, authentication time, and signature without retaining the bearer credential. Raw model material, when retention is enabled, follows the blob-reference boundary described in §7.
 
 ### 3.2.1 Which executor owns a vertex
 

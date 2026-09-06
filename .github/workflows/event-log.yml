@@ -6,6 +6,7 @@ on:
       - 'engine/**'
       - 'test/**'
       - 'db/**'
+      - 'docker/**'
       - 'idl/**'
       - 'coordinator/**'
       - 'gatewayd/**'
@@ -20,6 +21,7 @@ on:
       - 'engine/**'
       - 'test/**'
       - 'db/**'
+      - 'docker/**'
       - 'idl/**'
       - 'coordinator/**'
       - 'gatewayd/**'
@@ -90,9 +92,15 @@ jobs:
       - name: Verify the Tool Registry Gateway
         working-directory: gatewayd
         env:
+          FLORY_INTEGRATION: '1'
+          GATEWAYD_DATABASE_URL: postgresql://gateway_role:gateway-dev-password@127.0.0.1:5432/flory
           STORAGE_EMULATOR_HOST: http://localhost:4443
           GATEWAYD_BLOB_BUCKET: flory-tool-views
         run: go vet ./... && go test -race ./...
+      - name: Verify OIDC identity, Gateway RBAC, and frozen-run recovery
+        env:
+          RBAC_E2E_USE_EXISTING_POSTGRES: 'true'
+        run: npm run test:rbac
       # The end-to-end suite runs against a live topology: the gateway in front of
       # four tool services that register themselves through the SDK.
       - name: Verify the gateway-mediated topology

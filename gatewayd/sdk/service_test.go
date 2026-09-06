@@ -111,6 +111,7 @@ func checkContract() Contract {
 		TimeoutMS:           5000,
 		Retry:               DefaultRetry(),
 		Owner:               "inventory-team",
+		AllowedRoles:        []string{"*"},
 	}
 }
 

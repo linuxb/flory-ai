@@ -96,4 +96,7 @@ message ToolContract {
     uint32 timeout_ms = 12;
     RetryConstraints retry_constraints = 13;
     string owner = 14;
+    // Business roles authorised to discover and execute this contract. The
+    // reserved value "*" makes a tool public; an empty list is invalid.
+    repeated string allowed_roles = 15;
 }

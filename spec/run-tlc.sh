@@ -28,13 +28,17 @@ actual_sha() {
 }
 
 download_tools() {
-    local temporary_path
+    local temporary_path downloaded_sha
     temporary_path="${jar_path}.download"
     rm -f "${temporary_path}"
     curl -fsSL --retry 3 --retry-all-errors "${TLA_TOOLS_URL}" -o "${temporary_path}"
-    if [[ "$(actual_sha "${temporary_path}")" != "${TLA_TOOLS_SHA256}" ]]; then
+    downloaded_sha="$(actual_sha "${temporary_path}")"
+    if [[ "${downloaded_sha}" != "${TLA_TOOLS_SHA256}" ]]; then
         rm -f "${temporary_path}"
-        echo "tla2tools.jar checksum mismatch" >&2
+        echo "tla2tools.jar checksum mismatch for ${TLA_TOOLS_VERSION}" >&2
+        echo "expected: ${TLA_TOOLS_SHA256}" >&2
+        echo "actual:   ${downloaded_sha}" >&2
+        echo "Refuse to trust a replacement asset automatically; review and update spec/toolchain.env explicitly." >&2
         exit 1
     fi
     mv "${temporary_path}" "${jar_path}"
@@ -91,7 +95,9 @@ run_case "small-safety" "MCSmall.tla" "MCSmallSafety.cfg" success ""
 run_case "three-safety" "MCThree.tla" "MCThreeSafety.cfg" success ""
 run_case "small-liveness" "MCSmall.tla" "MCSmall.cfg" success ""
 run_case "three-liveness" "MCThree.tla" "MCThree.cfg" success ""
-run_case "oscillation-discovery" "MCDiscovery.tla" "MCDiscovery.cfg" failure "Temporal property L2EpisodeTerminates was violated."
+# v1.7.4 does not echo the property name here. MCDiscovery.cfg declares only
+# L2EpisodeTerminates, so the generic temporal failure still identifies it uniquely.
+run_case "oscillation-discovery" "MCDiscovery.tla" "MCDiscovery.cfg" failure "Temporal properties were violated."
 run_case "no-barrier-negative" "MCNoBarrier.tla" "MCNoBarrier.cfg" failure "Invariant I1PivotBarrier is violated."
 run_case "post-pivot-cancel-negative" "MCPostPivotCancel.tla" "MCPostPivotCancel.cfg" failure "Invariant I3NoCancelAfterPivot is violated."
 run_case "unscoped-effect-negative" "MCUnscopedEffect.tla" "MCUnscopedEffect.cfg" failure "Invariant AdmissionAllEffectsScoped is violated."

@@ -3,16 +3,32 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 cache_dir="$repo_dir/.cache/rbac-e2e"
-gateway_url="https://127.0.0.1:8092"
+gateway_url="https://127.0.0.1:18092"
+gateway_grpc_url="http://127.0.0.1:18093"
+sandbox_url="http://127.0.0.1:18090"
 issuer="http://127.0.0.1:8180/realms/flory"
 alice_subject="11111111-1111-4111-8111-111111111111"
 rbac_database_url="${GATEWAYD_DATABASE_URL:-postgresql://gateway_role:gateway-dev-password@127.0.0.1:5432/flory}"
 gateway_pid=""
 sandbox_pid=""
 
+stop_process() {
+    local pid="$1"
+    kill "$pid" 2>/dev/null || return 0
+    for _attempt in $(seq 1 20); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid" 2>/dev/null || true
+            return 0
+        fi
+        sleep 0.1
+    done
+    kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+}
+
 cleanup() {
-    if [[ -n "$sandbox_pid" ]]; then kill "$sandbox_pid" 2>/dev/null || true; fi
-    if [[ -n "$gateway_pid" ]]; then kill "$gateway_pid" 2>/dev/null || true; fi
+    if [[ -n "$sandbox_pid" ]]; then stop_process "$sandbox_pid"; fi
+    if [[ -n "$gateway_pid" ]]; then stop_process "$gateway_pid"; fi
     docker compose -f "$repo_dir/docker/compose.oidc.yml" down >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
@@ -44,9 +60,12 @@ npm run db:setup
 npm run rbac:pki
 npm run oidc:up
 wait_for Keycloak curl --fail --silent "$issuer/.well-known/openid-configuration"
+go -C gatewayd build -o "$cache_dir/gatewayd" ./cmd/gatewayd
 
 GATEWAYD_RBAC_ENABLED=true \
 GATEWAYD_BLOB_BACKEND=memory \
+GATEWAYD_HTTP_ADDR=127.0.0.1:18092 \
+GATEWAYD_GRPC_ADDR=127.0.0.1:18093 \
 GATEWAYD_DATABASE_URL="$rbac_database_url" \
 GATEWAYD_OIDC_ISSUER="$issuer" \
 GATEWAYD_OIDC_AUDIENCE=flory-gateway \
@@ -61,7 +80,7 @@ GATEWAYD_ADMIN_SPIFFE_IDS=spiffe://flory.local/rbac-admin \
 GATEWAYD_CLIENT_CA_FILE="$cache_dir/ca.pem" \
 GATEWAYD_TLS_CERT_FILE="$cache_dir/gateway.pem" \
 GATEWAYD_TLS_KEY_FILE="$cache_dir/gateway.key" \
-go -C gatewayd run ./cmd/gatewayd >"$cache_dir/gateway.log" 2>&1 &
+"$cache_dir/gatewayd" >"$cache_dir/gateway.log" 2>&1 &
 gateway_pid="$!"
 wait_for gatewayd curl --fail --silent --cacert "$cache_dir/ca.pem" "$gateway_url/healthz"
 
@@ -78,9 +97,10 @@ admin_curl -X PUT "$gateway_url/admin/v1/subjects/roles" \
     >"$cache_dir/bound.json"
 bound_revision="$(node -e 'const fs=require("fs"); process.stdout.write(String(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).revision))' "$cache_dir/bound.json")"
 
-GATEWAYD_BASE_URL=http://127.0.0.1:8093 GATEWAYD_HEARTBEAT_MS=1000 npx tsx test/sandbox/server.ts >"$cache_dir/sandbox.log" 2>&1 &
+GATEWAYD_BASE_URL="$gateway_grpc_url" GATEWAYD_HEARTBEAT_MS=1000 SANDBOX_PORT=18090 \
+    node --import tsx test/sandbox/server.ts >"$cache_dir/sandbox.log" 2>&1 &
 sandbox_pid="$!"
-wait_for sandbox curl --fail --silent http://127.0.0.1:8090/healthz
+wait_for sandbox curl --fail --silent "$sandbox_url/healthz"
 wait_for tool-view curl --fail --silent --cacert "$cache_dir/ca.pem" "$gateway_url/v1/tool-view"
 
 curl --fail --silent --show-error -X POST "$issuer/protocol/openid-connect/token" \
@@ -119,6 +139,6 @@ internal_curl -H 'Content-Type: application/json' -H "X-Flory-Workflow-Identity:
     "$gateway_url/mcp" >"$cache_dir/cancel.json"
 
 node -e 'const fs=require("fs"); for(const f of process.argv.slice(1)){const x=JSON.parse(fs.readFileSync(f,"utf8")); if(x.error||x.result?.structuredContent?.outcome!=="succeeded") process.exit(1)}' "$cache_dir/try.json" "$cache_dir/cancel.json"
-curl --fail --silent http://127.0.0.1:8090/test/snapshot >"$cache_dir/snapshot.json"
+curl --fail --silent "$sandbox_url/test/snapshot" >"$cache_dir/snapshot.json"
 node -e 'const fs=require("fs"); const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(x.inventory.open_holds!==0) process.exit(1)' "$cache_dir/snapshot.json"
 printf 'RBAC E2E passed: new work lost revoked access and the original run completed its cancel\n'

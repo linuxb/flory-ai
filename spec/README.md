@@ -14,9 +14,12 @@ runtime dependencies of the TypeScript Engine or Distributed Transaction Coordin
 ./spec/run-apalache.sh
 ```
 
-The script downloads the pinned official `tla2tools.jar` into the ignored
+The script downloads the pinned stable official `tla2tools.jar` into the ignored
 `spec/.tlc/` directory, verifies its SHA-256 digest from `toolchain.env`, and
 runs TLC with Java 11 or newer. Set `TLC_WORKERS` to change the worker count.
+Do not pin the rolling `v1.8.0` prerelease asset: upstream replaces that asset as
+new builds land. Tool upgrades must update the stable release version and digest
+together in `spec/toolchain.env`; CI never accepts a newly observed digest automatically.
 
 After every successful full check, the same command uses the pinned jar's
 TLA2TeX renderer and `pdflatex` to write `spec/output/FloryTxn.pdf`. The PDF is

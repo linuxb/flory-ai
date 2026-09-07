@@ -8,4 +8,8 @@ Acceptance is a migration, not a permanent document status. In the accepting cha
 
 Write proposals in English. Implementation and rollout plans belong in [`../plan/`](../plan/). The index below lists only active proposals; accepted decisions are discoverable through the design documents and Git history.
 
-There are currently no active ADR proposals.
+| ADR | Title | Status |
+|---|---|---|
+| [005](./adr-005-progressive-jit-dag-morphology.md) | Progressive JIT-DAG Workflow Morphology and Deterministic Routers | Proposed |
+| [006](./adr-006-console-ui-for-jit-dag.md) | Console UI for JIT-DAG Visualization and Monitoring | Proposed |
+| [007](./adr-007-business-stream-sequences.md) | Three-Tier Sequence Model for Business Streams | Proposed |

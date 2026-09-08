@@ -57,15 +57,21 @@ Mandatory interposition guarantees that attaching or updating a rule does not al
 - With mandatory interposition, attaching a rule changes only which template version the router **pins**.
 - This satisfies Doc 01 §5.3: changing a rule is mechanically identical to changing a model pin. Counterfactual evaluation ("What would have happened on Order #12345 if this junction had pinned v3 instead of v2?") becomes an ordinary fork replay evaluated with standard `surface-identity` and `cost-delta` evaluators (Doc 05 §3.1).
 
-### 4. Derived Placement, Multi-Scope Joins, and Barriers
+### 4. Derived Placement, Multi-Scope Joins, and Sweeper Fencing
 Routers have no side effects and are never scope members. Their transaction placement is derived mechanically by the engine from the ancestor graph at freeze time:
 - `at_savepoint`: All ancestor scopes are closed. Any branch emitted by the router opens a fresh transaction scope.
 - `inside_scope(S)`: An ancestor scope `S` remains half-open (a try is sealed but unconfirmed). The emitted branch joins `S`.
 
-**Multi-Scope Join Constraint:**
-When a router acts as a join node over multiple parallel branches that belong to distinct half-open scopes ($S_1, S_2$), the router cannot arbitrarily select a scope. To eliminate topological ambiguity and prevent partial rollback splits:
-1. **Confirmation Barrier Precedence:** The DAG must place a `confirmation-barrier` vertex before the router join (Doc 02 R5/R9). The barrier enforces that all parallel tries reach the `sealed` state, after which the coordinator unifies their lifecycle before the router evaluates.
-2. **Alternative Serialization:** Parallel branches with distinct scopes must be serialized into a single causal chain before reaching the router.
+**Multi-Scope Join & Parallel Branch Invariants:**
+When a router acts as a join node over parallel branches, freeze admission evaluates the router's pinned rule template against upstream scope membership:
+1. **Pre-Declared Common Scope for Atomicity:** If any branch in the router's rule template emits a pivot or joins an open scope, all parallel branches that execute tries intended to be atomic with that pivot **must be declared upfront as members of the same common scope $S$** (Doc 02 R3 natively supports parallel branches within one scope). A `confirmation-barrier` vertex precedes the router to ensure all parallel tries of $S$ reach the `sealed` state. The router then evaluates unambiguously as `inside_scope(S)`. Flory defines no ad-hoc runtime "scope-merge" protocol; atomicity across parallel branches must be declared at graph freeze time.
+2. **Disjoint Scope Isolation:** If parallel branches belong to distinct, uncoordinated scopes ($S_1 \ne S_2$), they **must commit or close before reaching the router join** if the router emits a pivot (since a single pivot cannot bind two independent scopes). Joining distinct open scopes is admitted *only* if the router's rule template is purely read-only (all branches have `effect_class: none`), where the router reads outputs without binding to either transaction scope.
+
+**Runtime Sweeper Fencing:**
+While DAG causality guarantees a router only runs after parent vertices succeed, TCC reservations have finite lease deadlines (`try_timeout_s`). If a Try's deadline expires before the router emits its branch, the Coordinator's Orphan Sweeper (Doc 07 §3.4, `service.go:299`) requests scope cancellation. To prevent race conditions:
+- When the engine admits an emitted branch into scope $S$, it executes an atomic compare-and-set fence against `txn_scope`: branch admission succeeds *if and only if* `txn_scope.state = 'open'`.
+- If the Sweeper has already initiated cancellation (`state = 'cancelling'`), the fence rejects the router's branch (`proposal_rejected`), pruning the branch and halting safely.
+- Once the router emits valid downstream work, the Coordinator claims member tasks with active work leases (`work_queue.lease_until`), preventing the Sweeper from cancelling active work while downstream execution is underway.
 
 **Scope Widening:** By default, the engine derives the minimum required scope based on tool footprint intersection (Doc 02 §3.1). When business atomicity requires binding unrelated footprints together (e.g., deducting company balance and updating ERP stock in a Supplier Procurement flow), the human-authored rule template can explicitly declare a widened `txn/scope` (Doc 02 §3.2 workflow policy). Widening beyond the minimum is legal; narrowing below it is rejected by R11.
 
@@ -80,7 +86,7 @@ When a router matches a deterministic branch and downstream tools execute, error
 - **Terminal Escalation to L4 (Separated by Pivot Boundary):** If retries are exhausted or an unrecoverable failure occurs on a deterministic path:
   - *If Pre-Pivot:* Scopes are rolled back cleanly, and the run halts to **L4 (Human Intervention)**.
   - *If Post-Pivot:* **No rollback is attempted**. The run halts and suspends with all committed state and unconfirmed tries preserved, escalating to **L4** for operator-assisted forward completion or manual ledger reconciliation.
-  - *If Pivot Outcome is Unknown (e.g., network timeout during pivot call):* The coordinator must treat the pivot as potentially committed. **It must never assume failure or trigger cancellation**, but must immediately halt to L4 for verification against external provider logs.
+  - *If Pivot Outcome is Unknown (e.g., network timeout during pivot call):* The coordinator does **not** immediately halt to manual intervention. It executes automatic recovery via the pivot's registered `status_query` operation (Doc 07 §3.3, `processPivot`) using its frozen retry policy. If the status query confirms execution occurred, it proceeds to `txn/pivot-passed`; if it confirms execution did not occur, the guarded cancellation path is safely permitted. Only if the status query itself fails or remains unresolved does the scope suspend to **L4**. Cancellation is strictly prohibited while the outcome remains indeterminate.
 
 **Downstream Planner Lifecycle:**
 - If the router branch connects to the downstream planner, the planner runs normally when upstream dependencies complete.

@@ -58,7 +58,13 @@ The backend projects an enriched observability model streamed via Server-Sent Ev
     "router_outcome": { "matched_condition": "amount > 100" } // for router vertices
   }
   ```
-- **Streaming Semantics:** The backend streams full initial DAG snapshots on connection, followed by lightweight incremental vertex status updates (`vertex_patched`) as events append.
+- **Streaming Event Vocabulary & Dynamic JIT Unfolding:**
+  Because Flory DAGs unfold progressively at runtime, streaming cannot rely solely on vertex status patches. The backend SSE/WebSocket connection transmits a typed stream of structural and lifecycle delta events:
+  1. `topology_snapshot`: Emitted on initial client connection or after connection recovery, containing the complete current DAG state, all active/shadowed vertices, edges, and the current `run_seq` watermark.
+  2. `subgraph_appended`: Emitted whenever a Planner or Router freezes a new JIT sub-DAG (`subgraph/frozen`), transmitting the newly created vertices and their causal parent edges. This instructs the UI canvas to animate dynamic branch expansion.
+  3. `subgraph_shadowed`: Emitted when replanning occurs (`subgraph/shadowed`), specifying the vertex IDs that are now pruned/greyed out.
+  4. `vertex_patched`: Emitted for in-place state transitions (`started`, `succeeded`, `failed`) and timing updates.
+- **Sequence Fencing & Reconnect Protocol:** Every stream event carries a monotonic `run_seq`. If a client disconnects and misses events, it presents its last received `run_seq` upon reconnect. If the gap exceeds the engine's memory buffer, the server transparently issues a fresh `topology_snapshot`, ensuring the frontend remains an exact, zero-drift replica of the backend read model without hand-rolling client-side graph folds.
 
 #### 3.2 On-Demand Detail Endpoints (Heavy I/O Offloading)
 To keep streaming DAG payloads under tight bandwidth limits, heavy debugging data is not embedded in the graph stream. The Console Drawer lazily queries dedicated REST endpoints when a user clicks a vertex:

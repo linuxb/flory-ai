@@ -4,7 +4,7 @@
 Proposed
 
 ## Context
-Flory's original event log design was centered around a single execution run (`run_id`). Within a run, events followed a single partial-order sequence (`stream_seq`, which in reality functioned as `run_seq`), alongside a physical `global_seq`. 
+Flory's original event log design was centered around a single execution run (`run_id`). Within a run, events followed a single partial-order sequence (`stream_seq`, which in reality functioned as `run_seq`), alongside a physical `global_seq`.
 
 While this model cleanly isolated the TypeScript Engine's orchestration control plane, it left significant gaps in the business domain and storage architecture:
 1. **Cross-Run Business Continuity:** In real-world enterprise operations (e.g., e-commerce, customer service, postage), a single domain entity (such as an Order, Support Ticket, or Waybill) undergoes multiple distinct workflow runs over its lifecycle (e.g., Order Placed $\to$ Payment Processed $\to$ Return Requested $\to$ Refund Issued). Without a first-class business stream sequence, domain teams writing semantic projections (folds) must manually correlate disparate runs.
@@ -87,8 +87,8 @@ To ensure offline causal counterfactuals (Doc 01 §5, Doc 05 §3) never corrupt 
 2. **Physical Hard Isolation Flag:** The `business_event_stream` table includes an `is_counterfactual boolean NOT NULL DEFAULT false` column.
 3. **Projection Filtering:** All production semantic folds and operational reports query:
    ```sql
-   SELECT * FROM business_event_stream 
-   WHERE stream_id = $1 AND is_counterfactual = false 
+   SELECT * FROM business_event_stream
+   WHERE stream_id = $1 AND is_counterfactual = false
    ORDER BY stream_seq ASC;
    ```
    This guarantees that simulated what-if events can never alter production ledger balances or real-world order states.

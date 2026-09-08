@@ -57,10 +57,15 @@ Mandatory interposition guarantees that attaching or updating a rule does not al
 - With mandatory interposition, attaching a rule changes only which template version the router **pins**.
 - This satisfies Doc 01 §5.3: changing a rule is mechanically identical to changing a model pin. Counterfactual evaluation ("What would have happened on Order #12345 if this junction had pinned v3 instead of v2?") becomes an ordinary fork replay evaluated with standard `surface-identity` and `cost-delta` evaluators (Doc 05 §3.1).
 
-### 4. Derived Placement and Scope Semantics
+### 4. Derived Placement, Multi-Scope Joins, and Barriers
 Routers have no side effects and are never scope members. Their transaction placement is derived mechanically by the engine from the ancestor graph at freeze time:
 - `at_savepoint`: All ancestor scopes are closed. Any branch emitted by the router opens a fresh transaction scope.
 - `inside_scope(S)`: An ancestor scope `S` remains half-open (a try is sealed but unconfirmed). The emitted branch joins `S`.
+
+**Multi-Scope Join Constraint:**
+When a router acts as a join node over multiple parallel branches that belong to distinct half-open scopes ($S_1, S_2$), the router cannot arbitrarily select a scope. To eliminate topological ambiguity and prevent partial rollback splits:
+1. **Confirmation Barrier Precedence:** The DAG must place a `confirmation-barrier` vertex before the router join (Doc 02 R5/R9). The barrier enforces that all parallel tries reach the `sealed` state, after which the coordinator unifies their lifecycle before the router evaluates.
+2. **Alternative Serialization:** Parallel branches with distinct scopes must be serialized into a single causal chain before reaching the router.
 
 **Scope Widening:** By default, the engine derives the minimum required scope based on tool footprint intersection (Doc 02 §3.1). When business atomicity requires binding unrelated footprints together (e.g., deducting company balance and updating ERP stock in a Supplier Procurement flow), the human-authored rule template can explicitly declare a widened `txn/scope` (Doc 02 §3.2 workflow policy). Widening beyond the minimum is legal; narrowing below it is rejected by R11.
 
@@ -68,11 +73,14 @@ Routers have no side effects and are never scope members. Their transaction plac
 In enterprise workflows, the downstream planner is a legitimate, declared stage in the workflow pipeline (e.g., `Tool-A -> Router -> Tool-B -> Planner`). The router deterministically selects the branch condition feeding into subsequent human/AI review.
 
 **Strict Failure Semantics (No LLM Replanning on Deterministic Failures):**
-When a router matches a deterministic branch and downstream tools execute, errors are strictly governed by the distributed transaction protocol:
+When a router matches a deterministic branch and downstream tools execute, errors are strictly governed by the distributed transaction protocol (Doc 02 §1, Doc 07 §2.3):
 - **Never Replan with an LLM on Deterministic Failures:** A deterministic rule represents rigid business policy. If a deterministic tool fails, allowing an LLM planner to "replan" and invent an ad-hoc workaround (e.g., issuing unapproved discount coupons when payment gateway times out) violates financial and audit compliance.
-- **Pre-Pivot Failure:** If a tool fails before passing the pivot, the coordinator immediately triggers scope cancellation (TCC Cancel / Saga compensation) to cleanly roll back held resources.
-- **Post-Pivot Failure:** If a tool fails after a pivot has passed, the coordinator enforces idempotent forward recovery (retries).
-- **Terminal Escalation to L4:** If retries are exhausted or an unrecoverable failure occurs on a deterministic path, the workflow halts, scopes are rolled back, and it immediately escalates to **L4 (Human Intervention)**. It never backtracks to an LLM planner.
+- **Pre-Pivot Failure:** If a tool fails *before* passing the pivot, the coordinator safely triggers scope cancellation (TCC Cancel / Saga compensation) to cleanly release held resources back to the savepoint.
+- **Post-Pivot Failure:** If a tool fails *after* a pivot has passed (e.g., payment succeeded, but warehouse notification timed out), **cancellation is strictly prohibited**. The database trigger `check_pivot_pass` and coordinator state machine reject any cancel event. The coordinator enforces idempotent forward recovery (retries).
+- **Terminal Escalation to L4 (Separated by Pivot Boundary):** If retries are exhausted or an unrecoverable failure occurs on a deterministic path:
+  - *If Pre-Pivot:* Scopes are rolled back cleanly, and the run halts to **L4 (Human Intervention)**.
+  - *If Post-Pivot:* **No rollback is attempted**. The run halts and suspends with all committed state and unconfirmed tries preserved, escalating to **L4** for operator-assisted forward completion or manual ledger reconciliation.
+  - *If Pivot Outcome is Unknown (e.g., network timeout during pivot call):* The coordinator must treat the pivot as potentially committed. **It must never assume failure or trigger cancellation**, but must immediately halt to L4 for verification against external provider logs.
 
 **Downstream Planner Lifecycle:**
 - If the router branch connects to the downstream planner, the planner runs normally when upstream dependencies complete.
@@ -86,7 +94,7 @@ Safety is enforced through three distinct gates:
 | Gate | Timing | Responsibility |
 |---|---|---|
 | **Registration** | Template publish time | Validates condition field syntax, resolves tools in catalog, verifies branch shapes in isolation (Q1–Q6). |
-| **Freeze Admission** | Proposal freeze time (pre-execution) | Runs **Exhaustive Admission** over all branches $\times$ placements against run-specific role views and existing scopes. |
+| **Freeze Admission** | Proposal freeze time (pre-execution) | Runs **Exhaustive Admission** over all branches $\times$ placements under topological stability invariants. |
 | **Structural Fall-Through** | Router evaluation time | Handles `no_match` by passing control to the downstream planner. |
 
 #### 6.1 Registration Admission (Q1–Q6)
@@ -101,18 +109,27 @@ Rule templates are published, content-addressed, immutable contracts in `gateway
 #### 6.2 Freeze-Time Exhaustive Admission & Complexity Analysis
 The core vulnerability of deterministic rules is **late detection**: discovering an invalid branch after an irreversible pivot has already passed. The fix is to move detection to freeze time, before any tool executes.
 
-**Exhaustive Admission Algorithm:**
+**Exhaustive Admission Algorithm & Topological Preconditions:**
 At the freeze introducing the router, the engine runs `checkSubDag` over:
 $$\text{Total Verifications} = N \text{ (branches)} \times M \text{ (reachable placements)}$$
 against this run's actual role-scoped tool view and existing-scope snapshot.
-- If all combinations are admissible, whichever branch fires at runtime is guaranteed 100% admissible by construction. **Runtime rejection probability for rule topology is zero.**
-- If any combination violates a rule, the proposal is rejected at freeze time. The rejection lands on the proposing planner, which sits safely at or above the backtrack floor, allowing clean replanning before any real-world state is mutated.
+
+**The Causal Invariance Proof ($M \equiv 1$):**
+Earlier drafts hypothesized $M = 2$ on the assumption that an upstream transaction scope might be cancelled between freeze and evaluation, causing the router to evaluate at `at_savepoint`. **This assumption violates DAG causality:**
+1. Under Flory's core DAG engine rules, a vertex $R$ is scheduled and evaluated *if and only if* all its parents ($\text{parent\_refs}$) have successfully executed (`vertex/succeeded`).
+2. If an upstream try or confirmation barrier fails or is cancelled, the entire branch is halted and shadowed (`subgraph/shadowed`). **The downstream router is pruned and never evaluates.**
+3. Therefore, an evaluating router can never wake up to find an upstream scope cancelled. If the upstream path has an open try, the fact that the router is evaluating mathematically guarantees that all tries succeeded and are `sealed`.
+4. Consequently, for any given router slot in the DAG, its placement state at the moment of evaluation is **strictly singular ($M \equiv 1$)**:
+   - *Pure Read Slot:* Statically known to have no open scopes $\to$ **$M = 1$ (`at_savepoint`)**.
+   - *Transactional Slot:* Preceded by a confirmation barrier sealing tries $\to$ **$M = 1$ (`inside_scope(UnifiedScope)`)**.
+   - *Cancelled / Failed Upstream:* Causally pruned $\to$ Router never evaluates.
 
 **Complexity Analysis:**
-- **Search Space ($N \times M$):** In real-world enterprise SOPs, the number of branches $N$ in a rule template typically ranges from 2 to 8 (rarely exceeding 20). The number of reachable placement states $M$ is bounded by at most 2 (`at_savepoint` or `inside_scope(S)`), because the ancestor graph of *this specific run* is already fixed. Thus, total evaluations per freeze are small (typically 3 to 16 checks).
+- **Search Space ($N \times 1 = N$):** Because $M \equiv 1$ by causal invariance, the search space collapses strictly to the number of rule branches $N$. In enterprise SOPs, $N$ is typically 2 to 8 (rarely exceeding 20).
 - **Execution Cost:** `checkSubDag` is a pure in-memory topological check with zero disk, network, or database I/O. Validating a 2–3 vertex branch in TypeScript takes 10–30 microseconds ($\mu s$). 
-  $$\text{Total CPU Overhead} = 20 \text{ checks} \times 25\mu s \approx 0.5 \text{ ms}$$
-  A sub-millisecond CPU check is negligible compared to database queries (2–5ms) or LLM latency (500–3000ms).
+  $$\text{Total CPU Overhead} = 8 \text{ checks} \times 25\mu s \approx 0.2 \text{ ms}$$
+  A 0.2 ms CPU check is negligible compared to database queries (2–5ms) or LLM latency (500–3000ms).
+- **Zero Runtime Rejection Guarantee:** Because $M \equiv 1$ is invariant and validated against this run's frozen role-scoped view, whichever branch fires at runtime is guaranteed 100% admissible by construction. Runtime rejection probability for rule topology is zero.
 - **Scalability Safeguards:** Q4 registration checks eliminate malformed graphs upfront. For large enterprise rules spanning multiple business domains, static context pruning discards irrelevant branches based on immutable run attributes (e.g., skipping cross-border branches on domestic order runs) before topological checks begin.
 
 **Check-Rules R12 & R13:**

@@ -30,17 +30,50 @@ Consistent with GCP consoles, clicking any vertex does not open a modal, but rat
   - *For Routers (Policy Engine):* Displays the exact rule condition matched to trigger the route.
 - **'Logs' Tab:** Streams raw execution logs specific to that vertex (e.g., standard output from the Go Executor).
 
-### 3. Data Binding (Unidirectional Data Flow & Dumb Renderer)
-The UI does not maintain its own state database, nor does it fold events itself. Per the core architecture (single canonical projector), implementing a second fold pipeline in the browser is strictly forbidden. Instead, the Console acts as a dumb renderer. The TypeScript Engine computes the `surface(stream_seq)` using the canonical versioned projection pipeline and streams the resulting surface JSON to the Console via Server-Sent Events (SSE) or WebSocket. The Console simply subscribes and renders the updated state.
+### 3. Data Binding & Dedicated Backend Console Read Model
+The UI does not maintain its own state database, nor does it fold events itself. Per the core architecture (Doc 01 §4), implementing a second fold pipeline in the browser is strictly forbidden. The Console is strictly a **dumb renderer**.
+
+However, the existing LLM-facing `surface()` projection (which discards `shadowed` vertices and omits timestamps/scopes to conserve context tokens) is insufficient for visual monitoring. To supply the promised UI features without front-end re-computation, the TypeScript Engine exposes a dedicated, versioned **`ConsoleDAGProjection`** read model alongside on-demand detail endpoints:
+
+#### 3.1 Backend `ConsoleDAGProjection` Contract
+The backend projects an enriched observability model streamed via Server-Sent Events (SSE) or WebSocket:
+- **Historical & Shadowed Vertex Preservation:** Unlike the context projector, the Console projection retains `shadowed` vertices (flagged with `is_shadowed: true`). The UI renders them greyed-out with dashed edges, allowing operators to visually inspect replanning history and discarded branches.
+- **Transaction & Timing Metadata:** Every vertex card payload is enriched with:
+  ```jsonc
+  {
+    "vertex_id": "v-1234",
+    "role": "tool",
+    "status": "succeeded",
+    "is_shadowed": false,
+    "txn": {
+      "scope_id": "txn-7f3a",
+      "is_pivot": true,
+      "effect_class": "irreversible"
+    },
+    "timing": {
+      "started_at": "2026-09-08T12:00:00.120Z",
+      "completed_at": "2026-09-08T12:00:00.340Z",
+      "duration_ms": 220
+    },
+    "router_outcome": { "matched_condition": "amount > 100" } // for router vertices
+  }
+  ```
+- **Streaming Semantics:** The backend streams full initial DAG snapshots on connection, followed by lightweight incremental vertex status updates (`vertex_patched`) as events append.
+
+#### 3.2 On-Demand Detail Endpoints (Heavy I/O Offloading)
+To keep streaming DAG payloads under tight bandwidth limits, heavy debugging data is not embedded in the graph stream. The Console Drawer lazily queries dedicated REST endpoints when a user clicks a vertex:
+- `GET /api/v1/runs/:runId/vertices/:vertexId/prompt`: Fetches the fully assembled prompt and raw LLM response.
+- `GET /api/v1/runs/:runId/vertices/:vertexId/logs`: Streams or fetches execution stdout/stderr logs directly from blob storage.
+- `GET /api/v1/runs/:runId/vertices/:vertexId/payload`: Fetches full inputs/outputs exceeding the event log size limit.
 
 ## Rationale
-- **Fits the Event Log Model:** Moving backward or forward in time (via Fork/Replay) simply means re-rendering the DAG canvas at a different `stream_seq`. The UI remains a pure projection of the backend.
-- **Cognitive Load:** The Vertex AI style is proven for handling complex machine-learning and orchestration pipelines. It emphasizes readability for highly nested or heavily branched graphs.
-- **Operational Safety:** Highlighting transaction boundaries (Pivots) prevents operators from misunderstanding why a workflow is moving forward with compensation instead of rolling back.
+- **Preserves Single Projector Law:** The browser never touches raw events or runs graph algorithms. All structural folding, scope derivation, and shadow tracking remain authoritative in the TypeScript Engine.
+- **Cognitive Load:** The Vertex AI style is proven for handling complex machine-learning and orchestration pipelines. Retaining shadowed branches makes replanning intuitive rather than confusingly disappearing nodes.
+- **Bandwidth Efficiency:** Separating the streaming DAG topology from heavy raw logs and prompts ensures the main canvas remains ultra-responsive even during peak 1k TPS bursts.
 
 ## Consequences
-- **Engineering Effort:** Requires standing up a front-end service (likely React/TypeScript) and a read-only API gateway that serves the `surface` projection to the frontend.
-- **Real-time Updates:** To show the JIT expansion smoothly, the Console will need a Server-Sent Events (SSE) or WebSocket connection to stream `event_log` appends to the client.
+- **Backend Read Model:** The TypeScript Engine will maintain a dedicated `ConsoleProjector` implementation alongside the canonical `SurfaceProjector`.
+- **Detail APIs:** Requires implementing read endpoints in the Engine gateway to fetch large payloads and logs from blob storage.
 
 ## Rejected Alternatives
 - **Command-Line Interface (CLI) Only:** While a CLI is useful for triggering runs, it is insufficient for visualizing a branched, nested, running DAG and diagnosing complex pivot/compensation states.

@@ -109,23 +109,39 @@ When a router acts as a join node over parallel branches, freeze admission evalu
 1. **Pre-Declared Common Scope for Atomicity:** If any branch in the router's rule template emits a pivot or joins an open scope, all parallel branches that execute tries intended to be atomic with that pivot **must be declared upfront as members of the same common scope $S$** (Doc 02 R3 natively supports parallel branches within one scope). A `confirmation-barrier` vertex precedes the router to ensure all parallel tries of $S$ reach the `sealed` state. The router then evaluates unambiguously as `inside_scope(S)`. Flory defines no ad-hoc runtime "scope-merge" protocol; atomicity across parallel branches must be declared at graph freeze time.
 2. **Disjoint Scope Isolation:** If parallel branches belong to distinct, uncoordinated scopes ($S_1 \ne S_2$), they **must commit or close before reaching the router join** if the router emits a pivot (since a single pivot cannot bind two independent scopes). Joining distinct open scopes is admitted *only* if the router's rule template is purely read-only (all branches have `effect_class: none`), where the router reads outputs without binding to either transaction scope.
 
-**Runtime Sweeper Fencing, Consistent Lock Hierarchy, and Lease Lifecycles:**
-While DAG causality guarantees a router only runs after parent vertices succeed, TCC reservations have finite lease deadlines (`try_timeout_s`). If a Try's deadline expires before the router emits its branch, the Coordinator's Orphan Sweeper (Doc 07 §3.4, `service.go:299`) requests scope cancellation. To eliminate Time-of-Check to Time-of-Use (TOCTOU) races and indefinite worker hangs:
+**Runtime Sweeper Fencing and Unresolved Attempts:**
+Branch admission, worker claims, and cancellation serialize through the same scope row. A lease grants temporary worker ownership; expiry does not prove that an external request stopped or that its effect is absent.
 
-1. **Consistent Lock Hierarchy (`txn_scope` $\to$ `work_queue`):**
-   Every state-altering transition across router branch admission, worker work claiming, and sweeper cancellation must acquire row locks in the exact same hierarchical order:
-   $$\text{Primary: } \text{txn\_scope (FOR UPDATE)} \longrightarrow \text{Secondary: } \text{work\_queue (FOR UPDATE SKIP LOCKED)}$$
-   - **Atomic Worker Claim (`claim_ready_work`):** When a worker selects a candidate row from `work_queue`, it must lock the associated `txn_scope` (`FOR UPDATE`) within the claiming transaction. It verifies `txn_scope.state = 'open'` under lock. If the scope is in `'cancelling'` or `'cancelled'`, the worker aborts the claim and purges the task. Only if `state = 'open'` does it update `work_queue` with `claimed_by` and establish `lease_until = now() + lease_duration`.
-   - **Atomic Branch Admission:** When the engine admits an emitted branch into scope $S$, it acquires `txn_scope FOR UPDATE`. It verifies `state = 'open'` AND checks that no sealed try in $S$ has expired (`NOT EXISTS (SELECT 1 FROM txn_bracket WHERE scope_id = S AND state = 'sealed' AND deadline_at < now())`). If any try expired, admission fails immediately (`proposal_rejected`).
-   - **In-Transaction Sweeper Re-Validation (`request_scope_cancel`):** The sweeper cannot rely on the earlier `ExpiredScopes` query result. Inside the cancellation transaction, under `txn_scope FOR UPDATE`, it must re-verify:
-     1. `txn_scope.state = 'open'`;
-     2. An expired sealed try still exists in $S$;
-     3. No member vertex holds a live execution lease (`NOT EXISTS (SELECT 1 FROM work_queue WHERE scope_id = S AND lease_until > now())`).
-     Only if all three conditions hold does it transition `state = 'cancelling'`, append `txn/cancel (requested)`, and atomically purge all unleased/orphaned work (`DELETE FROM work_queue WHERE scope_id = S`).
+1. **Atomic Admission and Claims:**
+   - Acquire locks in the order `txn_scope FOR UPDATE`, then `work_queue FOR UPDATE SKIP LOCKED`. Candidate discovery must not lock the queue before the scope. Branch admission checks `state = 'open'`, rejects expired sealed tries, and appends the branch and queues its work in that same transaction.
+   - A worker checks the scope state and establishes its bounded lease in one transaction. If cancellation wins first, ordinary queued work cannot be claimed; if claiming wins first, the live lease blocks sweeper cancellation.
+   - Claim eligibility depends on the operation's frozen phase, not merely on the existence of a scope:
 
-2. **Lease Renewal Semantics & Stuck Task Prevention:**
-   - **No Unbounded Blind Heartbeats:** Worker leases are strictly bounded and finite (`LeaseDuration`, default 30s). Flory intentionally omits background auto-heartbeat goroutines to prevent deadlocked, hanging, or OOM-frozen workers from holding leases indefinitely. Leases are only renewed between bounded retry attempts via `release_work` with deterministic backoff.
-   - **Active Progress Defined by Live Leases, Not Queue Non-Emptiness:** Sweeper cancellation is fenced strictly by **live unexpired leases** (`lease_until > now()`), never by mere presence of rows in `work_queue`. If a downstream task or worker hangs, its lease naturally expires at `now()`. Once `lease_until <= now()`, the sweeper's in-transaction re-validation recognizes the absence of active execution, acquires `txn_scope FOR UPDATE`, purges the hung `work_queue` task, and safely cancels the scope back to the savepoint. This ensures hung workers or orphaned queue items can never cause permanent deadlock or block cleanup.
+     | Work | Eligible scope state |
+     |---|---|
+     | New pre-pivot member work | `open` |
+     | Already-admitted post-pivot forward work | `pivot-passed`; also `committed` if the frozen graph permits work after confirmation |
+     | Confirm or forward-recovery operation | The existing Coordinator recovery path; never a new pre-pivot claim |
+     | Cancel or compensate | `cancelling`, through the existing cancellation-member queue |
+     | Unscoped read | No scope lock; retain the existing executor ownership rule |
+
+   - `pivot-inflight` is reserved for the admitted pivot and its outcome-resolution path. `suspended` blocks automatic business dispatch until explicit recovery. Ordinary work cannot run in `cancelling` or `cancelled`. Claim eligibility does not replace parent-dependency checks, pivot admission, or the prohibition on backward compensation after a pivot.
+
+2. **Durable Attempt Evidence:**
+   Before sending a side-effecting request, the Coordinator records its attempt identity, idempotency key, and start durably while validating scope state and lease ownership under the scope lock. An attempt remains unresolved until a definitive outcome is recorded. Queue deletion, lease expiry, or a transport timeout must never erase or resolve this evidence. A recorded start with no recorded outcome is conservatively unresolved, even if the worker may have crashed before sending.
+
+3. **Expiry Means Reconcile or Suspend:**
+   - Leases remain finite. On expiry, do not assume that the external operation has stopped and do not automatically redispatch an unresolved side-effecting attempt.
+   - Under the scope lock, the sweeper rechecks the expired sealed try, scope state, live leases, and unresolved attempts. If there is a live lease, it defers cancellation. If an attempt is unresolved, it preserves the queue and attempt evidence, records suspension, and escalates to L4. Suspension preserves pivot-admission and pivot-passage evidence; it never clears the no-cancel fence. The existing registered pivot status-query recovery remains the exception: it may establish occurrence or absence before deciding the next action.
+   - For an unresolved non-pivot attempt, this proposal adds no new automatic reconciliation protocol. An operator must establish the final external outcome and ensure the old request cannot later create another effect before authorizing recovery. A transient “not found” response is insufficient while the original request may still arrive. Late worker results may be retained as evidence, but do not authorize new dispatch, automatic unsuspension, or omission of cleanup.
+   - Only an `open` scope with an expired sealed try, no live execution lease, and no unresolved side-effecting attempt may automatically enter cancellation. The Coordinator atomically appends `txn/cancel (requested)` and removes pending ordinary work, retaining attempt history and all recorded effects needed for cancellation. Post-pivot states never take this path.
+
+This conservative policy deliberately trades automatic cleanup for explicit intervention when an external outcome is unknown. It avoids adding downstream fencing tokens while preventing lease expiry from being mistaken for proof that cancellation is safe.
+
+**Required Verification Cases:**
+- Cancellation wins before claim: no member adapter call starts. Claim wins first: the live lease prevents cancellation.
+- A request is delayed beyond lease expiry: the scope suspends, evidence remains, and neither automatic cancellation nor redispatch occurs. A late success remains visible for recovery.
+- Payment has passed its pivot: already-admitted forward work can still be claimed, while pre-pivot work and backward cancellation remain blocked.
 
 **Scope Widening:** By default, the engine derives the minimum required scope based on tool footprint intersection (Doc 02 §3.1). When business atomicity requires binding unrelated footprints together (e.g., deducting company balance and updating ERP stock in a Supplier Procurement flow), the human-authored rule template can explicitly declare a widened `txn/scope` (Doc 02 §3.2 workflow policy). Widening beyond the minimum is legal; narrowing below it is rejected by R11.
 
@@ -135,10 +151,10 @@ In enterprise workflows, the downstream planner is a legitimate, declared stage 
 **Strict Failure Semantics (No LLM Replanning on Deterministic Failures):**
 When a router matches a deterministic branch and downstream tools execute, errors are strictly governed by the distributed transaction protocol (Doc 02 §1, Doc 07 §2.3):
 - **Never Replan with an LLM on Deterministic Failures:** A deterministic rule represents rigid business policy. If a deterministic tool fails, allowing an LLM planner to "replan" and invent an ad-hoc workaround (e.g., issuing unapproved discount coupons when payment gateway times out) violates financial and audit compliance.
-- **Pre-Pivot Failure:** If a tool fails *before* passing the pivot, the coordinator safely triggers scope cancellation (TCC Cancel / Saga compensation) to cleanly release held resources back to the savepoint.
+- **Pre-Pivot Failure:** A definitive failure before the pivot permits scope cancellation (TCC Cancel / Saga compensation) once §4 establishes that no member attempt remains unresolved. An unknown outcome instead requires reconciliation or suspension.
 - **Post-Pivot Failure:** If a tool fails *after* a pivot has passed (e.g., payment succeeded, but warehouse notification timed out), **cancellation is strictly prohibited**. The database trigger `check_pivot_pass` and coordinator state machine reject any cancel event. The coordinator enforces idempotent forward recovery (retries).
 - **Terminal Escalation to L4 (Separated by Pivot Boundary):** If retries are exhausted or an unrecoverable failure occurs on a deterministic path:
-  - *If Pre-Pivot:* Scopes are rolled back cleanly, and the run halts to **L4 (Human Intervention)**.
+  - *If Pre-Pivot:* Cancel the scope only when §4 permits it, then halt to **L4 (Human Intervention)**. If any member outcome remains unresolved, suspend with its evidence and reservations preserved instead.
   - *If Post-Pivot:* **No rollback is attempted**. The run halts and suspends with all committed state and unconfirmed tries preserved, escalating to **L4** for operator-assisted forward completion or manual ledger reconciliation.
   - *If Pivot Outcome is Unknown (e.g., network timeout during pivot call):* The coordinator does **not** immediately halt to manual intervention. It executes automatic recovery via the pivot's registered `status_query` operation (Doc 07 §3.3, `processPivot`) using its frozen retry policy. If the status query confirms execution occurred, it proceeds to `txn/pivot-passed`; if it confirms execution did not occur, the guarded cancellation path is safely permitted. Only if the status query itself fails or remains unresolved does the scope suspend to **L4**. Cancellation is strictly prohibited while the outcome remains indeterminate.
 
@@ -176,23 +192,10 @@ At the freeze introducing the router, the engine runs `checkSubDag` over:
 $$\text{Total Verifications} = N \text{ (branches)} \times M \text{ (reachable placements)}$$
 against this run's actual role-scoped tool view and existing-scope snapshot.
 
-**The Causal Invariance Proof ($M \equiv 1$):**
-Earlier drafts hypothesized $M = 2$ on the assumption that an upstream transaction scope might be cancelled between freeze and evaluation, causing the router to evaluate at `at_savepoint`. **This assumption violates DAG causality:**
-1. Under Flory's core DAG engine rules, a vertex $R$ is scheduled and evaluated *if and only if* all its parents ($\text{parent\_refs}$) have successfully executed (`vertex/succeeded`).
-2. If an upstream try or confirmation barrier fails or is cancelled, the entire branch is halted and shadowed (`subgraph/shadowed`). **The downstream router is pruned and never evaluates.**
-3. Therefore, an evaluating router can never wake up to find an upstream scope cancelled. If the upstream path has an open try, the fact that the router is evaluating mathematically guarantees that all tries succeeded and are `sealed`.
-4. Consequently, for any given router slot in the DAG, its placement state at the moment of evaluation is **strictly singular ($M \equiv 1$)**:
-   - *Pure Read Slot:* Statically known to have no open scopes $\to$ **$M = 1$ (`at_savepoint`)**.
-   - *Transactional Slot:* Preceded by a confirmation barrier sealing tries $\to$ **$M = 1$ (`inside_scope(UnifiedScope)`)**.
-   - *Cancelled / Failed Upstream:* Causally pruned $\to$ Router never evaluates.
+**Static Placement and Runtime Validity:**
+Freeze admission validates each branch against its declared placement and the existing-scope snapshot. A slot with one fixed placement requires `N` branch checks; a supported topology with multiple placements requires every relevant combination. Parent success does not establish that a scope is still open or that a reservation is unexpired. Cancellation never converts an `inside_scope(S)` branch into a fresh transaction at a savepoint.
 
-**Complexity Analysis:**
-- **Search Space ($N \times 1 = N$):** Because $M \equiv 1$ by causal invariance, the search space collapses strictly to the number of rule branches $N$. In enterprise SOPs, $N$ is typically 2 to 8 (rarely exceeding 20).
-- **Execution Cost:** `checkSubDag` is a pure in-memory topological check with zero disk, network, or database I/O. Validating a 2–3 vertex branch in TypeScript takes 10–30 microseconds ($\mu s$). 
-  $$\text{Total CPU Overhead} = 8 \text{ checks} \times 25\mu s \approx 0.2 \text{ ms}$$
-  A 0.2 ms CPU check is negligible compared to database queries (2–5ms) or LLM latency (500–3000ms).
-- **Zero Runtime Rejection Guarantee:** Because $M \equiv 1$ is invariant and validated against this run's frozen role-scoped view, whichever branch fires at runtime is guaranteed 100% admissible by construction. Runtime rejection probability for rule topology is zero.
-- **Scalability Safeguards:** Q4 registration checks eliminate malformed graphs upfront. For large enterprise rules spanning multiple business domains, static context pruning discards irrelevant branches based on immutable run attributes (e.g., skipping cross-border branches on domestic order runs) before topological checks begin.
+Static checks reject illegal shapes before execution. Runtime admission still performs the atomic checks in §4 and may reject a previously shape-valid branch because transaction state changed. The checks have different responsibilities; freeze admission does not guarantee zero runtime rejection. Its cost depends on branch count and graph size, while runtime fencing also requires a database transaction.
 
 **Refined Check-Rules R12 & R13:**
 - **R12 (Placement & Scope Invariants):**
@@ -318,7 +321,7 @@ Router evaluation produces one of four mutually exclusive outcomes:
 1. `matched(i)`: Emits the matched branch sub-DAG. Downstream planner is shadowed if branch is terminal.
 2. `no_match`: Structural fall-through. Control passes directly to the downstream planner.
 3. `evaluation_error`: Fatal runtime error (e.g., malformed field path). Raises an operational alert and halts to L4.
-4. `proposal_rejected`: Prevented upfront by freeze-time exhaustive admission.
+4. `proposal_rejected`: Runtime scope or reservation checks reject an otherwise statically checked branch. Append `vertex/failed` with the rejection reason; do not publish runnable branch work or fall through to an LLM planner. Leave transaction cleanup or suspension to the Coordinator under §4. Illegal static shapes are rejected at freeze time before router execution.
 
 ### 7. Prompt Invisibility in Context Reduction
 To preserve prompt cache stability and prevent noise:
@@ -384,7 +387,7 @@ Suppose the run is authorized under role `junior-agent`, which lacks permission 
 
 ## Rationale
 - **Mathematical Invariance:** Mandatory interposition eliminates structural graph divergence between ruled and unruled runs, preserving prompt caches and enabling fork-based counterfactual evaluation.
-- **Zero Late Rejections:** Moving validation from runtime to freeze-time exhaustive admission ($N \times M$) ensures runtime execution never encounters structural deadlocks after irreversible actions have committed.
+- **Early Shape Validation:** Exhaustive freeze admission rejects illegal branch shapes before execution. Atomic runtime checks separately protect against changed scope state, expired reservations, and unresolved external attempts.
 - **Strict Separation of Concerns:** Rigid business policies execute deterministically without LLM hallucination risk, while transaction failures are contained by protocol rollback rather than ad-hoc model replanning.
 
 ## Consequences
@@ -414,7 +417,7 @@ Suppose the run is authorized under role `junior-agent`, which lacks permission 
 *Why rejected:* Assumes deterministic branch failures should be replanned by LLMs. Allowing an LLM to invent workarounds around failed deterministic policy is a critical audit violation. Deterministic failures must rollback and escalate to L4.
 
 ### 6. Rely Purely on Runtime Check-Rule Interception
-*Why rejected:* For deterministic rules, runtime rejections are unrecoverable defects. If a rejection occurs after an irreversible pivot, the system is deadlocked below the backtrack floor. Detection must occur at freeze time.
+*Why rejected:* Detecting an illegal rule shape only after execution may leave irreversible work without a valid continuation. Validate static shapes at freeze time and retain runtime fencing for mutable transaction state.
 
 ### 7. Harden Runtime Interception Instead of Moving Detection Earlier
-*Why rejected:* No amount of runtime checking can undo a captured payment. Moving validation to freeze-time exhaustive admission is sub-millisecond in cost and guarantees zero runtime structural rejections.
+*Why rejected:* Runtime checks cannot undo a captured payment or replace early shape validation. Both freeze-time validation and atomic runtime admission are required; unresolved external outcomes suspend for recovery rather than triggering speculative rollback.

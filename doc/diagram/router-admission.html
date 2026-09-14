@@ -4,115 +4,111 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Flory Router: Interposition, Template Binding, and Sub-DAG Admission</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lxgw-wenkai-tc-webfont@1.2.0/style.min.css">
 <style>
     :root {
-        --bg-color: #f8f9fa;
-        --surface: #ffffff;
-        --text-color: #343a40;
-        --muted: #6c757d;
-        --line-color: #868e96;
+        /* Shared palette — identical hex values in both themes */
+        --blue-fill:   #A5D8FF; --blue-stroke:   #1971C2;
+        --green-fill:  #B2F2BB; --green-stroke:  #2F9E44;
+        --violet-fill: #D0BFFF; --violet-stroke: #6741D9;
+        --orange-fill: #FFC078; --orange-stroke: #E8590C;
+        --red-fill:    #FFC9C9; --red-stroke:    #E03131;
+        --teal-fill:   #99E9F2; --teal-stroke:   #0C8599;
+        --pink-fill:   #FCC2D7; --pink-stroke:   #C2255C;
+        --yellow-fill: #FFEC99; --yellow-stroke: #F08C00;
 
-        --c-planner-bg: #f3f0ff;
-        --c-planner-br: #845ef7;
-        --c-router-bg: #e7f5ff;
-        --c-router-br: #339af0;
-        --c-tool-bg: #ebfbee;
-        --c-tool-br: #51cf66;
-        --c-gate-bg: #fff4e6;
-        --c-gate-br: #ffa94d;
-        --c-txn-bg: #fff0f6;
-        --c-txn-br: #f06595;
-        --c-reject-bg: #fff5f5;
-        --c-reject-br: #fa5252;
-        --c-store-bg: #f1f3f5;
-        --c-store-br: #adb5bd;
+        /* Theme-dependent surface tokens */
+        --bg: #FFFFFF;
+        --surface: #F8F9FA;
+        --ink: #1E1E1E;
+        --muted: #868E96;
+        --node-bg-alpha: 1;
+        --shadow: 0 2px 6px rgba(0,0,0,.08);
+        --ok-text: var(--green-stroke);
+        --bad-text: var(--red-stroke);
+        --step-text: var(--yellow-stroke);
 
-        --ok: #2f9e44;
-        --bad: #e03131;
-        --accent: #b45309;
-        --shadow: 0 2px 6px rgba(0,0,0,0.08);
+        --font: "LXGW WenKai TC", "LXGW WenKai", ui-serif, Georgia, serif;
+        --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     }
 
-    [data-theme="dark"] {
-        --bg-color: #1a1d20;
-        --surface: #22262a;
-        --text-color: #f1f3f5;
-        --muted: #adb5bd;
-        --line-color: #868e96;
+    @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+            --bg: #16181C;
+            --surface: #1E2126;
+            --ink: #E9ECEF;
+            --muted: #ADB5BD;
+            --node-bg-alpha: .22;
+            --shadow: 0 2px 8px rgba(0,0,0,.5);
+            --ok-text: var(--green-fill);
+            --bad-text: var(--red-fill);
+            --step-text: var(--yellow-fill);
+        }
+    }
 
-        --c-planner-bg: #3b2f63;
-        --c-planner-br: #b197fc;
-        --c-router-bg: #16456e;
-        --c-router-br: #74c0fc;
-        --c-tool-bg: #1c5b2b;
-        --c-tool-br: #8ce99a;
-        --c-gate-bg: #7a4508;
-        --c-gate-br: #ffc078;
-        --c-txn-bg: #7a2246;
-        --c-txn-br: #faa2c1;
-        --c-reject-bg: #6b2020;
-        --c-reject-br: #ff8787;
-        --c-store-bg: #343a40;
-        --c-store-br: #adb5bd;
-
-        --ok: #69db7c;
-        --bad: #ff8787;
-        --accent: #ffd43b;
-        --shadow: 0 2px 8px rgba(0,0,0,0.5);
+    :root[data-theme="dark"] {
+        --bg: #16181C;
+        --surface: #1E2126;
+        --ink: #E9ECEF;
+        --muted: #ADB5BD;
+        --node-bg-alpha: .22;
+        --shadow: 0 2px 8px rgba(0,0,0,.5);
+        --ok-text: var(--green-fill);
+        --bad-text: var(--red-fill);
+        --step-text: var(--yellow-fill);
     }
 
     body {
-        background: var(--bg-color);
-        color: var(--text-color);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--font);
         margin: 0;
         padding: 24px 20px 60px;
-        transition: background-color .3s, color .3s;
     }
 
     .controls {
         position: fixed;
         top: 16px;
         right: 16px;
-        background: rgba(128,128,128,.18);
+        background: color-mix(in srgb, var(--muted) 18%, transparent);
         padding: 5px;
-        border-radius: 6px;
+        border-radius: 8px;
         z-index: 100;
     }
 
     button {
-        background: none;
-        border: 1px solid var(--text-color);
-        color: var(--text-color);
+        background: transparent;
+        border: 1px solid var(--muted);
+        color: var(--ink);
         padding: 4px 10px;
-        border-radius: 4px;
+        border-radius: 6px;
         cursor: pointer;
-        font: inherit;
+        font-family: var(--font);
         font-size: .85rem;
     }
 
-    button.active { background: var(--text-color); color: var(--bg-color); }
+    button.active { background: var(--ink); color: var(--bg); }
 
     header { max-width: 980px; margin: 0 auto 8px; }
-    h1 { font-size: 1.45rem; margin: 0 0 6px; }
+    h1.title { font-size: 1.45rem; margin: 0 0 6px; font-family: var(--font); }
     h2 {
         font-size: 1.05rem;
         margin: 0 0 4px;
         padding-bottom: 6px;
-        border-bottom: 1px solid var(--line-color);
+        font-family: var(--font);
+        border-bottom: 1px solid color-mix(in srgb, var(--muted) 50%, transparent);
     }
-    p.lede, p.caption { color: var(--muted); font-size: .88rem; line-height: 1.5; margin: 6px 0 0; }
-    a { color: var(--c-router-br); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    p.lede, p.caption { color: var(--muted); font-size: .88rem; line-height: 1.55; margin: 6px 0 0; }
+    a { color: var(--blue-stroke); text-decoration-thickness: 1px; text-underline-offset: 2px; }
 
     section {
         max-width: 980px;
         margin: 26px auto;
         background: var(--surface);
-        border: 1px solid var(--line-color);
+        border: 1px solid color-mix(in srgb, var(--muted) 45%, transparent);
         border-radius: 10px;
         padding: 16px 20px 20px;
         box-shadow: var(--shadow);
-        transition: background-color .3s, border-color .3s;
     }
 
     svg.panel { width: 100%; height: auto; display: block; margin-top: 10px; overflow: visible; }
@@ -120,36 +116,38 @@
     .legend { max-width: 980px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 14px; font-size: .82rem; color: var(--muted); }
     .legend span { display: inline-flex; align-items: center; gap: 6px; }
     .swatch { width: 14px; height: 14px; border-radius: 3px; border: 2px solid; display: inline-block; }
-    .sw-planner { background: var(--c-planner-bg); border-color: var(--c-planner-br); }
-    .sw-router  { background: var(--c-router-bg);  border-color: var(--c-router-br); }
-    .sw-tool    { background: var(--c-tool-bg);    border-color: var(--c-tool-br); }
-    .sw-gate    { background: var(--c-gate-bg);    border-color: var(--c-gate-br); }
-    .sw-txn     { background: var(--c-txn-bg);     border-color: var(--c-txn-br); }
-    .sw-reject  { background: var(--c-reject-bg);  border-color: var(--c-reject-br); }
+    .sw-planner { background: color-mix(in srgb, var(--violet-fill) calc(var(--node-bg-alpha)*100%), transparent); border-color: var(--violet-stroke); }
+    .sw-router  { background: color-mix(in srgb, var(--blue-fill)   calc(var(--node-bg-alpha)*100%), transparent); border-color: var(--blue-stroke); }
+    .sw-tool    { background: color-mix(in srgb, var(--green-fill)  calc(var(--node-bg-alpha)*100%), transparent); border-color: var(--green-stroke); }
+    .sw-gate    { background: color-mix(in srgb, var(--orange-fill) calc(var(--node-bg-alpha)*100%), transparent); border-color: var(--orange-stroke); }
+    .sw-txn     { background: color-mix(in srgb, var(--pink-fill)   calc(var(--node-bg-alpha)*100%), transparent); border-color: var(--pink-stroke); }
+    .sw-reject  { background: color-mix(in srgb, var(--red-fill)    calc(var(--node-bg-alpha)*100%), transparent); border-color: var(--red-stroke); }
+    .sw-store   { background: color-mix(in srgb, var(--teal-fill)   calc(var(--node-bg-alpha)*100%), transparent); border-color: var(--teal-stroke); }
 
-    /* SVG semantics */
+    /* SVG node semantics: fill = palette fill at the theme's alpha, border = palette stroke */
     .box { stroke-width: 2; rx: 7; }
-    .b-planner { fill: var(--c-planner-bg); stroke: var(--c-planner-br); }
-    .b-router  { fill: var(--c-router-bg);  stroke: var(--c-router-br); }
-    .b-tool    { fill: var(--c-tool-bg);    stroke: var(--c-tool-br); }
-    .b-gate    { fill: var(--c-gate-bg);    stroke: var(--c-gate-br); }
-    .b-txn     { fill: var(--c-txn-bg);     stroke: var(--c-txn-br); }
-    .b-reject  { fill: var(--c-reject-bg);  stroke: var(--c-reject-br); }
-    .b-store   { fill: var(--c-store-bg);   stroke: var(--c-store-br); }
-    .b-ghost   { fill: none; stroke: var(--line-color); stroke-dasharray: 5 4; }
+    .b-planner { fill: color-mix(in srgb, var(--violet-fill) calc(var(--node-bg-alpha)*100%), transparent); stroke: var(--violet-stroke); }
+    .b-router  { fill: color-mix(in srgb, var(--blue-fill)   calc(var(--node-bg-alpha)*100%), transparent); stroke: var(--blue-stroke); }
+    .b-tool    { fill: color-mix(in srgb, var(--green-fill)  calc(var(--node-bg-alpha)*100%), transparent); stroke: var(--green-stroke); }
+    .b-gate    { fill: color-mix(in srgb, var(--orange-fill) calc(var(--node-bg-alpha)*100%), transparent); stroke: var(--orange-stroke); }
+    .b-txn     { fill: color-mix(in srgb, var(--pink-fill)   calc(var(--node-bg-alpha)*100%), transparent); stroke: var(--pink-stroke); }
+    .b-reject  { fill: color-mix(in srgb, var(--red-fill)    calc(var(--node-bg-alpha)*100%), transparent); stroke: var(--red-stroke); }
+    .b-store   { fill: color-mix(in srgb, var(--teal-fill)   calc(var(--node-bg-alpha)*100%), transparent); stroke: var(--teal-stroke); }
+    .b-ghost   { fill: none; stroke: var(--muted); stroke-dasharray: 5 4; }
 
-    text { fill: var(--text-color); font-family: inherit; }
+    text { fill: var(--ink); font-family: var(--font); }
     .t-title { font-size: 13.5px; font-weight: 700; }
     .t-body  { font-size: 11.5px; }
-    .t-mono  { font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .t-mono  { font-size: 11px; font-family: var(--font-mono); }
     .t-muted { fill: var(--muted); font-size: 11px; }
-    .t-ok    { fill: var(--ok); font-size: 11.5px; font-weight: 600; }
-    .t-bad   { fill: var(--bad); font-size: 11.5px; font-weight: 600; }
-    .t-step  { fill: var(--accent); font-size: 12px; font-weight: 700; }
+    .t-sub   { fill: var(--ink); fill-opacity: .78; font-size: 11px; }
+    .t-ok    { fill: var(--ok-text); font-size: 11.5px; font-weight: 700; }
+    .t-bad   { fill: var(--bad-text); font-size: 11.5px; font-weight: 700; }
+    .t-step  { fill: var(--step-text); font-size: 12px; font-weight: 700; }
 
-    .edge { stroke: var(--line-color); stroke-width: 1.8; fill: none; }
-    .edge-ok  { stroke: var(--ok);  stroke-width: 2; fill: none; }
-    .edge-bad { stroke: var(--bad); stroke-width: 2; fill: none; }
+    .edge { stroke: var(--muted); stroke-width: 1.8; fill: none; }
+    .edge-ok  { stroke: var(--green-stroke); stroke-width: 2; fill: none; }
+    .edge-bad { stroke: var(--red-stroke); stroke-width: 2; fill: none; }
     .edge-dash { stroke-dasharray: 5 4; }
     .arrowhead { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 </style>
@@ -163,7 +161,7 @@
 </div>
 
 <header>
-    <h1>Router: Interposition, Template Binding, and Sub-DAG Admission</h1>
+    <h1 class="title">Router: Interposition, Template Binding, and Sub-DAG Admission</h1>
     <p class="lede">
         How a rule-governed transition is taken without a model call. Companion to
         <a href="../design/10-deterministic-routers.md">Doc 10 — Deterministic Routers and Rule Templates</a>;
@@ -186,9 +184,9 @@
     <p class="caption">A planner never writes router syntax. When its proposal wires a tool caller straight into a planner, the engine normalizes the graph. Topology is therefore identical whether or not a rule is bound — attaching a rule changes a pin, never a shape.</p>
     <svg class="panel" viewBox="0 0 900 350" role="img" aria-label="Interposition of a router on a tool-caller to planner edge">
         <defs>
-            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto" style="color: var(--line-color)"><polyline points="2,2 8,5 2,8" class="arrowhead"/></marker>
-            <marker id="ar-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto" style="color: var(--ok)"><polyline points="2,2 8,5 2,8" class="arrowhead"/></marker>
-            <marker id="ar-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto" style="color: var(--bad)"><polyline points="2,2 8,5 2,8" class="arrowhead"/></marker>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto" style="color: var(--muted)"><polyline points="2,2 8,5 2,8" class="arrowhead"/></marker>
+            <marker id="ar-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto" style="color: var(--green-stroke)"><polyline points="2,2 8,5 2,8" class="arrowhead"/></marker>
+            <marker id="ar-bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto" style="color: var(--red-stroke)"><polyline points="2,2 8,5 2,8" class="arrowhead"/></marker>
         </defs>
 
         <text x="0" y="14" class="t-step">1 — as proposed</text>
@@ -216,7 +214,8 @@
         <text x="625" y="86" class="t-body">planner as a direct successor.</text>
         <text x="625" y="102" class="t-muted">The engine interposes one.</text>
 
-        <path d="M 510 112 V 150" class="edge edge-dash" marker-end="url(#ar)"/>
+        <path d="M 510 112 V 148 H 338 V 210" class="edge edge-dash" marker-end="url(#ar)"/>
+        <text x="470" y="140" class="t-muted" text-anchor="middle">the rejected edge becomes this router</text>
 
         <text x="0" y="176" class="t-step">2 — after normalization</text>
 
@@ -264,9 +263,9 @@
         <text x="115" y="50" class="t-title" text-anchor="middle">router vertex</text>
         <text x="115" y="68" class="t-mono" text-anchor="middle">template_ref: rule://…@v3</text>
 
-        <path d="M 210 57 H 330" class="edge" marker-end="url(#ar)"/>
-        <text x="270" y="48" class="t-muted" text-anchor="middle">O(1) by URI</text>
-        <text x="270" y="62" class="t-muted" text-anchor="middle">+ content digest</text>
+        <path d="M 210 57 H 280 V 92 H 330" class="edge" marker-end="url(#ar)"/>
+        <text x="247" y="34" class="t-muted" text-anchor="middle">O(1) by URI</text>
+        <text x="247" y="48" class="t-muted" text-anchor="middle">+ content digest</text>
 
         <text x="0" y="122" class="t-step">Track 2 — slot-based (engine-interposed)</text>
 
@@ -276,23 +275,23 @@
         <text x="115" y="192" class="t-mono" text-anchor="middle">workflow_type + sorted(</text>
         <text x="115" y="206" class="t-mono" text-anchor="middle">upstream_tools) + planner)</text>
 
-        <path d="M 210 178 H 330" class="edge" marker-end="url(#ar)"/>
-        <text x="270" y="170" class="t-muted" text-anchor="middle">lookup by</text>
-        <text x="270" y="184" class="t-muted" text-anchor="middle">slot coordinate</text>
+        <path d="M 210 178 H 280 V 146 H 330" class="edge" marker-end="url(#ar)"/>
+        <text x="262" y="199" class="t-muted" text-anchor="middle">lookup by</text>
+        <text x="262" y="213" class="t-muted" text-anchor="middle">slot coordinate</text>
 
         <rect x="333" y="60" width="200" height="118" class="box b-store"/>
         <text x="433" y="88" class="t-title" text-anchor="middle">Rule-template store</text>
         <text x="433" y="108" class="t-body" text-anchor="middle">Engine-owned</text>
         <text x="433" y="124" class="t-body" text-anchor="middle">immutable, content-addressed</text>
-        <text x="433" y="146" class="t-muted" text-anchor="middle">admitted under Q1–Q6</text>
-        <text x="433" y="162" class="t-muted" text-anchor="middle">before any router may bind it</text>
+        <text x="433" y="146" class="t-body" text-anchor="middle">admitted under Q1–Q6</text>
+        <text x="433" y="162" class="t-body" text-anchor="middle">before any router may bind it</text>
 
         <path d="M 533 100 H 620" class="edge-ok" marker-end="url(#ar-ok)"/>
         <rect x="623" y="76" width="180" height="48" class="box b-router"/>
         <text x="713" y="96" class="t-title" text-anchor="middle">hit — pinned template</text>
         <text x="713" y="113" class="t-body" text-anchor="middle">becomes a pin_version</text>
 
-        <path d="M 533 142 H 620" class="edge edge-dash" marker-end="url(#ar)"/>
+        <path d="M 533 142 H 578 V 160 H 620" class="edge edge-dash" marker-end="url(#ar)"/>
         <rect x="623" y="136" width="180" height="48" class="box b-ghost"/>
         <text x="713" y="156" class="t-title" text-anchor="middle">miss — pass-through</text>
         <text x="713" y="173" class="t-body" text-anchor="middle">evaluates to no_match</text>
@@ -309,7 +308,7 @@
         <rect x="473" y="258" width="400" height="66" class="box b-store"/>
         <text x="673" y="280" class="t-title" text-anchor="middle">Engine-owned configuration stream</text>
         <text x="673" y="298" class="t-body" text-anchor="middle">separate from every run stream · never written by gatewayd</text>
-        <text x="673" y="315" class="t-muted" text-anchor="middle">replay resolves the template bound at any historical position</text>
+        <text x="673" y="315" class="t-body" text-anchor="middle">replay resolves the template bound at any historical position</text>
     </svg>
 </section>
 
@@ -378,7 +377,7 @@
 
         <rect x="315" y="94" width="250" height="46" class="box b-router"/>
         <text x="440" y="114" class="t-title" text-anchor="middle">router: vertex/started</text>
-        <text x="440" y="131" class="t-muted" text-anchor="middle">mandatory, even though nothing is called</text>
+        <text x="440" y="131" class="t-sub" text-anchor="middle">mandatory, even though nothing is called</text>
 
         <path d="M 440 140 V 164" class="edge" marker-end="url(#ar)"/>
 
@@ -392,7 +391,7 @@
 
         <rect x="80" y="264" width="240" height="46" class="box b-router"/>
         <text x="200" y="284" class="t-title" text-anchor="middle">emit branch sub-DAG</text>
-        <text x="200" y="301" class="t-muted" text-anchor="middle">subgraph/proposed</text>
+        <text x="200" y="301" class="t-mono t-sub" text-anchor="middle">subgraph/proposed</text>
 
         <path d="M 200 310 V 332" class="edge" marker-end="url(#ar)"/>
 
@@ -406,7 +405,7 @@
         <text x="125" y="450" class="t-title" text-anchor="middle">admitted</text>
         <text x="125" y="468" class="t-mono" text-anchor="middle">vertex/succeeded</text>
         <text x="125" y="482" class="t-mono" text-anchor="middle">{matched_condition: i}</text>
-        <text x="125" y="497" class="t-muted" text-anchor="middle">terminal branch shadows P2</text>
+        <text x="125" y="497" class="t-sub" text-anchor="middle">terminal branch shadows P2</text>
 
         <path d="M 270 396 V 428" class="edge-bad" marker-end="url(#ar-bad)"/>
         <rect x="243" y="430" width="212" height="72" class="box b-reject"/>
@@ -422,7 +421,7 @@
         <rect x="570" y="264" width="240" height="60" class="box b-planner"/>
         <text x="690" y="286" class="t-title" text-anchor="middle">fall through to planner P2</text>
         <text x="690" y="304" class="t-mono" text-anchor="middle">vertex/succeeded {null}</text>
-        <text x="690" y="318" class="t-muted" text-anchor="middle">router invisible in the prompt</text>
+        <text x="690" y="318" class="t-sub" text-anchor="middle">router invisible in the prompt</text>
 
         <path d="M 690 324 V 348" class="edge" marker-end="url(#ar)"/>
         <rect x="570" y="350" width="240" height="46" class="box b-ghost"/>
@@ -469,7 +468,7 @@
 
         <rect x="492" y="76" width="175" height="40" class="box b-reject"/>
         <text x="579" y="94" class="t-body" text-anchor="middle">opens_scope → rejected</text>
-        <text x="579" y="108" class="t-muted" text-anchor="middle">an open scope is no savepoint</text>
+        <text x="579" y="108" class="t-sub" text-anchor="middle">an open scope is no savepoint</text>
 
         <rect x="683" y="76" width="175" height="40" class="box b-txn"/>
         <text x="770" y="94" class="t-body" text-anchor="middle">has_pivot → admitted only</text>
@@ -495,7 +494,7 @@
         <path d="M 335 287 H 358" class="edge" marker-end="url(#ar)"/>
         <rect x="360" y="262" width="58" height="50" class="box b-router"/>
         <text x="389" y="284" class="t-body" text-anchor="middle">router</text>
-        <text x="389" y="299" class="t-muted" text-anchor="middle">in S</text>
+        <text x="389" y="299" class="t-sub" text-anchor="middle">in S</text>
 
         <rect x="470" y="212" width="410" height="132" class="box b-ghost"/>
         <text x="675" y="236" class="t-title" text-anchor="middle">Disjoint open scopes</text>
@@ -503,10 +502,11 @@
         <text x="577" y="271" class="t-body" text-anchor="middle">scope S₁ open</text>
         <rect x="492" y="290" width="170" height="34" class="box b-txn"/>
         <text x="577" y="311" class="t-body" text-anchor="middle">scope S₂ open</text>
-        <path d="M 662 267 H 690 V 287" class="edge"/>
-        <path d="M 662 307 H 690 V 287" class="edge"/>
-        <path d="M 690 287 H 700 V 262" class="edge-ok" marker-end="url(#ar-ok)"/>
-        <path d="M 700 287 V 312" class="edge-bad" marker-end="url(#ar-bad)"/>
+        <path d="M 662 267 H 690" class="edge"/>
+        <path d="M 662 307 H 690" class="edge"/>
+        <path d="M 690 262 V 314" class="edge"/>
+        <path d="M 690 262 H 701" class="edge-ok" marker-end="url(#ar-ok)"/>
+        <path d="M 690 314 H 701" class="edge-bad" marker-end="url(#ar-bad)"/>
         <rect x="706" y="242" width="164" height="40" class="box b-tool"/>
         <text x="788" y="260" class="t-body" text-anchor="middle">purely read-only template</text>
         <text x="788" y="275" class="t-ok" text-anchor="middle">admitted</text>
@@ -517,25 +517,15 @@
 </section>
 
 <script>
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
-
-    function apply(isDark) {
-        if (isDark) {
-            document.documentElement.setAttribute('data-theme', 'dark');
-        } else {
-            document.documentElement.removeAttribute('data-theme');
-        }
-    }
-
     function setTheme(theme) {
         document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
         document.getElementById('btn-' + theme).classList.add('active');
-        apply(theme === 'dark' || (theme === 'auto' && prefersDark.matches));
+        if (theme === 'auto') {
+            document.documentElement.removeAttribute('data-theme');
+        } else {
+            document.documentElement.setAttribute('data-theme', theme);
+        }
     }
-
-    prefersDark.addEventListener('change', e => {
-        if (document.getElementById('btn-auto').classList.contains('active')) apply(e.matches);
-    });
 
     setTheme('auto');
 </script>

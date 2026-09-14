@@ -165,6 +165,7 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Distributed Transaction Coordinator](doc/design/07-distributed-transaction-coordinator.md)         | Scope lifecycle, event-log interactions, barriers, execution, and recovery.      |
 | [Database schema and storage model](doc/design/08-database-schema.md)                               | Event log immutability, sequence allocation, and synchronous projections.   |
 | [`gatewayd` Tool Registry Gateway](doc/design/09-tool-registry-gateway.md)                          | Immutable tool views, dynamic registration, the SDK, and one-attempt routing. |
+| [Deterministic routers](doc/design/10-deterministic-routers.md)                                     | Router vertices, rule templates, freeze-time admission, and zero-model branching. |
 
 The README hero image is the animated architecture overview; its generator lives in [doc/animations/src](doc/animations/src). Architecture diagrams are available in [doc/diagram/](doc/diagram/). The [deployment architecture](doc/diagram/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/diagram/architecture.html) remains a higher-level companion. Editable Draw.io diagrams cover [transaction boundaries](doc/diagram/txn-boundary.drawio), [replanning](doc/diagram/replan-flow.drawio), [projections](doc/diagram/projection.drawio), and [Coordinator/Engine interaction](doc/diagram/coordinator-engine-interaction.drawio).
 

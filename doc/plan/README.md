@@ -13,3 +13,4 @@ All planning documents are written in English.
 | [003](./plan-003-distributed-transaction-coordinator.md) | Distributed Transaction Coordinator | [Doc 00 §3.1](../design/00-overview.md#31-service-and-language-boundaries), [Doc 02](../design/02-transaction-model.md), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Active — runtime delivered; complete S12 scenario pending |
 | [004](./plan-004-tool-registry-gateway.md) | Tool Registry Gateway | [Doc 09](../design/09-tool-registry-gateway.md) | Done |
 | [005](./plan-005-gateway-owned-rbac.md) | Gateway-Owned RBAC | [Doc 09 §3.3](../design/09-tool-registry-gateway.md#33-role-based-access-control-rbac) | Done |
+| [006](./plan-006-deterministic-routers.md) | Deterministic Routers and Rule Templates | [Doc 10](../design/10-deterministic-routers.md) | Proposed |

@@ -22,6 +22,22 @@ If any pre-pivot try fails, the Coordinator fences the whole scope against pivot
 
 The scheduler claims ready work through PostgreSQL `FOR UPDATE SKIP LOCKED`, maintains recoverable leases, and evaluates parent completion. Confirmation barriers are runtime vertices: they wait for all required tries to become sealed, abort when the scope starts cancelling, and never call a business adapter.
 
+**One lock order.** Router branch admission, worker claiming, and sweeper cancellation all serialize through the same scope row, and all acquire locks in the order `txn_scope FOR UPDATE`, then `work_queue FOR UPDATE SKIP LOCKED`. Candidate discovery must never lock the queue before the scope. Branch admission checks `state = 'open'`, rejects a scope holding an expired sealed try, and appends the branch and queues its work in that one transaction. A worker validates scope state and establishes its bounded lease in one transaction, which makes the race decisive in either direction: if cancellation commits first, ordinary queued work can no longer be claimed; if the claim commits first, the live lease blocks sweeper cancellation.
+
+**Claim eligibility follows the operation's frozen phase**, not merely the existence of a scope:
+
+| Work | Eligible scope state |
+|---|---|
+| New pre-pivot member work | `open` |
+| Already-admitted post-pivot forward work | `pivot-passed`, and `committed` where the frozen graph permits work after confirmation |
+| Confirm or forward-recovery operation | The recovery path of §3.3; never a new pre-pivot claim |
+| Cancel or compensate | `cancelling`, through the cancellation-member queue |
+| Unscoped read | No scope lock; the executor ownership rule of [01 §3.2.1](./01-jit-dag-and-event-log.md#321-which-executor-owns-a-vertex) applies unchanged |
+
+`pivot-inflight` is reserved for the admitted pivot and its outcome resolution. `suspended` blocks automatic business dispatch until explicit recovery. Ordinary work never runs in `cancelling` or `cancelled`. Eligibility is a filter in front of the existing checks, not a replacement for them: parent dependencies, pivot admission, and the prohibition on backward compensation after a pivot all still apply.
+
+Router vertices are not scheduled here at all. They call nothing, so the Engine evaluates them synchronously on parent completion and no queue row is ever created ([10 §7](./10-deterministic-routers.md#7-runtime-execution-and-event-lifecycle)).
+
 ### 3.2 Transaction Lifecycle Manager
 
 The lifecycle manager owns scope states `open`, `cancelling`, `pivot-inflight`, `pivot-passed`, `committed`, `cancelled`, and `suspended`. Safety-critical transitions use database functions that lock the synchronous projection and append the corresponding event in one transaction.
@@ -30,9 +46,23 @@ The lifecycle manager owns scope states `open`, `cancelling`, `pivot-inflight`, 
 
 The executor calls an adapter with a frozen idempotency key and deterministic retry policy. An unknown pivot outcome is resolved only through the pivot's registered status-query operation. After a pivot, retries are forward-only; exhausting the frozen policy suspends the scope for human intervention. Every call carries the frozen tool-view digest and the exact tool version, and `gatewayd` routes one attempt without ever deciding or hiding a retry.
 
+Before a side-effecting request leaves the executor, it durably records the attempt identity, idempotency key, and start under the scope lock, having validated scope state and lease ownership in the same transaction. That record is **unresolved** until a definitive outcome is written back. Nothing else resolves it: not queue deletion, not lease expiry, not a transport timeout. This is what lets §3.4 distinguish "the worker stopped" from "the effect did not happen".
+
+On a successful call, the executor lifts the control-flow fields named by the tool's registered **log-fields schema** — status codes, scores, classifications — directly into `vertex/succeeded`, while bulk output streams to blob storage. Routers evaluate strictly against those in-event fields, so a deterministic branch decision never performs blob I/O ([09 §3](./09-tool-registry-gateway.md#3-registration-and-the-tool-view-contract), [10 §7](./10-deterministic-routers.md#7-runtime-execution-and-event-lifecycle)).
+
 ### 3.4 Orphan Sweeper
 
-The sweeper polls two recovery sets. An `open` scope with a sealed bracket past its deadline enters cancellation through the row-locked scope compare-and-set function. A `cancelling` scope with no effective member lease is a recoverable interruption; the sweeper passes its recorded cancellation idempotency key back to the same scope-cancellation loop, which claims the remaining inverse work or appends the terminal completed event when none remains. A live lease prevents takeover, while an expired lease permits an idempotent retry. Confirm and cancellation still race through the scope fence, and no correctness-critical timer or cancellation cursor exists only in memory.
+The sweeper polls two recovery sets. An `open` scope with a sealed bracket past its deadline is a **candidate** for cancellation. A `cancelling` scope with no effective member lease is a recoverable interruption; the sweeper passes its recorded cancellation idempotency key back to the same scope-cancellation loop, which claims the remaining inverse work or appends the terminal completed event when none remains. A live lease prevents takeover, while an expired lease permits an idempotent retry. Confirm and cancellation still race through the scope fence, and no correctness-critical timer or cancellation cursor exists only in memory.
+
+A candidate is not yet a decision. The earlier query result is never trusted: inside the cancellation transaction, under `txn_scope FOR UPDATE`, the sweeper re-verifies the scope state, the expired sealed try, live leases, and unresolved attempts, and then takes exactly one of three paths ([02 §4.4](./02-transaction-model.md#44-orphan-try-detection)):
+
+| Observation under the lock | Action |
+|---|---|
+| A live execution lease exists | Defer. Progress is defined by a live lease, not by queue occupancy. |
+| An attempt is unresolved (§3.3) | Preserve the queue and the attempt evidence, record suspension, and escalate to L4. Suspension keeps pivot-admission and pivot-passage evidence and never clears the no-cancel fence. |
+| Expired sealed try, no live lease, no unresolved attempt | Append `txn/cancel {phase: requested}` and remove pending ordinary work in the same transaction, retaining attempt history and every recorded effect cancellation will need. |
+
+Post-pivot states never take the third path. The only automatic resolution of an unknown outcome remains the pivot's registered status query; for an unresolved non-pivot attempt an operator establishes the external outcome and ensures the original request can no longer create an effect before authorizing recovery. A late worker result arriving after suspension is retained as evidence and authorizes nothing on its own.
 
 ## 4. Adapter Boundary
 
@@ -50,7 +80,9 @@ The test world is a set of tool services built on the SDK, with deterministic fa
 
 The event log remains the only Engine/Coordinator boundary. The Engine owns planning and structure events; the Coordinator owns every `txn/*` event.
 
-Execution events are owned by the vertex's executor rather than by the Coordinator unconditionally ([01 §3.2.1](./01-jit-dag-and-event-log.md)). The Coordinator executes every queued vertex except those whose pinned contract declares `effect_class: none` and which carry no scope; those are the Orchestrator's, because they have no bracket, no compensation, and no pivot interaction for a transaction coordinator to own. The database enforces the partition on both the work queue and the append boundary, so neither service can execute or record a vertex belonging to the other.
+Execution events are owned by the vertex's executor rather than by the Coordinator unconditionally ([01 §3.2.1](./01-jit-dag-and-event-log.md)). The Coordinator executes every queued vertex except those whose pinned contract declares `effect_class: none` and which carry no scope; those are the Orchestrator's, because they have no bracket, no compensation, and no pivot interaction for a transaction coordinator to own. Router vertices are never queued and are evaluated by the Engine. The database enforces the partition on the work queue and the append boundary, so no service can execute or record a vertex belonging to another.
+
+On a pre-pivot terminal failure the Coordinator still owns the transaction outcome even when the failed work came from a deterministic router branch. What changes is what happens next: the Engine appends no `replan/boundary` for that failure, and the run halts or suspends at L4 ([03 §2.5](./03-replan-and-recovery.md#25-deterministic-branches-never-replan-with-a-model)).
 
 The Coordinator may build operational projections for execution, but it must not implement `surface`, `slice`, `fold`, `linearize`, or `assemble`.
 

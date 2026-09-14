@@ -54,7 +54,7 @@ export function causalDescendants(events: readonly StoredEvent[], vertexId: stri
 }
 
 /**
- * Partitions a source stream for a lazy causal fork (ADR-005). With substitutions present, the
+ * Partitions a source stream for a lazy causal fork (Doc 01 §5.2, Doc 08 §4). With substitutions present, the
  * divergence vertex's causal descendants and its own execution events are invalidated — their cause
  * changed, so the fork regenerates them; with no substitutions nothing is invalidated and everything
  * merges. All remaining events up to `eval_up_to_seq` are inherited: at or before the divergence
@@ -171,7 +171,7 @@ export class EventStore {
     }
 
     /**
-     * Creates a lazy causal counterfactual fork at any vertex (ADR-005). The divergence point is a
+     * Creates a lazy causal counterfactual fork at any vertex (Doc 01 §5.2, Doc 08 §4). The divergence point is a
      * vertex — planner or tool-caller, inside or outside a bracket, above or below the pivot floor.
      * Inherited copies preserve their source `stream_seq`; the fork numbers its own events above
      * `eval_up_to_seq`, so `run/end-seed` lands at `eval_up_to_seq + 1`. Causally independent events

@@ -25,7 +25,7 @@ Model calls are non-deterministic, so any assertion that depends on a live model
 
 | Tier | Planner | Assertion strength | Covers | Needs API key |
 |---|---|---|---|---|
-| **T-A pure function** | none | exact equality | check-rules R1–R11, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff ([01 §6](./01-jit-dag-and-event-log.md#6-replay-testing)) | no |
+| **T-A pure function** | none | exact equality | check-rules R1–R14, `surface` / `slice` / `fold` / `linearize` / `assemble`, replay log diff ([01 §6](./01-jit-dag-and-event-log.md#6-replay-testing)) | no |
 | **T-B scripted planner** | stub emitting canned sub-DAG proposals | exact equality | transaction brackets, compensation, L0–L4 ladder, in-place replan and lazy causal fork semantics, orphan-try sweep, crash recovery | no |
 | **T-C live planner** | real model | statistical thresholds + guardrails | JIT planning quality, plan admissibility rate, token economics | yes |
 
@@ -44,6 +44,8 @@ The scripted planner must be able to emit **deliberately illegal proposals**, no
 - a non-idempotent successor after the pivot (R1)
 - a `txn/try` with no reachable cancel exit (R6)
 - parallel branches with intersecting write sets, one carrying a pivot (R9)
+- a router branch opening a fresh scope inside a half-open ancestor scope (R12)
+- a router branch referencing a tool absent from the run's role-scoped view (R13)
 
 For each of these the assertion is stronger than "rejected": **no tool in the sandbox may be invoked at all**, because rejection happens before freeze. A rejection that arrives after a side effect is a failed test even though the violation was detected.
 
@@ -68,7 +70,7 @@ The engine may never read the ledger view. The oracles may never call the actor 
 
 ### 3.2 Ledger semantics
 
-Resources are modelled as **signed deltas with an owner**, never as absolute values, matching the compensation contract in [02 §4.3](./02-transaction-model.md#43-parallel-branches-and-shared-resources-worked-example).
+Resources are modelled as **signed deltas with an owner**, never as absolute values, matching the compensation contract in [02 §4.3](./02-transaction-model.md#43-parallel-branches-and-shared-resources--worked-example).
 
 ```
 available(sku) = on_hand(sku) − Σ open_holds(sku)
@@ -188,6 +190,15 @@ Each row exists to kill one specific accident. A scenario that cannot fail if a 
 | S12 | `duplicate_delivery` on `payment.charge` | exactly one charge in the ledger | O1 | T-B runtime scenario pending |
 | S13 | **information dependence**: the same `goal_prompt` scenario run twice, differing only in an injected fact — `inventory.check` returns 20 units in variant 1 and 0 units in variant 2 | the sub-DAGs frozen **after** the planner that consumes that fact must **differ** (variant 2 must source or substitute). Identical plans prove the graph was pre-baked rather than JIT, which the depth assertion alone cannot detect | O4.info_dependence | T-B, promoted to T-C |
 | S14 | **clairvoyant parameters**: the scripted planner freezes a subgraph binding `carrier = "fast-co"` before any quote vertex has succeeded | rejected at freeze: every bound parameter must trace to an existing upstream vertex output or to `task_input`. A value that could not yet be known is a premature commitment, violating progressive disclosure even though depth is legal | O4.no_clairvoyance | T-B |
+| S15 | **router freeze-time rejection**: the run is authorized under a role lacking `refund.issue`, and the bound template's branches reference it | rejected at freeze by R13, before the proposing planner freezes and before any tool runs. No pivot has passed, so the planner replans an alternative path normally ([10 §11](./10-deterministic-routers.md#11-worked-example-post-sale-return-on-order-12345) step 5) | O2.router_admission | T-B |
+| S15b | **exhaustive admission**: the matched branch is legal, a *non-matched* branch of the same template is not — it opens a fresh scope at an `inside_scope(S)` placement | rejected at freeze by R12. Checking only the branch that would match is the defect this row exists to kill: the illegal branch would otherwise be discovered on the day its condition first holds, possibly after a pivot | O2.router_admission | T-B |
+| S16 | **deterministic branch failure**: a router matches, its branch's TCC try fails permanently pre-pivot, every member attempt resolved | scope cancels to the savepoint, then **L4**. No `replan/boundary` and no planner call anywhere after the failure; a model call here is a failure even if the run would have recovered ([03 §2.5](./03-replan-and-recovery.md#25-deterministic-branches-never-replan-with-a-model)) | O2.no_deterministic_replan, O3 | T-B |
+| S17 | **prompt invisibility**: one scenario run twice, once with no template bound to the slot and once with a template bound whose conditions all evaluate false | both runs reach the downstream planner with a **byte-identical prompt hash**. Topology is identical in both runs because interposition is mandatory; a rendered fall-through line would change every junction of every prompt | O4.router_invisibility | T-B |
+| S18 | **router join over parallel branches** holding two distinct open scopes, with a template whose branches are not all `effect_class: none` | freeze rejected. Admitted only for a purely read-only template, or after the branches commit or close. Flory has no runtime scope-merge, so a router must never become the place where two independent transactions silently fuse ([10 §4.1](./10-deterministic-routers.md#41-routers-as-join-nodes-over-parallel-branches)) | O2.router_admission | T-B |
+| S19 | **cancel-versus-claim race**: sweeper cancellation and a worker claim contend for the same scope | decisive in both directions and never both: if cancellation commits first, no member adapter call starts; if the claim commits first, the live lease defers cancellation | O1, O2 | T-B runtime integration |
+| S19a | **unresolved attempt**: a side-effecting request is delayed past lease expiry, with a durable start and no recorded outcome | the scope **suspends** to L4 with its attempt evidence and reservations intact. No automatic cancellation and no automatic redispatch. A late success arriving afterwards remains visible as evidence and authorizes nothing by itself ([02 §4.4](./02-transaction-model.md#44-orphan-try-detection)) | O1, O2.no_cancel_while_unresolved, O3 | T-B runtime integration |
+| S19b | **post-pivot claim eligibility**: payment has passed its pivot while forward work remains queued | already-admitted forward work is still claimable; a new pre-pivot claim and every backward cancellation stay blocked ([07 §3.1](./07-distributed-transaction-coordinator.md#31-work-scheduler)) | O2 | T-B runtime integration |
+| S20 | **rule-template counterfactual**: fork one historical run substituting `rule://…@v3` for `@v2` at a router vertex | the fork differs from the source in a pin, never in topology, and both surfaces are comparable by the standard evaluators. A structural difference means interposition was not applied uniformly ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)) | O2, O4 | T-B |
 
 ## 7. Oracles
 
@@ -222,6 +233,11 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 | a no-substitution fork reproduces the source surface exactly | 01 §5.3; 01 §6 |
 | no `event_log` row is ever updated or deleted; projection rows may change, and shadowing remains an event | 01 §3.3 inv. 1 |
 | an unknown `event_type` without `ignorable` makes the reader reject the whole log | 01 §3.2.1 |
+| **router trajectory**: every router vertex appends `vertex/started` before its `vertex/succeeded` or `vertex/failed`, and its success payload carries `matched_condition` (an index, or `null` on fall-through) | 01 §3.2; 10 §7 |
+| **router admission**: no router branch reaches execution without a freeze-time `checkSubDag` over every branch of its pinned template; a rejection cites R12, R13, R14, or an inherited R1-R11 code | 02 §3.4; 10 §5.1 |
+| **no deterministic replan**: no `replan/boundary` is appended for a failure inside a router-emitted branch, and no planner vertex starts on that failure path | 03 §2.5 |
+| **no cancel while unresolved**: no `txn/cancel {phase: requested}` is appended for a scope holding an unresolved `txn_attempt` row; that scope suspends instead | 02 §4.4; 07 §3.4 |
+| **configuration-stream ownership**: `rule_template/published` appears only in the Engine-owned configuration stream and never in a run stream; `gateway_role` appends nothing anywhere | 01 §3.2; 08 §3 |
 | each event type was appended only by its owning service | 01 §3.2; 08 §3 |
 | `subgraph/frozen` and its `vertex/created` events share one transaction boundary | 01 §3.3 inv. 2 |
 
@@ -251,6 +267,7 @@ Structural assertions alone are **necessary but not sufficient**: an engine whos
 |---|---|
 | **information dependence**: for a scenario pair differing only in an injected fact, the subgraphs frozen after the planner consuming that fact must differ (S13) | the only assertion that distinguishes genuine JIT from a pre-baked shallow graph. It tests that planning *consumed* runtime information, not merely that it was chunked |
 | **no clairvoyant parameters**: every parameter bound at freeze traces to an existing upstream vertex output or to `task_input` (S14) | a planner binding a value it cannot yet know has committed prematurely, violating progressive disclosure while satisfying every depth bound |
+| **router invisibility**: for a scenario pair differing only in whether a non-matching template is bound, the downstream planner's prompt hash is identical (S17) | a rendered fall-through would appear at every junction, since R14 interposes a router on every tool-caller-to-planner edge, and would destroy prefix stability on every turn |
 | every `subgraph/frozen` has depth ≤ K (default 3) | chunking is present — necessary, and weak on its own |
 | the run contains ≥ 2 planner vertices whenever the goal requires a decision point | the DAG grew incrementally |
 | every frozen subgraph passed check-rules; no freeze without a preceding admission | [02 §3.4](./02-transaction-model.md#34-deterministic-check-rules) |

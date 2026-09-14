@@ -6,18 +6,23 @@
 
 Flory is an AI harness orchestration engine for AI-driven e-commerce. It supports end-to-end AI deployment from suppliers (product selection, procurement, and inventory) to sales channels (pricing, listing, orders, and logistics).
 
+Flory executes **progressive JIT-DAG workflows**: a submitted workflow — anything from one planner vertex to a multi-vertex DAG mixing deterministic tools with probabilistic steps — unfolds just in time as planners and routers generate the next sub-DAG.
+
 Its central challenge is that **LLM planning is probabilistic, while inventory decrements and logistics bookings are irreversible**. Flory is therefore not another agent framework: it joins JIT dynamic planning and distributed-transaction discipline on one execution substrate.
 
 ## 2. Core Concepts
 
 | Concept | One-sentence definition | Details |
 |---|---|---|
-| JIT-DAG | An execution DAG generated incrementally by a planner in the ReAct style, using progressive disclosure. | [01](./01-jit-dag-and-event-log.md) |
+| JIT-DAG | An execution DAG generated incrementally in the ReAct style, using progressive disclosure: planners expand the next decision, routers expand the next deterministic branch. | [01](./01-jit-dag-and-event-log.md) |
 | planner node | A node that calls a model, produces the next sub-DAG, and owns replanning authority. | [01](./01-jit-dag-and-event-log.md) |
 | tool-caller node | A deterministic tool-calling node that neither calls a model nor owns planning authority. | [01](./01-jit-dag-and-event-log.md) |
+| router node | A deterministic vertex that evaluates a pinned rule template over upstream output fields and emits a sub-DAG with no model call. Interposed on every tool-caller-to-planner edge (R14). | [10](./10-deterministic-routers.md) |
+| rule template | A published, immutable, content-addressed list of `(condition, sub_dag)` pairs with first-match semantics; a router binds one as a `pin_version`. | [10 §3](./10-deterministic-routers.md#3-rule-templates) |
+| unresolved attempt | A durably recorded side-effecting request with no recorded outcome. It blocks automatic cancellation: a lease expiry proves the worker stopped, never that the effect is absent. | [02 §4.4](./02-transaction-model.md#44-orphan-try-detection) |
 | event log | An append-only vertex-event table in a transactional database; the sole source of truth for the DAG *and* for transaction brackets. Carries a contiguous per-run `stream_seq` and a gappy `global_seq`. | [01 §3.1](./01-jit-dag-and-event-log.md) |
 | stream | One run's append-only event sequence. `stream_seq` is strict, contiguous, rollback-safe and commit-ordered inside it and is the only legal input to a fold; `global_seq` is a coarse `BIGSERIAL` that is none of those. | [01 §3.3](./01-jit-dag-and-event-log.md) |
-| `pin_version` | The pinned external contract an event depends on — model endpoint, tool API, assembly strategy, fold reducer. A fork substitutes pins; nothing else about an inherited event may change. | [01 §5.3](./01-jit-dag-and-event-log.md) |
+| `pin_version` | The pinned external contract an event depends on — model endpoint, tool API, assembly strategy, fold reducer, router rule template. A fork substitutes pins; nothing else about an inherited event may change. | [01 §5.3](./01-jit-dag-and-event-log.md) |
 | `fold_mode` | The liveness ladder for an evaluation: `recorded` → `model-live` → `reads-live`, with `writes-live` being production rather than an evaluation mode. | [01 §5.4](./01-jit-dag-and-event-log.md) |
 | surface | The pure-function projection of unshadowed event-log rows: the DAG currently visible to a planner. | [01](./01-jit-dag-and-event-log.md) |
 | pivot | An irreversible and uncompensable node in a transaction scope, such as a committed inventory decrement or logistics booking; at most one is allowed per scope. | [02](./02-transaction-model.md) |
@@ -56,6 +61,7 @@ Flory uses two services and one database because its planner and transaction run
 - The **Go 1.25 Tool Registry Gateway** is a separate service and module. It publishes immutable tool views and routes one pinned attempt without taking transaction authority. [09](./09-tool-registry-gateway.md) specifies that boundary.
 - **PostgreSQL** holds the append-only event log, harness metadata, synchronous transaction projections, and work queues, and allocates per-run write order.
 - **The event log and shared IDLs are the component boundary.** Components do not import or call another component's internals. PostgreSQL work claiming provides handoff; a message broker is not introduced until measured load requires one.
+- **Routers are Engine-executed and never queued.** A deterministic branch decision performs no call, so it is evaluated synchronously on parent completion; giving it a queue row would let a lease expiry fabricate a failure for a pure function ([10 §7](./10-deterministic-routers.md#7-runtime-execution-and-event-lifecycle)).
 - **Canonical projection semantics have exactly one implementation, in TypeScript.** Operational folds such as unmatched-try scans, sweeps, and readiness checks may live with their owning runtime, but no other component reimplements planner context projection.
 
 ### 3.2 Boundary rationale, costs, and alternatives

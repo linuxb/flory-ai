@@ -20,7 +20,8 @@ The migrations create synchronous safety projections and recoverable operational
 | --- | --- |
 | `txn_scope` | Required try members plus `open`, `cancelling`, `pivot-inflight`, `pivot-passed`, `committed`, `cancelled`, and `suspended` lifecycle states |
 | `txn_bracket` | Globally unique idempotency key, sealed half-open state, deadline, inverse/confirm operations, frozen input, and retry policy |
-| `work_queue` | Parent references, deterministic readiness time, attempt count, and recoverable Coordinator lease claimed with `FOR UPDATE SKIP LOCKED` |
+| `work_queue` | Parent references, deterministic readiness time, attempt count, and recoverable Coordinator lease claimed with `FOR UPDATE SKIP LOCKED`. `enqueue_vertex_work` skips router vertices: they perform no call, so they are evaluated synchronously by the Engine and never materialize claimable work |
+| `txn_attempt` | Durable evidence for one side-effecting request: attempt identity, idempotency key, recorded start, and the definitive outcome when one exists. A row with a start and no outcome is **unresolved**, and only a recorded outcome resolves it — never queue deletion, lease expiry, or a transport timeout ([02 §4.4](./02-transaction-model.md#44-orphan-try-detection)) |
 | `scope_cancel_member` | Recoverable inverse-operation work materialized for one requested scope cancellation; dependency depth makes descendants reverse before ancestors without using sequence order |
 | `gateway_rbac_role` | Gateway-owned, revisioned role catalogue and enabled state; `*` is reserved and never stored |
 | `gateway_rbac_subject` | Enabled state and CAS revision for an OIDC `(issuer, subject)` identity |
@@ -38,7 +39,13 @@ An insert trigger locks the scope and rejects `txn/cancel` after pivot admission
 
 `admit_pivot` locks an open scope, verifies that every required try is sealed, moves the scope to `pivot-inflight`, and appends `vertex/started` atomically. `resolve_pivot_absent` is the only transition back to `open`, and is called only after an adapter status query proves that the irreversible effect did not happen. Once `txn/pivot-passed` is appended, only forward confirmation and retry remain.
 
-Scope cancellation uses two `txn/cancel` phases. `requested` fences the whole scope and materializes inverse work for all sealed members. Workers claim those members idempotently; `completed` is accepted only when none remain. No per-try cancel event exists.
+Scope cancellation uses two `txn/cancel` phases. `requested` fences the whole scope and materializes inverse work for all sealed members. Workers claim those members idempotently; `completed` is accepted only when none remain. No per-try cancel event exists. `request_scope_cancel` re-validates under `txn_scope FOR UPDATE` rather than trusting the sweeper's earlier query, and refuses the transition while any member holds a live lease or any `txn_attempt` row is unresolved; that scope is suspended instead ([07 §3.4](./07-distributed-transaction-coordinator.md#34-orphan-sweeper)).
+
+Every state-altering path — router branch admission, `claim_ready_work`, and `request_scope_cancel` — locks in the order `txn_scope FOR UPDATE`, then `work_queue FOR UPDATE SKIP LOCKED`. A single lock order is what makes the claim-versus-cancel race decisive instead of deadlock-prone, and candidate discovery therefore must not lock the queue first.
+
+`flory_executor_class` has three values: `router`, `orchestrator`, and `coordinator`. The class is derived from the vertex payload, and both the queue and the ownership trigger derive it identically ([01 §3.2.1](./01-jit-dag-and-event-log.md#321-which-executor-owns-a-vertex)).
+
+The configuration stream is an Engine-owned stream in `event_log`, distinct from every run stream and carrying only `rule_template/published` events. It has a `run` counter row of its own, so `stream_seq` is allocated and ordered there exactly as in a run stream, and the ownership trigger admits that event type from `engine_role` alone. Recording each publication, update, and slot binding as a diff event is what lets replay and counterfactual evaluation resolve the exact template bound to a router at a historical position without consulting a live registry ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)).
 
 Gateway RBAC mutations use security-definer functions with advisory transaction locks and `expected_revision` compare-and-swap. The same transaction appends the actor SPIFFE ID, request ID, idempotency key, target, and before/after revisions to `gateway_rbac_audit`; repeating an idempotency key returns the recorded result. Live subject lookup joins only enabled roles and active bindings. `run/start` synchronously projects its Gateway-signed `authorization_identity` into `run_authorization`, so a Coordinator restart can resume using the frozen role set without receiving the original JWT and without consulting current bindings.
 

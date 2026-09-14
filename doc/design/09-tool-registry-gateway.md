@@ -14,7 +14,7 @@
 
 It is an independently deployable Go 1.25 service in its own module. Sharing a language and toolchain with the Distributed Transaction Coordinator creates no internal API boundary: neither module imports the other, and they communicate only through their public contracts.
 
-`gatewayd` does not own planning, transaction admission, retries, event appends, compensation policy, or projection semantics. It validates registrations, resolves current business roles, signs run-scoped authorization snapshots, and routes exactly one requested attempt to an upstream tool service. Its database role cannot append to the event log.
+`gatewayd` does not own planning, transaction admission, retries, event appends, compensation policy, projection semantics, or router rule templates. A rule template is planning structure, so the Engine publishes and records it ([10 §3](./10-deterministic-routers.md#3-rule-templates)); the gateway's contribution is the tool view that template's branches are admitted against. It validates registrations, resolves current business roles, signs run-scoped authorization snapshots, and routes exactly one requested attempt to an upstream tool service. Its database role cannot append to the event log.
 
 The deployment relationship is shown in [the deployment architecture](../diagram/deployment-architecture.html).
 
@@ -45,6 +45,7 @@ The registration contract is `flory.gateway.v1.ToolContract` in [`idl/proto/`](.
 - compensation and confirmation tool references where the selected mode requires them;
 - a resource footprint and write set, and an owner.
 - a non-empty `allowed_roles` policy; `*` denotes a public tool.
+- a **log-fields schema**: the control-flow fields of the output — status codes, scores, classifications — that an executor lifts directly into `vertex/succeeded` while bulk output streams to blob storage. It is what lets a router decide a branch from the event payload alone, with no blob dereference ([10 §7](./10-deterministic-routers.md#7-runtime-execution-and-event-lifecycle)).
 
 `is_pivot` and `compensable` have no field. They are derived from `effect_class` and the declared undo path exactly as specified in [02 §2.1](./02-transaction-model.md#21-derived-attributes-are-never-declared), and the schema gives a service nothing to declare that could disagree with what they are derived from. That obligation is therefore discharged structurally rather than by a runtime check.
 

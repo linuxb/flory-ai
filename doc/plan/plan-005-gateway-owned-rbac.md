@@ -3,7 +3,7 @@
 - **Status:** Done
 - **Date:** 2026-09-06
 - **Implements:** [09 §3.3 Role-Based Access Control](../design/09-tool-registry-gateway.md#33-role-based-access-control-rbac)
-- **Specifies:** [09 gatewayd Tool Registry Gateway](../design/09-tool-registry-gateway.md), [08 Database Schema](../design/08-database-schema.md), [01 Event Log §3.2](../design/01-jit-dag-and-event-log.md#32-event-types)
+- **Specifies:** [09 gatewayd Tool Registry Gateway](../design/09-tool-registry-gateway.md), [08 Database Schema](../design/08-database-schema.md), [01 Event Log §3.2](../design/01-jit-dag-and-event-log.md#32-core-event-vocabulary)
 
 ## 1. Objective
 

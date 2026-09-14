@@ -16,6 +16,8 @@ L3 rollback               (compensate to a transaction savepoint, then replan or
 L4 suspend + human action (the only exit when post-pivot forward recovery cannot complete)
 ```
 
+The ladder assumes the failed work was proposed by a planner, which is the only actor with the authority to propose a different approach. Work emitted by a deterministic router branch has no such author: L1 and L2 are unavailable to it, and its ladder runs L0 → L3 → L4 (§2.5).
+
 ## 2. Greedy Replanning
 
 ### 2.1 Legal replan boundaries and the backtrack floor
@@ -67,6 +69,22 @@ This controls replan input cost and clearly identifies paths already disproven.
 1. **Cancel before replan.** Planning never resumes across an active `try`; compensation precedes backtracking. (Note: Offline forks, due to their causal evaluation nature, are exempt from this online constraint. They handle active tries via mock injection or lazy termination rather than cancellation). Live runs cancel to make a boundary legal.
 2. **The pivot is a one-way gate.** Once `txn/pivot-passed` is appended, that seq becomes the backtrack floor (§2.1): no replan boundary may be selected below it, for the remainder of the run. Within the pivot's own scope, a subsequent failure may only retry the suffix idempotently (L0) or reach human intervention (L4). The prohibition is on *planner position*, not on business action — a refund issued from a boundary above the floor is a new forward action and is permitted ([02 §3.3](./02-transaction-model.md)). R1 guarantees that every forward-path node is safely idempotent.
 3. **Shadowing does not delete.** A replan-rejected subtree remains in the log for auditability and as evidence that prevents repeating the same failed approach.
+
+### 2.5 Deterministic branches never replan with a model
+
+Work emitted by a router's matched branch came from a rigid, audited business rule, not from a plan ([10](./10-deterministic-routers.md)). When it fails, the ladder skips L1 and L2 entirely. Handing that failure to a planner would invite exactly the class of action the rule exists to prevent — an unapproved discount issued because a payment gateway timed out, a refund path invented because a reservation service was down — and the model has no authority to author it.
+
+The ladder for a failed deterministic branch is therefore:
+
+| Situation | Path |
+|---|---|
+| Transient failure | L0 idempotent retry under the branch's frozen retry policy, exactly as for planner-emitted work. |
+| Definitive pre-pivot failure, every member attempt resolved | Cancel the scope to its savepoint (L3), then halt to **L4**. No planner is called at the resulting savepoint. |
+| Pre-pivot failure with an unresolved member attempt | No cancellation. Suspend with the attempt evidence and the reservations preserved, and escalate to **L4** ([02 §4.4](./02-transaction-model.md#44-orphan-try-detection)). |
+| Post-pivot failure | Forward recovery only. Cancellation is rejected by the coordinator state machine and the `check_pivot_pass` trigger. If idempotent retries cannot close the scope, suspend to **L4** with all committed state and unconfirmed tries preserved, for operator-assisted completion or ledger reconciliation. |
+| Unknown pivot outcome | Not an immediate L4. The Coordinator runs the pivot's registered `status_query` under its frozen retry policy ([07 §3.3](./07-distributed-transaction-coordinator.md#33-tool-executor)). Confirmed occurrence proceeds to `txn/pivot-passed`; confirmed absence permits the guarded cancellation path; only an unresolved status query suspends to L4. Cancellation stays prohibited while the outcome is indeterminate. |
+
+Two adjacent cases are **not** deterministic failures and keep the ordinary ladder. A router that matches nothing has not failed: `no_match` is structural fall-through, and the downstream planner decides as it always would. A router whose runtime admission rejects an otherwise shape-valid branch (`proposal_rejected`) appends `vertex/failed` with its reason and publishes no runnable work; the transaction outcome belongs to the Coordinator, and control does not fall through to a planner as a consolation path ([10 §6](./10-deterministic-routers.md#6-closed-outcome-vocabulary)).
 
 ## 3. Rollback (L3)
 

@@ -4,7 +4,8 @@
 
 ## 1. Goals
 
-- The DAG is not a predefined workflow. A planner generates it just in time in the ReAct style, through progressive disclosure: each planner expands only the next batch of certain actions and the next decision point rather than the entire graph.
+- The DAG is not a predefined workflow. It is generated just in time in the ReAct style, through progressive disclosure: each planner expands only the next batch of certain actions and the next decision point rather than the entire graph. A submitted workflow may itself be anything from a single planner vertex to a multi-vertex DAG mixing deterministic tools with probabilistic steps; it unfolds recursively as planners and routers generate sub-DAGs of tool callers and further downstream planners and routers.
+- Not every expansion needs a model. A transition whose decision is a rigid business rule is taken by a **router** — a deterministic vertex that evaluates a pinned rule template and emits a sub-DAG with zero model calls (§2.3, [10](./10-deterministic-routers.md)).
 - Storage and execution history share one **append-only event log** in a transactional database: **a vertex is an event and `stream_seq` is its position within its DAG**. No separate event-log component is introduced, and there is no separate transaction log either — the `txn/*` brackets are rows in the same table.
 - Every derived view (current DAG, planner context, progress, and token accounting) is a pure-function projection of the log, making it auditable, replayable, and forkable. **Purity is guaranteed within one run and deliberately not across runs** (§3.3 invariant 3), which is exactly the scope every projection and every offline evaluation operates in.
 
@@ -24,7 +25,14 @@
 - Carries transaction attributes such as effect class, compensability, idempotence, and pivot status (see [02](./02-transaction-model.md)).
 - Makes no recovery decision on failure: it retries according to those attributes, then triggers replanning when retries are exhausted (see [03](./03-replan-and-recovery.md)).
 
-The role split is a **permission split**. Planners may append sub-DAG proposals; tool callers may append only their own execution results. The append boundary validates which node type may append which event type, following the spirit of dsh surface-transition validation.
+### 2.3 Router node
+
+- Evaluates a pinned, declarative rule template against upstream tool-output summary fields and emits the matched branch's sub-DAG, **without calling a model**. It calls no tool, holds no transaction bracket, and is never a transaction-scope member.
+- Enters the graph through two tracks: a workflow author declares it explicitly with a pinned `template_ref`, or the engine interposes one automatically. Check-rule **R14** makes the second track mandatory: no tool-caller vertex may have a planner vertex as a direct successor, so every such edge carries a router ([02 §3.4](./02-transaction-model.md#34-deterministic-check-rules)).
+- Its authority is a strict subset of a planner's: it may emit only sub-DAG proposals a planner could legally propose at the same position, and those proposals pass the same `checkSubDag` admission.
+- Produces one of four closed outcomes — a matched branch, structural fall-through to the downstream planner, an evaluation error, or a runtime proposal rejection. The complete mechanism, its rule templates, and its three admission gates are specified in [10](./10-deterministic-routers.md).
+
+The role split is a **permission split**. Planners may append sub-DAG proposals; tool callers may append only their own execution results; routers may append their own execution results and the branch proposals their pinned template authorizes. The append boundary validates which node type may append which event type, following the spirit of dsh surface-transition validation.
 
 ## 3. Event Log Storage Model
 
@@ -54,7 +62,7 @@ CREATE TABLE event_log (
 ) PARTITION BY HASH (run_id);
 ```
 
-A run owns exactly one stream, so `run_id` identifies the stream and `stream_seq` is the position within it. `stream_seq` is allocated from a counter column on the run row, inside the appending transaction:
+A run owns exactly one stream, so `run_id` identifies the stream and `stream_seq` is the position within it. One stream is not a run: the Engine-owned **configuration stream** carries `rule_template/published` events (§3.2) and has a counter row like any other, so it folds under the same rules while never mixing rule history into a business run. `stream_seq` is allocated from a counter column on the run row, inside the appending transaction:
 
 ```sql
 UPDATE run SET next_seq = next_seq + 1 WHERE run_id = $1 RETURNING next_seq - 1;
@@ -105,7 +113,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | `subgraph/proposed` | Complete planner sub-DAG proposal, including the immutable `tool_view_ref` and `tool_view_digest` used for admission ([09 §3](./09-tool-registry-gateway.md)) | engine (planner output) |
 | `subgraph/frozen` | Check-rules passed; all vertex rows are atomically appended | engine |
 | `subgraph/rejected` | Check-rules rejection and reasons | engine |
-| `vertex/created` | Vertex definition: role, tool, parameters, and transaction attributes | engine during freeze |
+| `vertex/created` | Vertex definition: role (`planner`, `tool-caller`, or `router`), tool or pinned rule template, parameters, and transaction attributes | engine during freeze |
 | `vertex/started`, `vertex/succeeded`, `vertex/failed` | Execution state transitions | the vertex's executor (§3.2.1) |
 | `vertex/retried` | Idempotent retry number and backoff | the vertex's executor (§3.2.1) |
 | `subgraph/shadowed` | Replan shadowed a failed subtree; payload names affected seqs | engine |
@@ -114,6 +122,9 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | `run/end-seed` | First own event of a fork, closing its inherited seed; every inherited copy — in the seed or merged later — is read-only (§5.2) | engine |
 | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | Distributed Transaction Coordinator |
 | `budget/charged` | One completed LLM thought call: provider, protocol, sanitized endpoint, requested and returned model, measured duration, normalized input/output/cache/reasoning token usage, and an optional cost estimate tied to its exact pricing snapshot | engine |
+| `rule_template/published` | A rule template published, updated, or bound to a slot: the RFC 6902 structural diff against its predecessor, the resulting content digest, author metadata, and slot coordinates. Appended to the **configuration stream** — an Engine-owned stream, never a run stream ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)) | engine |
+
+A router's execution trajectory is `vertex/started` followed by `vertex/succeeded` carrying `{matched_condition}` — the matched branch index, or `null` on structural fall-through — or by `vertex/failed`. Skipping `vertex/started` is prohibited even though the evaluation is synchronous and needs no network call: the trace validator and the TLA+ models depend on that monotonic transition existing for every vertex role.
 
 The engine appends `vertex/started` before the network request. A successful response appends `budget/charged` and `vertex/succeeded` together; a transport or provider failure appends `vertex/failed`. The charge contains provider-reported usage rather than a local tokenizer estimate. Its optional `estimated_cost` is explicitly an estimate: it records currency, price reference, price tier, and all per-million-token rates used in the calculation, so a later provider price change cannot rewrite historical economics. If no trustworthy pricing snapshot is configured, usage is still recorded and `estimated_cost` is omitted.
 
@@ -121,9 +132,15 @@ Event payloads retain only normalized metadata and SHA-256 input/output digests.
 
 ### 3.2.1 Which executor owns a vertex
 
-Execution events belong to whichever executor ran the vertex, and the partition is by effect class. A tool-caller vertex is **Orchestrator-executed** if and only if its pinned contract declares `effect_class: none` *and* it carries no `scope_id`; every other queued vertex is **Coordinator-executed**.
+Execution events belong to whichever executor ran the vertex. There are three executor classes, and the partition is derived rather than declared.
 
-A read has no transaction bracket, no compensation, and no pivot interaction, so there is nothing for a transaction coordinator to own — and the `reads-live` fold mode ([05 §3.2](./05-context-aggregation-and-offline-evaluation.md)) already assumes the Orchestrator executes exactly that class of tool live. Check-rule R10 requires every side-effecting node to belong to a scope, so the two classes partition the queued vertices with no overlap and no gap.
+| Executor class | Vertices | Queued? |
+|---|---|---|
+| `router` | Every router vertex | **No.** Routers are evaluated by the Engine synchronously on parent completion; they call nothing, so `enqueue_vertex_work` never materializes work for them ([10 §7](./10-deterministic-routers.md#7-runtime-execution-and-event-lifecycle)) |
+| `orchestrator` | A tool-caller vertex whose pinned contract declares `effect_class: none` *and* which carries no `scope_id`; and every planner vertex | Yes |
+| `coordinator` | Every other queued vertex | Yes |
+
+A read has no transaction bracket, no compensation, and no pivot interaction, so there is nothing for a transaction coordinator to own — and the `reads-live` fold mode ([05 §3.2](./05-context-aggregation-and-offline-evaluation.md)) already assumes the Orchestrator executes exactly that class of tool live. Check-rule R10 requires every side-effecting node to belong to a scope, so the two queued classes partition the queued vertices with no overlap and no gap. A router is outside that partition rather than an exception inside it: it is never queued at all, because a vertex that performs no call has nothing for a worker to claim, and giving it a queue row would let a lease expiry fabricate a failure for a pure function.
 
 The class is derived from the vertex payload and never declared, exactly as `is_pivot` is derived from `effect_class`. Both the work queue and the event-log ownership trigger compute it the same way, so a service cannot append an execution event for a vertex it does not own even if its own guard is bypassed.
 
@@ -172,6 +189,7 @@ linearize(surface, planner_vertex) → [ctx_item...]
 1. Include only the planner's ancestor closure and result summaries, rather than full outputs, from sibling branches.
 2. Sort parallel branches lexicographically by `vertex_id`, never by either sequence number or completion time; scheduling order must not affect replay. `stream_seq` fixes storage order but not the order in which concurrent siblings were scheduled, so sorting on it would still be non-reproducible.
 3. Inject failure evidence as an explicit structured section during replanning, rather than scattering it through history.
+4. Render a router only when it matched, and then only as its matched condition string, so the emitted branch is explained. A router that fell through is **completely invisible**: the downstream planner receives a byte-identical context to a run in which no router existed ([10 §8](./10-deterministic-routers.md#8-prompt-invisibility)). Because R14 interposes a router on every tool-caller-to-planner edge, rendering fall-throughs would otherwise add a line to every junction of every prompt and destroy the prefix stability the cache dividend rests on.
 
 The function is pure. The same log prefix and harness-state version produce the same prompt, allowing regression assertions without a model.
 
@@ -232,8 +250,11 @@ Every event that depends on an external contract carries a **`pin_version`** ide
 | Tool API contract | `tool://logistics.book@v4` |
 | Prompt assembly strategy | `assemble://v7 + harness_state@v12` |
 | Fold reducer | `fold://inventory@v3` |
+| Router rule template | `rule://return-routing@v3` |
 
-A substitution is nothing more elaborate than **changing one of these pins and replaying**. That is why the mechanism needs no special cases for "what if we used a different model", "what if the carrier API had behaved as in v5", or "what if the prompt had been assembled differently" — all three are the same operation on a different pin.
+A substitution is nothing more elaborate than **changing one of these pins and replaying**. That is why the mechanism needs no special cases for "what if we used a different model", "what if the carrier API had behaved as in v5", "what if the prompt had been assembled differently", or "what if this junction had routed on v2 of the rule" — all four are the same operation on a different pin.
+
+The rule-template pin is what makes deterministic routing evaluable at all. Because a router is interposed on every tool-caller-to-planner edge whether or not a rule is bound, attaching or changing a rule never changes the physical DAG; it changes one pin, and the counterfactual is an ordinary fork ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)). Resolving that pin at a historical position needs no live registry, because the Engine records every publication and binding as a `rule_template/published` diff event (§3.2).
 
 The pin is also what makes a fork reproducible: a fork with no substitutions must fold to a surface identical to the source, and any difference means an unpinned dependency leaked into the pipeline.
 

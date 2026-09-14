@@ -1,18 +1,26 @@
 # Database Schema and Storage Model (08)
 
-> Status: Implemented storage and Coordinator projections v0.2 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [05](./05-context-aggregation-and-offline-evaluation.md), [07](./07-distributed-transaction-coordinator.md)
+> Status: Two-plane schema specified (v0.3); the single-table storage of v0.2 is implemented and its migration is tracked by [Plan 007](../plan/plan-007-two-plane-storage.md) | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [05](./05-context-aggregation-and-offline-evaluation.md), [07](./07-distributed-transaction-coordinator.md)
 
 ## 1. Executable Boundary
 
 The executable storage core lives in [`db/migrations/`](../../db/migrations/), with its canonical wire schema in [`idl/event-log.schema.json`](../../idl/event-log.schema.json). The schema is the only event contract. TypeScript and Go contract models are generated from it; neither language owns an independent event definition.
 
-PostgreSQL has four development roles. `flory` owns migrations. `engine_role` creates runs and appends engine-owned events. `coordinator_role` appends coordinator-owned events. `gateway_role` reads and mutates only the Gateway-owned RBAC schema through security-definer functions and has no event-log write privilege. The Engine and Coordinator can read the run authorization projection but cannot mutate RBAC data. Application roles cannot insert, update, or delete event-log base tables directly; controlled append functions and their triggers inspect `session_user` so the original service identity remains enforceable through the write path.
+PostgreSQL has four development roles. `flory` owns migrations. `engine_role` creates runs and streams, appends engine-owned events in both planes, and writes snapshot rows. `coordinator_role` appends coordinator-owned events. `gateway_role` reads and mutates only the Gateway-owned RBAC schema through security-definer functions and has no event-log write privilege. The Engine and Coordinator can read the run authorization projection but cannot mutate RBAC data. Application roles cannot insert, update, or delete event-log base tables directly; controlled append functions and their triggers inspect `session_user` so the original service identity remains enforceable through the write path.
 
 ## 2. Ground-Truth Tables
 
-`run(run_id, next_seq, seed_floor, created_at)` is the per-stream sequence allocator; `seed_floor` is non-null only for fork runs, where it equals `eval_up_to_seq` and pins own-event numbering above it. `event_log` is hash partitioned by `run_id`, with `(run_id, stream_seq)` as its primary key and a non-foldable generated `global_seq` for operations only. Each row contains the event type, causal and scope columns, `pin_version`, explicit `ignorable`, an `inherited` provenance marker (true only on read-only copies from a fork's source stream), JSON payload, and creation time.
+Storage has two planes, because a run and a business entity are different lifetimes ([01 §3.1](./01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences)).
 
-`append_events(run_id, events)` locks the run row, increments `next_seq`, and inserts every supplied event inside the caller's transaction. A failed batch rolls back the counter and every row, so `stream_seq` stays contiguous and commit ordered within one stream. `global_seq` remains intentionally gappy and must never drive a fold.
+`run(run_id, next_seq, seed_floor, created_at)` allocates `run_seq`; `seed_floor` is non-null only for fork runs, where it equals `eval_up_to_seq` and pins own-event numbering above it. `stream(stream_id, next_seq, created_at)` allocates `stream_seq` for one aggregate root.
+
+`run_event_log` is the orchestration plane: hash partitioned by `run_id`, primary key `(run_id, run_seq)`, with a non-foldable generated `global_seq` for operations only. Each row contains the event type, causal and scope columns, `pin_version`, explicit `ignorable`, an `inherited` provenance marker (true only on read-only copies from a fork's source run), JSON payload, and creation time.
+
+`business_event_stream` is the data plane: hash partitioned by `stream_id`, primary key `(stream_id, stream_seq)`. Partitioning on `stream_id` is what makes that key enforceable — PostgreSQL requires every partition-key column to appear in a unique constraint, so the same key on a `run_id`-partitioned table would have to include `run_id` and would stop being unique per entity, which is the whole point. Each row carries `(run_id, run_seq)` provenance and `is_counterfactual`, and the reserved configuration `stream_id` lives here too ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)).
+
+`append_events(run_id, events)` locks the run row, increments `next_seq`, and inserts every supplied event inside the caller's transaction. A domain event additionally locks its `stream` row and writes both planes in the same transaction; a pure orchestration event never takes the stream lock. A failed batch rolls back both counters and every row, so each sequence stays contiguous and commit ordered within its own ordering. `global_seq` remains intentionally gappy and must never drive a fold.
+
+`business_stream_snapshot(snapshot_id, stream_id, pinned_stream_seq, reducer_version, state_payload, created_at)` stores one folded entity state, unique on `(stream_id, pinned_stream_seq, reducer_version)`. It is the anchor that lets a later run consume business context without the context drifting under replay ([04 §2.1](./04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state)).
 
 The migrations create synchronous safety projections and recoverable operational queues:
 
@@ -29,7 +37,7 @@ The migrations create synchronous safety projections and recoverable operational
 | `gateway_rbac_audit` | Append-only, idempotency-keyed administrative audit committed in the same transaction as each role mutation |
 | `run_authorization` | Synchronous projection of the signed authorization identity in `run/start`, readable by executors for later Gateway calls |
 
-No application role receives `UPDATE` or `DELETE` access to `event_log`. Shadowing is represented only by a new `subgraph/shadowed` event.
+No application role receives `UPDATE` or `DELETE` access to either event plane. Shadowing is represented only by a new `subgraph/shadowed` event. A snapshot row is immutable once written: a changed reducer produces a new `reducer_version`, never an update in place.
 
 ## 3. Write-Time Guards
 
@@ -45,21 +53,23 @@ Every state-altering path — router branch admission, `claim_ready_work`, and `
 
 `flory_executor_class` has three values: `router`, `orchestrator`, and `coordinator`. The class is derived from the vertex payload, and both the queue and the ownership trigger derive it identically ([01 §3.2.1](./01-jit-dag-and-event-log.md#321-which-executor-owns-a-vertex)).
 
-The configuration stream is an Engine-owned stream in `event_log`, distinct from every run stream and carrying only `rule_template/published` events. It has a `run` counter row of its own, so `stream_seq` is allocated and ordered there exactly as in a run stream, and the ownership trigger admits that event type from `engine_role` alone. Recording each publication, update, and slot binding as a diff event is what lets replay and counterfactual evaluation resolve the exact template bound to a router at a historical position without consulting a live registry ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)).
+The configuration stream is a reserved, Engine-owned `stream_id` in `business_event_stream`, carrying only `rule_template/published` events. It has a `stream` counter row like any entity, so `stream_seq` is allocated and ordered there under the ordinary rules, and the ownership trigger admits that event type from `engine_role` alone. Recording each publication, update, and slot binding as a diff event is what lets replay and counterfactual evaluation resolve the exact template bound to a router at a historical position without consulting a live registry ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)).
 
 Gateway RBAC mutations use security-definer functions with advisory transaction locks and `expected_revision` compare-and-swap. The same transaction appends the actor SPIFFE ID, request ID, idempotency key, target, and before/after revisions to `gateway_rbac_audit`; repeating an idempotency key returns the recorded result. Live subject lookup joins only enabled roles and active bindings. `run/start` synchronously projects its Gateway-signed `authorization_identity` into `run_authorization`, so a Coordinator restart can resume using the frozen role set without receiving the original JWT and without consulting current bindings.
 
 ## 4. Fork Storage Transaction
 
-The TypeScript engine implements the lazy causal fork of [01 §5.2](./01-jit-dag-and-event-log.md) — `fork(source_stream, at_vertex_id, substitutions[], eval_up_to_seq)` — in one database transaction:
+The TypeScript engine implements the lazy causal fork of [01 §5.2](./01-jit-dag-and-event-log.md) — `fork(source_run, at_vertex_id, substitutions[], eval_up_to_seq)` — in one database transaction. A fork lives entirely in the orchestration plane except for the quarantined stream described at the end of this section:
 
 1. Lock the source `run` row and validate that `eval_up_to_seq` names a recorded source position.
 2. Resolve the divergence vertex `at_vertex_id` — **any** vertex, with no planner, bracket, or pivot-floor restriction — and validate that every substitution names one of its pinned events.
 3. Compute the causal slice. With substitutions present, every causal descendant of the divergence vertex (derived via `parent_refs`) and the divergence vertex's own execution events are invalidated: their cause changed, so they are never copied and the fork regenerates that chain. With no substitutions nothing is invalidated and everything merges, which is what lets a no-substitution fork reproduce the source surface exactly.
-4. Create the child run with its counter preset to `eval_up_to_seq + 1` and `seed_floor = eval_up_to_seq`, append source-side `fork/created` provenance, then copy the seed — the inherited events at or before the divergence vertex — **preserving each source `stream_seq`** and marking every row `inherited`. A substitution changes only the named copy's `pin_version`.
+4. Create the child run with its counter preset to `eval_up_to_seq + 1` and `seed_floor = eval_up_to_seq`, append source-side `fork/created` provenance, then copy the seed — the inherited events at or before the divergence vertex — **preserving each source `run_seq`** and marking every row `inherited`. A substitution changes only the named copy's `pin_version`.
 5. Append `run/end-seed` at `eval_up_to_seq + 1` as the child's first own event, carrying the fork provenance (`source_run_id`, `at_vertex_id`, `eval_up_to_seq`, substitutions) that later merges re-derive.
 
-Causally independent events after the divergence vertex are not copied eagerly. `mergeIndependentEvents(child_run_id, through_seq)` merges them lazily — re-deriving the same causal slice from the `run/end-seed` provenance, skipping sequences already present, and never merging past `eval_up_to_seq`. Merged rows are inherited copies like the seed: they keep their source `stream_seq` (always at or below `seed_floor`, so an inherited and an own sequence can never collide) and carry the `inherited` marker the §3 guard keys on. Inherited copies also never materialize live state: the transaction projections and the work queue skip them, so a fork can neither operate an inherited bracket nor schedule inherited vertices as coordinator work.
+Causally independent events after the divergence vertex are not copied eagerly. `mergeIndependentEvents(child_run_id, through_seq)` merges them lazily — re-deriving the same causal slice from the `run/end-seed` provenance, skipping sequences already present, and never merging past `eval_up_to_seq`. Merged rows are inherited copies like the seed: they keep their source `run_seq` (always at or below `seed_floor`, so an inherited and an own sequence can never collide) and carry the `inherited` marker the §3 guard keys on. Inherited copies also never materialize live state: the transaction projections and the work queue skip them, so a fork can neither operate an inherited bracket nor schedule inherited vertices as coordinator work.
+
+A fork that produces domain events writes them to a synthetic stream, `fork:<fork_run_id>:<source_stream_id>`, with `is_counterfactual = true` and its own `stream` counter row. It never appends to the source entity's stream: that would collide with the entity's sequence during inherited copying and would leave simulated facts inside the view production reducers fold. Production folds and reports filter `is_counterfactual = false`, so a query that forgets the namespace still cannot read a counterfactual as fact.
 
 The fork copies recorded semantics only. It does not call a tool or replay an external effect. The accepted modes are `recorded`, `model-live`, and `reads-live`; `writes-live` is not a fork API mode.
 

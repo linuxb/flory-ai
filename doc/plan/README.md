@@ -14,3 +14,4 @@ All planning documents are written in English.
 | [004](./plan-004-tool-registry-gateway.md) | Tool Registry Gateway | [Doc 09](../design/09-tool-registry-gateway.md) | Done |
 | [005](./plan-005-gateway-owned-rbac.md) | Gateway-Owned RBAC | [Doc 09 §3.3](../design/09-tool-registry-gateway.md#33-role-based-access-control-rbac) | Done |
 | [006](./plan-006-deterministic-routers.md) | Deterministic Routers and Rule Templates | [Doc 10](../design/10-deterministic-routers.md) | Proposed |
+| [007](./plan-007-two-plane-storage.md) | Two-plane storage and the three-tier sequence model | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 08](../design/08-database-schema.md) | Proposed |

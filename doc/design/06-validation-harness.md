@@ -160,7 +160,7 @@ A scenario is a declarative record, not a script. The runner is generic; scenari
 
 The `goal_prompt` is the initial workflow prompt that drives orchestration. In T-B it is context for the scripted planner's branch selection; in T-C it is the real model input. Keeping one field for both means a scenario can be promoted from T-B to T-C by changing `planner.mode` and nothing else.
 
-The repository's gated live test uses the same minimal scenario shape with `planner.mode = "live"`. It is enabled only by `FLORY_LLM_LIVE=1`; ordinary tests use an in-memory HTTP double and require no key. The live test creates a real planner vertex, performs one thought call, then reads the PostgreSQL stream back and asserts that its `budget/charged` event contains positive duration and token usage plus cost when a pricing snapshot was configured.
+The repository's gated live test uses the same minimal scenario shape with `planner.mode = "live"`. It is enabled only by `FLORY_LLM_LIVE=1`; ordinary tests use an in-memory HTTP double and require no key. The live test creates a real planner vertex, performs one thought call, then reads the run's PostgreSQL events back and asserts that its `budget/charged` event contains positive duration and token usage plus cost when a pricing snapshot was configured.
 
 ## 6. Scenario Matrix
 
@@ -198,6 +198,9 @@ Each row exists to kill one specific accident. A scenario that cannot fail if a 
 | S19 | **cancel-versus-claim race**: sweeper cancellation and a worker claim contend for the same scope | decisive in both directions and never both: if cancellation commits first, no member adapter call starts; if the claim commits first, the live lease defers cancellation | O1, O2 | T-B runtime integration |
 | S19a | **unresolved attempt**: a side-effecting request is delayed past lease expiry, with a durable start and no recorded outcome | the scope **suspends** to L4 with its attempt evidence and reservations intact. No automatic cancellation and no automatic redispatch. A late success arriving afterwards remains visible as evidence and authorizes nothing by itself ([02 §4.4](./02-transaction-model.md#44-orphan-try-detection)) | O1, O2.no_cancel_while_unresolved, O3 | T-B runtime integration |
 | S19b | **post-pivot claim eligibility**: payment has passed its pivot while forward work remains queued | already-admitted forward work is still claimable; a new pre-pivot claim and every backward cancellation stay blocked ([07 §3.1](./07-distributed-transaction-coordinator.md#31-work-scheduler)) | O2 | T-B runtime integration |
+| S21 | **cross-run business continuity**: `order:12345` runs four workflows — place, pay, return, refund — each a separate `run_id` | one semantic fold over `stream_id = 'order:12345'` reproduces the entity view without correlating runs by hand, and each business row traces back to the `(run_id, run_seq)` that produced it | O1, O2 | T-B |
+| S22 | **counterfactual quarantine**: fork a run whose branch would append domain events for `order:12345` | **negative test**: the live stream's head is unchanged and its production fold is byte-identical before and after the fork. The fork's events exist under `fork:<fork_run_id>:order:12345` with `is_counterfactual = true` | O1, O2.counterfactual_quarantine | T-B |
+| S23 | **snapshot replay determinism**: run a workflow against a business snapshot pinned at `stream_seq = 42`, advance the entity to 100, then replay the run | the replayed prompt hash is identical. Re-folding the entity at assembly time instead would change the prompt, which is the drift this pin exists to prevent (04 §2.1) | O4, O2.pinned_business_context | T-B |
 | S20 | **rule-template counterfactual**: fork one historical run substituting `rule://…@v3` for `@v2` at a router vertex | the fork differs from the source in a pin, never in topology, and both surfaces are comparable by the standard evaluators. A structural difference means interposition was not applied uniformly ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)) | O2, O4 | T-B |
 
 ## 7. Oracles
@@ -226,8 +229,10 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 | **witness completeness**: every ancestor planner of the failed vertex, enumerated by `parent_refs` traversal, appears in the `replan/boundary` candidate list with either a published cost or a closed-vocabulary rejection reason | 03 §4.2 |
 | **witness minimality**: the selected boundary has the lowest **published** cost among candidates not marked rejected; the oracle never recalculates the cost | 03 §4.2 |
 | **witness honesty**: each rejection reason is factually true of the log — `open_bracket` requires an unmatched `txn/try` before that vertex, `below_floor` requires a later `txn/pivot-passed`, `savepoint_precedes` requires the cancelled scope's savepoint to precede the candidate | 03 §4.2 |
-| **no online fork**: an online replan appends `replan/boundary` in the same stream; `fork/created` appears only for offline evaluation (01 §5) | 01 §5 |
-| **no inherited mutation**: a fork appends no `txn/*` event referencing an inherited scope — one whose `txn/try` is a copy from the source stream | 02 §4.4 |
+| **no online fork**: an online replan appends `replan/boundary` in the same run; `fork/created` appears only for offline evaluation (01 §5) | 01 §5 |
+| **no inherited mutation**: a fork appends no `txn/*` event referencing an inherited scope — one whose `txn/try` is a copy from the source run | 02 §4.4 |
+| **counterfactual quarantine**: a fork appends no row to a live business stream; its domain events carry `is_counterfactual = true` under `fork:<fork_run_id>:<source_stream_id>`, and no production fold reads them | 01 §5.2; 08 §4 |
+| **pinned business context**: a run whose `task_input` names a business snapshot assembles from that snapshot's `(stream_id, pinned_stream_seq, reducer_version)`, never from the entity's current head | 04 §2.1 |
 | **causal inheritance**: a fork inherits no causal descendant (via `parent_refs`) of its divergence vertex, and every merged event is causally independent of it | 01 §5.2 |
 | a fork evaluation invokes no tool above its declared `fold_mode`, and never a write | 01 §5.4; 05 §3.2 |
 | a no-substitution fork reproduces the source surface exactly | 01 §5.3; 01 §6 |
@@ -237,7 +242,7 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 | **router admission**: no router branch reaches execution without a freeze-time `checkSubDag` over every branch of its pinned template; a rejection cites R12, R13, R14, or an inherited R1-R11 code | 02 §3.4; 10 §5.1 |
 | **no deterministic replan**: no `replan/boundary` is appended for a failure inside a router-emitted branch, and no planner vertex starts on that failure path | 03 §2.5 |
 | **no cancel while unresolved**: no `txn/cancel {phase: requested}` is appended for a scope holding an unresolved `txn_attempt` row; that scope suspends instead | 02 §4.4; 07 §3.4 |
-| **configuration-stream ownership**: `rule_template/published` appears only in the Engine-owned configuration stream and never in a run stream; `gateway_role` appends nothing anywhere | 01 §3.2; 08 §3 |
+| **configuration-stream ownership**: `rule_template/published` appears only under the reserved Engine-owned configuration `stream_id` and never in a run or an entity stream; `gateway_role` appends nothing anywhere | 01 §3.2; 08 §3 |
 | each event type was appended only by its owning service | 01 §3.2; 08 §3 |
 | `subgraph/frozen` and its `vertex/created` events share one transaction boundary | 01 §3.3 inv. 2 |
 
@@ -277,7 +282,7 @@ Structural assertions alone are **necessary but not sufficient**: an engine whos
 
 The permutation assertion deserves emphasis: the harness runs selected scenarios twice with **deliberately permuted branch scheduling** and asserts an identical prompt hash *and* identical fold views. Scheduling jitter silently destroying replay determinism and prompt-cache hit rate is exactly the bug class that no ordinary test catches.
 
-It is also the only assertion that tests **reducer commutativity over concurrent events**. Serializing appends fixes storage order but not scheduling order, so two concurrent siblings may receive `stream_seq` in either order across replays. A reducer that is order-sensitive over events with no `parent_refs` path between them breaks projection purity even with a perfect sequence ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3).
+It is also the only assertion that tests **reducer commutativity over concurrent events**. Serializing appends fixes storage order but not scheduling order, so two concurrent siblings may receive `run_seq` in either order across replays. A reducer that is order-sensitive over events with no `parent_refs` path between them breaks projection purity even with a perfect sequence ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3).
 
 ### O5 — Cost-model fidelity (reads the log plus the recorded tool view)
 
@@ -299,7 +304,7 @@ O1–O5 validate **mechanism**: given a policy, was it executed correctly. They 
 
 **wider** is the L2 strategy used deliberately: rather than the nearest legal boundary, select an earlier ancestor planner and replan a larger scope.
 
-Method. Select an explicit historical failure episode identified by `(run_id, stream_seq)`. From that same point, run two **counterfactual evaluations** ([05 §3](./05-context-aggregation-and-offline-evaluation.md)): one substituting the pin that forces the nearest legal boundary, one forcing an earlier boundary. `fold_mode: reads-live`, so the model is called fresh and `effect_class: none` tools are actually called while writes are skipped.
+Method. Select an explicit historical failure episode identified by `(run_id, run_seq)`. From that same point, run two **counterfactual evaluations** ([05 §3](./05-context-aggregation-and-offline-evaluation.md)): one substituting the pin that forces the nearest legal boundary, one forcing an earlier boundary. `fold_mode: reads-live`, so the model is called fresh and `effect_class: none` tools are actually called while writes are skipped.
 
 What an evaluation can compare: model cost actually charged, plan size, real quoted tool prices, the check-rules verdict, an LLM-judge score, and — the sharpest cheap signal — whether the new plan **reuses a `(tool, parameter pattern)` already recorded as disproven**. That last one is the best available proxy for "this would fail again", and it needs no writes.
 

@@ -11,4 +11,3 @@ Write proposals in English. Implementation and rollout plans belong in [`../plan
 | ADR | Title | Status |
 |---|---|---|
 | [006](./adr-006-console-ui-for-jit-dag.md) | Console UI for JIT-DAG Visualization and Monitoring | Proposed |
-| [007](./adr-007-business-stream-sequences.md) | Three-Tier Sequence Model for Business Streams | Proposed |

@@ -28,7 +28,7 @@ Building a prompt is not "query and concatenate." It is a layered pipeline of pu
 
 ### 2.1 Layer contracts
 
-- Every layer is **pure** and **independently cacheable**. Cache key = `hash(stream_seq_prefix) + projector_version + harness_state_version`. The prefix is hashed over one run's events ordered by `stream_seq`; `global_seq` is never an input, because it is neither gap-free nor commit-ordered and would make the key non-reproducible ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3).
+- Every layer is **pure** and **independently cacheable**. Cache key = `hash(run_seq_prefix) + projector_version + harness_state_version`, plus the pinned business snapshot when the run carries one ([04 §2.1](./04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state)). The prefix is hashed over one run's events ordered by `run_seq`; `global_seq` is never an input, because it is neither gap-free nor commit-ordered and would make the key non-reproducible ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3).
 - Every layer must be able to **dump its intermediate output**. Multi-layer pure pipelines are cheap to reason about and expensive to debug blind; when a prompt looks wrong, an operator must be able to ask which layer distorted it.
 - Layers may be replaced individually, but replacement bumps `projector_version` (see §4.2).
 
@@ -77,20 +77,20 @@ Forking is Flory's **offline historical-evaluation** mechanism. It answers "what
 
 ### 3.1 The evaluation API
 
-Because the log is immutable and any `stream_seq` folds into a surface, an evaluation is a small, uniform call:
+Because the log is immutable and any `run_seq` folds into a surface, an evaluation is a small, uniform call:
 
 ```
 evaluate({
-  source_stream:  run_id,
+  source_run:     run_id,
   at_vertex_id:   "v-4109",                   // divergence point — any vertex (01 §5.2)
-  substitutions:  [{ stream_seq: 4109, pin_version: "model://claude-sonnet-5@2026-08" }],
+  substitutions:  [{ run_seq: 4109, pin_version: "model://claude-sonnet-5@2026-08" }],
   eval_up_to_seq: 4172,                       // lazy: execute and merge no further than this
   fold_mode:      "model-live",               // 01 §5.4 ladder
   evaluator:      "eval://plan-admissibility@v2"
 }) → evaluation_result
 ```
 
-The engine forks at the divergence vertex, substitutes the pins, invalidates the vertex's causal descendants, regenerates that chain while lazily merging causally independent events up to `eval_up_to_seq`, then hands the evaluator **two surfaces** — one folded from the source stream, one from the fork — at comparable positions. The evaluator is scenario-specific and owns the entire notion of "better":
+The engine forks at the divergence vertex, substitutes the pins, invalidates the vertex's causal descendants, regenerates that chain while lazily merging causally independent events up to `eval_up_to_seq`, then hands the evaluator **two surfaces** — one folded from the source run, one from the fork — at comparable positions. Any domain events the fork produces land in its own quarantined stream and are invisible to production folds ([01 §5.2](./01-jit-dag-and-event-log.md#52-fork-is-a-lazy-causal-counterfactual-on-an-immutable-history)). The evaluator is scenario-specific and owns the entire notion of "better":
 
 | Evaluator | Compares | Typical use |
 |---|---|---|
@@ -101,7 +101,7 @@ The engine forks at the divergence vertex, substitutes the pins, invalidates the
 
 A router's rule template is an ordinary pin, so "what would this junction have done under v2 of the rule" needs no new machinery: substitute `rule://…@vN` at the router vertex and compare with `surface-identity` and `cost-delta`. This is only possible because interposition is mandatory — the ruled and unruled graphs have the same shape, so the two histories differ in a pin rather than in topology ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)). A read-only fork also constrains what a template may do there: a side-effecting branch is refused in a read-only slot before the fork evaluates it ([10 §5.2](./10-deterministic-routers.md#52-multi-dimensional-tags-and-admission-logic)).
 
-The engine supplies surfaces and never opinions. Keeping the comparison logic in a named, versioned evaluator is what allows a result to be re-derived later. `fork/created` records `(source_stream, at_vertex_id, eval_up_to_seq, substitutions, fold_mode, evaluator, projector_version, harness_state_version)`.
+The engine supplies surfaces and never opinions. Keeping the comparison logic in a named, versioned evaluator is what allows a result to be re-derived later. `fork/created` records `(source_run, at_vertex_id, eval_up_to_seq, substitutions, fold_mode, evaluator, projector_version, harness_state_version)`.
 
 ### 3.2 Fold modes govern the cost and the risk
 
@@ -145,9 +145,9 @@ An offline result may recommend a candidate for operator review. It cannot autho
 
 **Metrics are projections, not telemetry.** Replan depth, token usage and estimated cost, check-rule verdicts, suspension state, and **per-rule match rate** are folded from the log. Match rate is a governance instrument rather than a dashboard number: a rule matching close to 100% of the time means the junction never needed a planner and should become a static pipeline, and a condition list that keeps growing means rules are being substituted for thought and the junction should revert to a planner ([10 §10](./10-deterministic-routers.md#10-governance-and-match-rate-telemetry)). Both readings are computable because a router records `{matched_condition}` on every evaluation, including fall-through. Each LLM `budget/charged` row carries provider-reported normalized usage, measured wall-clock duration, and, when configured, the immutable price reference and rates used for its estimate. The projection therefore never consults today's provider price page to reinterpret an old run. When a metric definition changes, history can be recomputed under a named projector version.
 
-**Fold per stream, then summarize — never fold concatenated streams.** Projection purity is guaranteed within one stream and explicitly not across them ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3). Descriptive corpus summaries may be grouped by task type, SKU-count bucket, pivot presence, or failure class, but every underlying case result remains available and no pooled causal claim is made.
+**Fold per ordering, then summarize — never fold concatenations of the same kind.** Projection purity is guaranteed within one run and within one business stream, and explicitly not across two runs or two entities ([01 §3.3](./01-jit-dag-and-event-log.md) inv. 3). One entity's four workflow runs are not a concatenation problem — that is precisely what `stream_seq` orders, so `inventory_view` for `order:12345` folds natively across them. Descriptive corpus summaries across *different* entities may be grouped by task type, SKU-count bucket, pivot presence, or failure class, but every underlying case result remains available and no pooled causal claim is made.
 
-**Provenance is complete or the result is invalid.** Record the source run and position, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version`. Live-read results also record observation time and cache status because current quotes and inventory are not historical facts.
+**Provenance is complete or the result is invalid.** Record the source run and position, substitutions, `fold_mode`, evaluator pin, `projector_version`, `harness_state_version`, and the pinned business snapshot `(stream_id, pinned_stream_seq, reducer_version)` when the run carried one. Live-read results also record observation time and cache status because current quotes and inventory are not historical facts.
 
 **Safety dominates.** A lower estimated cost cannot overcome a failed check-rule, a worse post-pivot risk, or reliance on an unverified write. Production rollback uses absolute safety guardrails or operator judgement, not a comparison between heterogeneous task windows.
 

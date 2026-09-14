@@ -6,7 +6,7 @@
 
 - The DAG is not a predefined workflow. It is generated just in time in the ReAct style, through progressive disclosure: each planner expands only the next batch of certain actions and the next decision point rather than the entire graph. A submitted workflow may itself be anything from a single planner vertex to a multi-vertex DAG mixing deterministic tools with probabilistic steps; it unfolds recursively as planners and routers generate sub-DAGs of tool callers and further downstream planners and routers.
 - Not every expansion needs a model. A transition whose decision is a rigid business rule is taken by a **router** — a deterministic vertex that evaluates a pinned rule template and emits a sub-DAG with zero model calls (§2.3, [10](./10-deterministic-routers.md)).
-- Storage and execution history share one **append-only event log** in a transactional database: **a vertex is an event and `stream_seq` is its position within its DAG**. No separate event-log component is introduced, and there is no separate transaction log either — the `txn/*` brackets are rows in the same table.
+- Storage and execution history share one **append-only log** in a transactional database: **a vertex is an event and `run_seq` is its position within its DAG**. No separate event-log component is introduced, and there is no separate transaction log either — the `txn/*` brackets are rows in the same orchestration table. A second plane records what a *business entity* experienced across all of its runs, ordered by `stream_seq` (§3.1).
 - Every derived view (current DAG, planner context, progress, and token accounting) is a pure-function projection of the log, making it auditable, replayable, and forkable. **Purity is guaranteed within one run and deliberately not across runs** (§3.3 invariant 3), which is exactly the scope every projection and every offline evaluation operates in.
 
 ## 2. Node Roles
@@ -36,19 +36,27 @@ The role split is a **permission split**. Planners may append sub-DAG proposals;
 
 ## 3. Event Log Storage Model
 
-### 3.1 Illustrative schema
+### 3.1 Two planes and three sequences
 
-The log is named `event_log` rather than `vertex_log` because its rows are not only DAG-vertex transitions. Externally imposed events land in the same stream — a human-triggered refine, an operator what-if request, a reconciliation outcome — and they belong there for exactly the reason vertex events do: they change the context that later decisions fold from. "Stream" names the ordering, "event" names the row; both terms are needed and neither substitutes for the other.
+A log row is not only a DAG-vertex transition. Externally imposed events land in the log too — a human-triggered refine, an operator what-if request, a reconciliation outcome — and they belong there for exactly the reason vertex events do: they change the context that later decisions fold from. "Stream" names the ordering, "event" names the row; both terms are needed and neither substitutes for the other.
 
-This section defines the logical model. The physical PostgreSQL schema, indexes, triggers, and work-queue tables are specified in [08](./08-database-schema.md).
+What a run orchestrates and what a business entity experiences are, however, **different orderings over different lifetimes**. One order is placed, paid, returned, and refunded across four separate workflow runs; one run touches exactly one DAG. Folding either ordering out of the other means correlating runs by hand in every domain reducer. The log is therefore split into two planes, and three sequences with deliberately different authorities.
 
-It carries **two sequence numbers with different guarantees**, and confusing them is the most consequential mistake available in this schema (see §3.3 invariant 3).
+| Sequence | Scope and plane | Authority and use |
+|---|---|---|
+| `run_seq` | one run — the orchestration plane | Allocated by the Engine per `run_id`. Strict, contiguous, rollback-safe, commit-ordered within its run. The only legal input to a surface fold, and the anchor of every intra-run reference. |
+| `stream_seq` | one business entity — the data plane | Allocated per `stream_id`, such as `order:12345`. An immutable, monotonically increasing order over every domain event of that entity, across all of its historical runs. The only legal input to a semantic fold. |
+| `global_seq` | the physical table — the storage plane | Database-assigned. Gappy and not commit-ordered. Replication, change-data capture, and operational triage only; never a fold input (§3.3 invariant 3). |
+
+This section defines the logical model. The physical PostgreSQL schema, its partitioning, indexes, triggers, and work-queue tables are specified in [08](./08-database-schema.md).
+
+**Orchestration plane.** `run_event_log` holds what the Engine executes: `subgraph/*`, `vertex/*`, `replan/*`, `txn/*`, `budget/charged`. It is hash partitioned by `run_id` with primary key `(run_id, run_seq)`, so the query that matters most — every event of one run in order — reads exactly one partition and never scatters.
 
 ```sql
-CREATE TABLE event_log (
+CREATE TABLE run_event_log (
   run_id       UUID    NOT NULL,           -- one end-to-end task = one DAG
-  stream_seq      BIGINT  NOT NULL,           -- per-run: strict, contiguous, rollback-safe
-  global_seq   BIGSERIAL,                  -- coarse global order; gappy, NOT commit-ordered
+  run_seq      BIGINT  NOT NULL,           -- per-run: strict, contiguous, rollback-safe
+  global_seq   BIGSERIAL,                  -- coarse physical order; gappy, NOT commit-ordered
   event_type   TEXT    NOT NULL,           -- see 3.2
   vertex_id    UUID,                       -- owning vertex; NULL for some events
   parent_refs  UUID[],                     -- DAG edges: parent vertices define causal order
@@ -58,33 +66,53 @@ CREATE TABLE event_log (
   ignorable    BOOLEAN NOT NULL DEFAULT false, -- explicit opt-in for forward-compatible events
   payload      JSONB   NOT NULL,           -- role, tool, params, txn attrs, result summary, blob refs
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (run_id, stream_seq)
+  PRIMARY KEY (run_id, run_seq)
 ) PARTITION BY HASH (run_id);
 ```
 
-A run owns exactly one stream, so `run_id` identifies the stream and `stream_seq` is the position within it. One stream is not a run: the Engine-owned **configuration stream** carries `rule_template/published` events (§3.2) and has a counter row like any other, so it folds under the same rules while never mixing rule history into a business run. `stream_seq` is allocated from a counter column on the run row, inside the appending transaction:
+**Data plane.** `business_event_stream` holds domain events for an aggregate root, hash partitioned by `stream_id` with primary key `(stream_id, stream_seq)`. Partitioning on the same column the key leads with is what makes the constraint expressible at all: PostgreSQL requires every partition-key column to appear in a unique constraint, so a cross-run unique `(stream_id, stream_seq)` is only enforceable when `stream_id` is the partition key. Each row also records the `run_id` and `run_seq` that produced it, so any business fact traces back to the orchestration step that caused it.
 
 ```sql
-UPDATE run SET next_seq = next_seq + 1 WHERE run_id = $1 RETURNING next_seq - 1;
+CREATE TABLE business_event_stream (
+  stream_id        TEXT    NOT NULL,       -- aggregate root, e.g. 'order:12345'
+  stream_seq       BIGINT  NOT NULL,       -- per-entity: strict, contiguous, rollback-safe
+  global_seq       BIGSERIAL,
+  run_id           UUID    NOT NULL,       -- cross-plane provenance
+  run_seq          BIGINT  NOT NULL,
+  event_type       TEXT    NOT NULL,
+  is_counterfactual BOOLEAN NOT NULL DEFAULT false,  -- offline fork isolation (§5.2)
+  payload          JSONB   NOT NULL,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (stream_id, stream_seq)
+) PARTITION BY HASH (stream_id);
 ```
 
-That single statement buys three properties a sequence cannot provide. The row lock **serializes appends within one stream**, so `stream_seq` is strictly and contiguously increasing within it — the only ordering guarantee the design relies on. The counter lives in a row, so an aborted transaction **un-increments it** — no gaps from rollback, which `BIGSERIAL` explicitly does not offer. And because the lock is per-`run_id`, **different runs never contend**.
+Both sequences are allocated the same way, from a counter column on an owning row, inside the appending transaction:
 
-The cost is that concurrent appends inside one run serialize on that row. That is acceptable and arguably desirable: a run has at most a handful of concurrent branches, the transactions are short, and the resulting order is what makes per-run reads reproducible.
+```sql
+UPDATE run    SET next_seq = next_seq + 1 WHERE run_id    = $1 RETURNING next_seq - 1;
+UPDATE stream SET next_seq = next_seq + 1 WHERE stream_id = $2 RETURNING next_seq - 1;
+```
 
-Not stored here: raw model input and output, which live in blob storage referenced from `payload` (§7). Hot query fields (`run_id`, `event_type`, `vertex_id`, `scope_id`) are real columns; everything else stays in JSONB.
+That single statement buys three properties a sequence cannot provide. The row lock **serializes appends within one ordering**, so the counter is strictly and contiguously increasing within it — the only ordering guarantee the design relies on. The counter lives in a row, so an aborted transaction **un-increments it**, which `BIGSERIAL` explicitly does not offer. And because each lock is per owner, different runs never contend, and neither do different entities.
 
-**Every intra-run reference uses `stream_seq`** — `replan/boundary.boundary_seq`, `subgraph/shadowed` ranges, `fork/created.boundary_seq`. Cross-run references, such as `evidence_seqs` in harness-state ([04](./04-refine-and-harness-state.md)), must be `(run_id, stream_seq)` pairs; a bare number is ambiguous.
+A domain event takes both locks and writes both planes in one transaction; a pure orchestration event takes only the run lock and never touches the business plane. The cost is bounded by what actually contends: a run has a handful of concurrent branches, an order's lifecycle is close to sequential, and high throughput is spread across tens of thousands of distinct `run_id` and `stream_id` values. The two-lock path is only paid where a business fact is actually recorded.
 
-A fork (§5.2) copies inherited events — the divergence vertex's causal ancestors, plus lazily merged causally independent events — with the source stream's `stream_seq` values unchanged, and numbers its own events above `eval_up_to_seq` so an inherited seq and an own seq can never collide. `PRIMARY KEY (run_id, stream_seq)` stays satisfied because `run_id` differs.
+Not stored in either plane: raw model input and output, which live in blob storage referenced from `payload` (§7). Hot query fields are real columns; everything else stays in JSONB.
+
+**References name their plane.** Every intra-run reference uses `run_seq` — `replan/boundary.boundary_seq`, `subgraph/shadowed` ranges, `fork/created.boundary_seq`. Cross-run references, such as `evidence_seqs` in harness-state ([04](./04-refine-and-harness-state.md)), must be `(run_id, run_seq)` pairs; a bare number is ambiguous. A business reference is a `(stream_id, stream_seq)` pair, and a business-state snapshot pins one ([04 §2.1](./04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state)).
+
+A fork (§5.2) copies inherited events with the source run's `run_seq` values unchanged, and numbers its own events above `eval_up_to_seq` so an inherited seq and an own seq can never collide. `PRIMARY KEY (run_id, run_seq)` stays satisfied because `run_id` differs. Its business-plane writes are quarantined instead of merged — see §5.2.
+
+Two orderings exist that are neither a run nor a business entity, and both live in the data plane under a reserved `stream_id` rather than inventing a third plane. The Engine-owned **configuration stream** carries `rule_template/published` events (§3.2); a fork's synthetic stream carries its counterfactual business writes (§5.2). Both fold under exactly the rules above.
 
 ### 3.1.1 Projections and their indexes
 
-The transaction bracket state is **not a separate log** — `txn/*` events are ordinary `event_log` rows. What the coordinator needs beyond the log is a set of projections for queries a raw scan cannot serve. All of them are updated **in the same database transaction as the event append**, never asynchronously: pivot admission is a safety-critical synchronous read, and a projection lagging by even a few hundred milliseconds could let an irreversible action fire that should have been blocked.
+The transaction bracket state is **not a separate log** — `txn/*` events are ordinary `run_event_log` rows. What the coordinator needs beyond the log is a set of projections for queries a raw scan cannot serve. All of them are updated **in the same database transaction as the event append**, never asynchronously: pivot admission is a safety-critical synchronous read, and a projection lagging by even a few hundred milliseconds could let an irreversible action fire that should have been blocked.
 
 | Projection | Key columns and indexes | Query it serves |
 |---|---|---|
-| `txn_scope` | `scope_id` PK, `state`, `pivot_vertex_id`, `savepoint_seq`, `opened_seq`, `closed_seq`; partial unique `(scope_id) WHERE is_pivot`; partial index for `state = 'cancelling'` | "May this scope's pivot fire?", "is there an open bracket at this replan boundary?", and "which interrupted cancellations are eligible for takeover?" |
+| `txn_scope` | `scope_id` PK, `state`, `pivot_vertex_id`, `savepoint_seq`, `opened_seq`, `closed_seq` (all `run_seq` positions); partial unique `(scope_id) WHERE is_pivot`; partial index for `state = 'cancelling'` | "May this scope's pivot fire?", "is there an open bracket at this replan boundary?", and "which interrupted cancellations are eligible for takeover?" |
 | `txn_bracket` | one row per try: `state`, `deadline_at`, `idempotency_key`; partial deadline index `WHERE state = 'sealed'`; unique `(idempotency_key)` | first-entry orphan sweep for expired sealed tries |
 | `scope_cancel_member` | one row per inverse action: `completed`, `dependency_depth`, `claimed_by`, `lease_until`; partial readiness and live-lease indexes `WHERE NOT completed` | cancellation progress, expired-lease takeover, and terminal-completion admission |
 | `work_queue` | `vertex_id`, `ready_at`, `claimed_by`; claimed with `FOR UPDATE SKIP LOCKED` | the Distributed Transaction Coordinator claiming executable vertices |
@@ -97,13 +125,13 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 
 | Discipline | Database mechanism |
 |---|---|
-| Append-only (§3.3 inv. 1) | Application roles have no `UPDATE`/`DELETE` grant on `event_log`; controlled security-definer append functions are their only write path |
+| Append-only (§3.3 inv. 1) | Application roles have no `UPDATE`/`DELETE` grant on either plane; controlled security-definer append functions are their only write path |
 | Event ownership (§3.2.1) | `BEFORE INSERT` trigger checks the connection's `session_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Coordinator cannot append `subgraph/*` |
 | Idempotency ([02 §2](./02-transaction-model.md)) | `UNIQUE (idempotency_key)` on `txn_bracket` — a duplicate try becomes a constraint violation instead of a duplicated side effect |
 | One pivot per scope (R3) | partial unique index on the pivot column; a second line of defence behind the freeze-time check |
 | No cancel after pivot (I3) | `BEFORE INSERT` trigger rejects a `txn/cancel` when the scope projection records `pivot-passed` |
 
-`event_log` has no `shadowed_by` column. Shadowing is declared only by `subgraph/shadowed` events; a materialized shadow flag may exist inside a projection table, where the projector owns it.
+`run_event_log` has no `shadowed_by` column. Shadowing is declared only by `subgraph/shadowed` events; a materialized shadow flag may exist inside a projection table, where the projector owns it.
 
 ### 3.2 Core event vocabulary
 
@@ -122,7 +150,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | `run/end-seed` | First own event of a fork, closing its inherited seed; every inherited copy — in the seed or merged later — is read-only (§5.2) | engine |
 | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | Distributed Transaction Coordinator |
 | `budget/charged` | One completed LLM thought call: provider, protocol, sanitized endpoint, requested and returned model, measured duration, normalized input/output/cache/reasoning token usage, and an optional cost estimate tied to its exact pricing snapshot | engine |
-| `rule_template/published` | A rule template published, updated, or bound to a slot: the RFC 6902 structural diff against its predecessor, the resulting content digest, author metadata, and slot coordinates. Appended to the **configuration stream** — an Engine-owned stream, never a run stream ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)) | engine |
+| `rule_template/published` | A rule template published, updated, or bound to a slot: the RFC 6902 structural diff against its predecessor, the resulting content digest, author metadata, and slot coordinates. Appended to the **configuration stream** — a reserved data-plane `stream_id` owned by the Engine, never a run and never a business entity ([10 §3.3](./10-deterministic-routers.md#33-templates-are-pins-and-pin-changes-are-events)) | engine |
 
 A router's execution trajectory is `vertex/started` followed by `vertex/succeeded` carrying `{matched_condition}` — the matched branch index, or `null` on structural fall-through — or by `vertex/failed`. Skipping `vertex/started` is prohibited even though the evaluation is synchronous and needs no network call: the trace validator and the TLA+ models depend on that monotonic transition existing for every vertex role.
 
@@ -150,33 +178,33 @@ Unknown `event_type` values are **fail-closed**: readers reject the complete log
 
 1. **Append-only.** Every action appends a new event; state changes, shadowing, and forks never mutate historical rows. Only materialized projection columns or tables may be updated.
 2. **Atomic append.** Freezing a proposal appends `subgraph/frozen` and all `vertex/created` events in one database transaction. The entire subgraph is visible or none of it is. This is a control-plane transaction, not a business transaction.
-3. **Partial order, and purity scoped to one stream.** `parent_refs` defines causal order. Neither sequence number carries causal meaning: adjacent values in parallel branches imply no dependency. The two sequences carry deliberately different guarantees, and **purity of the projection is defined only against `stream_seq`**:
+3. **Partial order, and purity scoped to one ordering.** `parent_refs` defines causal order. No sequence number carries causal meaning: adjacent values in parallel branches imply no dependency. The three sequences carry deliberately different guarantees, and **purity of a projection is defined only against the sequence that owns it**:
 
-   | | `stream_seq` | `global_seq` |
-   |---|---|---|
-   | Scope | one stream = one run = one DAG | whole table |
-   | Strictly increasing | yes | yes |
-   | Contiguous, no gaps | **yes** | no |
-   | Survives rollback without skipping | **yes** (counter in a row) | no (sequences do not roll back) |
-   | Commit-ordered | **yes** (serialized by the stream's run row lock) | **no** |
-   | Legal input to a fold | **yes** | **never** |
-   | Use | projections, folds, forks, replay, all intra-stream references | coarse global ordering, operational triage only |
+   | | `run_seq` | `stream_seq` | `global_seq` |
+   |---|---|---|---|
+   | Scope | one run = one DAG | one business entity, across all its runs | whole table |
+   | Strictly increasing | yes | yes | yes |
+   | Contiguous, no gaps | **yes** | **yes** | no |
+   | Survives rollback without skipping | **yes** (counter in a row) | **yes** (counter in a row) | no (sequences do not roll back) |
+   | Commit-ordered | **yes** (serialized by the run row lock) | **yes** (serialized by the stream row lock) | **no** |
+   | Legal input to a fold | **yes**, for the surface pipeline | **yes**, for semantic folds | **never** |
+   | Use | projections, forks, replay, all intra-run references | domain entity views, cross-run business continuity | replication, CDC, operational triage |
 
-   The reason for the split is that a `BIGSERIAL` is allocated before commit but observed after it. Two concurrent appends may take 100 and 101 while 101 commits first, so an incremental reader can advance past 100 and skip it permanently. Worse than a skipped event, **the same set of events can fold in two different orders on two different reads, and the projection stops being a pure function** — which would take down replay testing, prompt caching, and reproducible historical evaluation together, since all three rest on that purity.
+   The reason for excluding `global_seq` is that a `BIGSERIAL` is allocated before commit but observed after it. Two concurrent appends may take 100 and 101 while 101 commits first, so an incremental reader can advance past 100 and skip it permanently. Worse than a skipped event, **the same set of events can fold in two different orders on two different reads, and the projection stops being a pure function** — which would take down replay testing, prompt caching, and reproducible historical evaluation together, since all three rest on that purity.
 
-   `stream_seq` removes the hazard within the boundary that matters, and the boundary is honestly declared:
+   The row-allocated counters remove that hazard within the boundaries that matter, and the boundaries are honestly declared:
 
-   - **Guaranteed:** a fold over one stream is a pure function of that stream's events. `surface`, `slice`, `fold`, `linearize`, and `assemble` all operate inside one stream, and so does every fork evaluation — a counterfactual compares two surfaces, each folded from a single stream (§5.2). Nothing in the projection pipeline reaches across streams.
-   - **Not guaranteed:** a fold over the concatenation of streams. Cross-run analytics must therefore be computed as **fold per stream, then aggregate** — never as one fold ordered by `global_seq`. This is a rule, not a preference: the second form is not reproducible ([05 §4](./05-context-aggregation-and-offline-evaluation.md)).
+   - **Guaranteed:** a fold over one run is a pure function of that run's events, and a fold over one business stream is a pure function of that entity's events. `surface`, `slice`, `fold`, `linearize`, and `assemble` all operate inside one run, and so does every fork evaluation — a counterfactual compares two surfaces, each folded from a single run (§5.2). Semantic reducers operate inside one business stream, which is exactly what lets an order's four workflow runs fold into one entity view without hand-correlating them ([05 §2.2](./05-context-aggregation-and-offline-evaluation.md#22-semantic-fold-framework-mechanism-domain-owned-meaning)).
+   - **Not guaranteed:** a fold over the concatenation of two orderings of the same kind — two runs, or two entities. Cross-case analytics must therefore be computed as **fold per ordering, then aggregate** — never as one fold ordered by `global_seq`. This is a rule, not a preference: the second form is not reproducible ([05 §4](./05-context-aggregation-and-offline-evaluation.md)).
 
-   One more requirement follows, and it is easy to miss. Serializing appends fixes the *storage* order but not the *scheduling* order: two concurrent siblings may be assigned `stream_seq` in either order across replays. Purity therefore also demands that **every reducer be commutative over concurrent events** — events with no `parent_refs` path between them. `linearize` satisfies this by sorting on `vertex_id` (§4.2), and semantic-fold reducers satisfy it because compensation is delta-based rather than state-restoring ([02 §4.3](./02-transaction-model.md) D2), which makes their operations commute. A reducer that is order-sensitive over concurrent events breaks purity even with a perfect sequence, so this is asserted by the permutation test in [06 §7](./06-validation-harness.md) O4.
+   One more requirement follows, and it is easy to miss. Serializing appends fixes the *storage* order but not the *scheduling* order: two concurrent siblings may be assigned `run_seq` in either order across replays. Purity therefore also demands that **every reducer be commutative over concurrent events** — events with no `parent_refs` path between them. `linearize` satisfies this by sorting on `vertex_id` (§4.2), and semantic-fold reducers satisfy it because compensation is delta-based rather than state-restoring ([02 §4.3](./02-transaction-model.md) D2), which makes their operations commute. A reducer that is order-sensitive over concurrent events breaks purity even with a perfect sequence, so this is asserted by the permutation test in [06 §7](./06-validation-harness.md) O4.
 4. **Visibility assertion.** Before every planner model call, runtime asserts that the sent context equals the log projection followed by linearization. A projection-hash comparison may replace full byte comparison to avoid dsh's double-serialization cost.
 
 ## 4. Surface Projection and Linearization
 
 ### 4.1 Surface
 
-`surface(stream, at_stream_seq) → current_dag` folds one stream's events up to that position in `stream_seq` order and removes subtrees shadowed by `subgraph/shadowed`, yielding the currently active DAG. Any `stream_seq` may be folded, which is what makes historical inspection and fork comparison the same operation (§5.2). Its input is always a single stream; no projection reaches across streams. It may be implemented as a materialized view or engine cache, but it **must always be reproducible from the complete log with the same result**. This is the basis of replay testing.
+`surface(run, at_run_seq) → current_dag` folds one run's events up to that position in `run_seq` order and removes subtrees shadowed by `subgraph/shadowed`, yielding the currently active DAG. Any `run_seq` may be folded, which is what makes historical inspection and fork comparison the same operation (§5.2). Its input is always a single run in the orchestration plane; the surface pipeline never reads the business plane and never reaches across runs. It may be implemented as a materialized view or engine cache, but it **must always be reproducible from the complete log with the same result**. This is the basis of replay testing.
 
 ### 4.2 Linearization
 
@@ -187,7 +215,7 @@ linearize(surface, planner_vertex) → [ctx_item...]
 ```
 
 1. Include only the planner's ancestor closure and result summaries, rather than full outputs, from sibling branches.
-2. Sort parallel branches lexicographically by `vertex_id`, never by either sequence number or completion time; scheduling order must not affect replay. `stream_seq` fixes storage order but not the order in which concurrent siblings were scheduled, so sorting on it would still be non-reproducible.
+2. Sort parallel branches lexicographically by `vertex_id`, never by any sequence number or completion time; scheduling order must not affect replay. `run_seq` fixes storage order but not the order in which concurrent siblings were scheduled, so sorting on it would still be non-reproducible.
 3. Inject failure evidence as an explicit structured section during replanning, rather than scattering it through history.
 4. Render a router only when it matched, and then only as its matched condition string, so the emitted branch is explained. A router that fell through is **completely invisible**: the downstream planner receives a byte-identical context to a run in which no router existed ([10 §8](./10-deterministic-routers.md#8-prompt-invisibility)). Because R14 interposes a router on every tool-caller-to-planner edge, rendering fall-throughs would otherwise add a line to every junction of every prompt and destroy the prefix stability the cache dividend rests on.
 
@@ -201,9 +229,9 @@ Three mechanisms, three purposes:
 
 | Mechanism | Purpose | Creates a run? |
 |---|---|---|
-| **Resume** | crash recovery | no — re-project the same stream |
-| **In-place replan** | online recovery from a tool failure (§5.1) | no — append to the same stream |
-| **Fork** | offline counterfactual evaluation (§5.2) | yes — a new run with its own stream |
+| **Resume** | crash recovery | no — re-project the same run |
+| **In-place replan** | online recovery from a tool failure (§5.1) | no — append to the same run |
+| **Fork** | offline counterfactual evaluation (§5.2) | yes — a new run, plus a quarantined synthetic business stream |
 
 ### 5.1 Online replanning does not fork
 
@@ -214,7 +242,7 @@ Creating a child run online would buy nothing and cost two real things:
 1. **A fragmented audit trail.** "What happened to order 12345" would become a chase across a chain of run ids instead of one readable run. For a business process this is the more serious of the two.
 2. **Pure storage waste.** Deep-copying the prefix duplicates events that the shadow mechanism already handles correctly.
 
-Crash recovery is likewise **not** a fork: it is a resume, achieved by re-projecting the same stream.
+Crash recovery is likewise **not** a fork: it is a resume, achieved by re-projecting the same run.
 
 ### 5.2 Fork is a lazy causal counterfactual on an immutable history
 
@@ -223,7 +251,7 @@ The event log is **immutable history**. Its purpose is that the context state at
 Because forks are strictly for **offline evaluation**, they are completely decoupled from online transaction constraints. A fork is **not** bound by pivot floors, nor is it restricted to planner vertices. It can occur at *any* vertex to evaluate any counterfactual—whether swapping a model in a planner, changing a tool version at a tool-caller node, or injecting a mock response for dry-run simulation.
 
 ```
-fork(source_stream, at_vertex_id, substitutions[], eval_up_to_seq) → new run
+fork(source_run, at_vertex_id, substitutions[], eval_up_to_seq) → new run
 ```
 
 The mechanics of a fork operate on the principle of **Causal Chain Evaluation**:
@@ -233,6 +261,8 @@ The mechanics of a fork operate on the principle of **Causal Chain Evaluation**:
 3. **Merge Causally Independent Events.** Not all events after the divergence point are causal descendants. Events that have no causal link to the forked vertex (e.g., sibling parallel branches, external user inputs, out-of-band webhook events) are still valid. These causally independent events are merged and replayed onto the new run up to the requested evaluation sequence.
 4. **Lazy Evaluation.** A fork is **lazy**. It does not automatically run to completion. Evaluation happens by specifying a target `seq` from the source run (`eval_up_to_seq`), and the engine only executes the new causal chain and replays independent events up to that sequence. This produces a comparable fold.
 5. **Mocking and Blocked Folds.** Because different fork strategies require different levels of execution, `fold_mode` determines how far execution proceeds. A strategy might dictate "no live LLM calls." In this case, the fold executes only up to context assembly and blocks, producing just the context prompt (ideal for prompt diff evaluation). For deeper simulations, the system can inject **mocked tool responses** to continue dry-running the new causal chain without hitting real endpoints.
+
+**A fork never writes to a live business stream.** Its orchestration events are ordinary rows of its own run, but a counterfactual that appended to `order:12345` would either collide with that entity's sequence during inherited copying or, worse, leave simulated facts in the view a production reducer folds. A fork's business writes therefore go to a synthetic stream of its own, `fork:<fork_run_id>:<source_stream_id>`, and carry `is_counterfactual = true`. Production semantic folds and operational reports read `WHERE stream_id = $1 AND is_counterfactual = false`, so the isolation is physical rather than a convention a reducer could forget. The flag is belt and braces with the namespace: the namespace keeps the sequences apart, the flag keeps a mistaken query honest.
 
 Inherited events are **read-only copies** wherever they sit: in particular a fork never cancels or confirms an inherited `txn/try`, because that hold belongs to a live source run — an inherited open bracket is history to mock around or terminate lazily at, never to mutate ([02 §4.4](./02-transaction-model.md), [03 §2.4](./03-replan-and-recovery.md)).
 
@@ -294,11 +324,11 @@ The following alternatives are rejected:
 
 The log is both a mock script and expected output. Record one real run, replay it in `fold_mode: recorded` (§5.4), and assert an event-by-event stream match while ignoring timestamps. JIT-DAG regression testing then becomes a stream diff instead of an API-key-dependent model run.
 
-Replay is a fork with **no substitutions**: same stream, same pins, `recorded` mode. Its expected result is therefore an identical surface, which makes it the cheapest possible check that the projection pipeline has not drifted — and the first thing to run after any change to a projection layer or a `pin_version` default.
+Replay is a fork with **no substitutions**: same run, same pins, `recorded` mode. Its expected result is therefore an identical surface, which makes it the cheapest possible check that the projection pipeline has not drifted — and the first thing to run after any change to a projection layer or a `pin_version` default.
 
 ## 7. Open Questions
 
 - **Log granularity:** dsh records streaming model chunks, which makes logs heavy and requires compression. Flory's current choice is vertex fidelity, not token fidelity: payloads contain summaries plus external blob references for raw model input and output.
 - `subgraph/shadowed` positional reasoning needs property-based tests for multi-replan boundary cases.
-- **Append contention inside one very wide run.** `stream_seq` serializes appends on the run row (§3.1). A run with unusually high branch fan-out would queue on that lock. No measurement exists yet; if it becomes real, the options are batching several events per transaction or sharding the counter per branch — the latter costs the contiguity that made the design worth having, so it should not be reached for early.
-- **Offline readers still see `global_seq` gaps.** Purity is guaranteed per run (§3.3 inv. 3), which covers the projection pipeline, but trace validation and metric recomputation read across runs. They must either fold per run and then aggregate, or consume Postgres logical decoding, which delivers events in commit order. Which of the two becomes the standard path is unresolved.
+- **Append contention inside one very wide run.** `run_seq` serializes appends on the run row (§3.1). A run with unusually high branch fan-out would queue on that lock. No measurement exists yet; if it becomes real, the options are batching several events per transaction or sharding the counter per branch — the latter costs the contiguity that made the design worth having, so it should not be reached for early.
+- **Offline readers still see `global_seq` gaps.** Purity is guaranteed per run and per business stream (§3.3 inv. 3), which covers both fold pipelines, but trace validation and metric recomputation still read across runs. Business continuity for one entity is no longer part of this problem — that is what `stream_seq` is for — yet cross-*case* analytics must either fold per ordering and then aggregate, or consume Postgres logical decoding, which delivers events in commit order. Which of the two becomes the standard path is unresolved.

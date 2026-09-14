@@ -50,7 +50,31 @@ The same input always produces the same output. This purity enables exact prompt
 ```
 
 - Any text that can appear in a prompt is stored through a `*_ref` or `recipe` reference; the raw text lives in a versioned template library or memory store. Harness-state contains no prose.
-- `evidence_seqs` anchors every policy to concrete event-log events, preserving provenance for every lesson.
+- `evidence_seqs` anchors every policy to concrete orchestration events as `(run_id, run_seq)` pairs, preserving provenance for every lesson ([01 §3.1](./01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences)).
+
+### 2.1 Business context enters through `task_input`, not harness-state
+
+A long-lived business entity accumulates history across many runs: an order is placed, paid, returned, and refunded in four separate workflows. A later run needs that history, and there are two wrong ways to give it one.
+
+Storing the entity's state **in harness-state** breaks the metadata-only boundary of §1 — it is concrete business JSON, not an assembly rule, a policy reference, or a query recipe. Re-folding the entity's stream **at assembly time** breaks something subtler and worse: the entity keeps advancing, so the same run replayed a month later folds a longer history and assembles a different prompt. Replay would drift by design.
+
+The business stream is therefore folded **once, at run start, to an explicit position**, and the run carries a reference to that fold:
+
+```jsonc
+// task_input, recorded in run/start
+{
+  "stream_id": "order:12345",
+  "business_state": { "snapshot_id": "snap-8f21", "pinned_stream_seq": 42 }
+}
+```
+
+The snapshot itself lives in `business_stream_snapshot`, keyed by `(stream_id, pinned_stream_seq, reducer_version)` ([08 §2](./08-database-schema.md#2-ground-truth-tables)). Three properties follow:
+
+1. **Harness-state stays metadata-only.** It holds the assembly rules that decide how business state is rendered; it never holds the state.
+2. **Replay is byte-identical forever.** Re-running this workflow when the entity has reached `stream_seq = 100` still resolves the snapshot pinned at 42, so `assemble` receives exactly the input it received originally.
+3. **Provenance is explicit.** The prompt's business content traces to one `(stream_id, pinned_stream_seq, reducer_version)` triple rather than to "whatever the entity looked like when this ran".
+
+A run that needs fresher business state takes a new snapshot at a later position, which is a visible change in `task_input` — not an invisible drift in what an unchanged input means.
 
 ## 3. Mem-Hints: Query Recipes, Not Memory
 
@@ -120,7 +144,7 @@ prime-agent's `expectedOutcome` is free text and is not verified. Flory replaces
 
 ## 5. Interfaces with Documents 01–03
 
-- Refine input evidence is a projection of the [event log](./01-jit-dag-and-event-log.md); `evidence_seqs` directly name event sequences.
+- Refine input evidence is a projection of the [orchestration plane](./01-jit-dag-and-event-log.md); `evidence_seqs` directly name `(run_id, run_seq)` positions. Business context reaches a run through the pinned snapshot of §2.1, never through refine.
 - The mandatory post-rollback gate in [03](./03-replan-and-recovery.md) is the main path by which failure lessons enter `policy_hint` or the memory store.
 - Repeated check-rule rejection patterns from [02](./02-transaction-model.md) should refine policy hints to help planners avoid mistakes. The rule engine decides admission; refine reduces wasted attempts. These responsibilities do not overlap.
 

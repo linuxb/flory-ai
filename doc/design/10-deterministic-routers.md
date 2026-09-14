@@ -2,6 +2,8 @@
 
 > Status: Draft v0.1 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [03](./03-replan-and-recovery.md), [09](./09-tool-registry-gateway.md)
 
+> Diagram: [diagram/router-admission.html](../diagram/router-admission.html) — regions A–E: mandatory interposition, template binding, the three gates, runtime evaluation, and derived placement.
+
 ## 1. Why a Deterministic Branch Vertex Exists
 
 Flory executes **progressive JIT-DAG workflows**. A submitted workflow may be a multi-vertex DAG combining deterministic tools and probabilistic model steps, or a single planner vertex, and it unfolds just in time as planners and routers generate sub-DAGs of tool callers and further downstream planners and routers ([01 §1](./01-jit-dag-and-event-log.md#1-goals)).
@@ -53,7 +55,7 @@ Explicit declaration resolves the template in constant time by content-addressed
                             └─ rule matched → emit deterministic sub-DAG branch, zero model calls
 ```
 
-This is check-rule **R14**, the router topology invariant ([02 §3.4](./02-transaction-model.md#34-deterministic-check-rules)): *no tool-caller vertex may have a planner vertex as a direct successor; every such edge carries a router, interposed by the engine when the proposal does not supply one.* The planner's action vocabulary stays pure — it never writes router syntax — while business policy keeps a guaranteed interception point on every thought junction.
+Region A of [diagram/router-admission.html](../diagram/router-admission.html) shows the normalization. This is check-rule **R14**, the router topology invariant ([02 §3.4](./02-transaction-model.md#34-deterministic-check-rules)): *no tool-caller vertex may have a planner vertex as a direct successor; every such edge carries a router, interposed by the engine when the proposal does not supply one.* The planner's action vocabulary stays pure — it never writes router syntax — while business policy keeps a guaranteed interception point on every thought junction.
 
 ### 2.2 Bounded authority
 
@@ -72,7 +74,7 @@ Conditions are totally ordered and evaluated with first-match semantics. A templ
 
 ### 3.2 Dual binding resolution
 
-Binding resolves out of band and never passes through a model.
+Binding resolves out of band and never passes through a model; region B of [the diagram](../diagram/router-admission.html) shows both tracks.
 
 1. **Explicit reference.** A vertex declaring `template_ref` resolves its pinned contract from the Engine's rule-template store in constant time by URI and content digest.
 2. **Slot-based dynamic resolution.** An auto-interposed router resolves its template through a stable topological coordinate:
@@ -117,7 +119,7 @@ A router has no side effects and is never a scope member, so its transaction pla
 | `at_savepoint` | Every ancestor scope is closed. | The branch opens a fresh transaction scope. |
 | `inside_scope(S)` | An ancestor scope `S` is half-open — a try is sealed but unconfirmed. | The branch joins `S`. |
 
-The admission rules for each placement are R12 and R13 ([02 §3.4](./02-transaction-model.md#34-deterministic-check-rules)).
+The admission rules for each placement are R12 and R13 ([02 §3.4](./02-transaction-model.md#34-deterministic-check-rules)); region E of [the diagram](../diagram/router-admission.html) shows both placements and the two legal join shapes.
 
 ### 4.1 Routers as join nodes over parallel branches
 
@@ -135,7 +137,7 @@ By default the engine derives the minimum scope from tool-footprint intersection
 
 ## 5. Three Lines of Defence
 
-Safety is enforced at three distinct times, and the division of labour between them is the point:
+Safety is enforced at three distinct times, and the division of labour between them is the point (region C of [the diagram](../diagram/router-admission.html)):
 
 | Gate | Timing | Responsibility |
 |---|---|---|
@@ -252,7 +254,7 @@ function checkFreezeAdmission(branches: BranchTraits[], slot: SlotPlacementConte
 
 ## 6. Closed Outcome Vocabulary
 
-Router evaluation produces exactly one of four mutually exclusive outcomes:
+Router evaluation produces exactly one of four mutually exclusive outcomes, traced in region D of [the diagram](../diagram/router-admission.html):
 
 | Outcome | Meaning |
 |---|---|

@@ -185,7 +185,7 @@ The README hero image is the animated architecture overview; its generator lives
 │   ├── animations/        # Animated architecture diagram and its generator
 │   ├── design/            # Architecture and mechanism specifications
 │   ├── diagram/           # HTML and Draw.io diagrams
-│   └── plan/              # Implementation and rollout plans
+│   └── plan/              # Backlog of specified-but-undelivered work
 ├── spec/                  # TLA+ transaction-protocol model and TLC configurations
 ├── engine/                # TypeScript event store, projections, forks, and harness
 ├── idl/                   # Versioned shared contracts: the event-log JSON Schema and the gateway protobufs

@@ -9,7 +9,7 @@ on:
       - 'doc/adr/**'
       - 'doc/design/**'
       - 'doc/diagram/**'
-      - 'doc/plan/plan-001-tla-plus-specification.md'
+      - 'doc/plan/outstanding-work.md'
   push:
     paths:
       - 'AGENTS.md'
@@ -18,7 +18,7 @@ on:
       - 'doc/adr/**'
       - 'doc/design/**'
       - 'doc/diagram/**'
-      - 'doc/plan/plan-001-tla-plus-specification.md'
+      - 'doc/plan/outstanding-work.md'
   workflow_dispatch:
 
 permissions:

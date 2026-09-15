@@ -3,7 +3,7 @@
 ## Documentation
 
 - Write all repository documentation in English.
-- Keep design documents in `doc/design/`, architecture decision records in `doc/adr/`, and planning documents in `doc/plan/`.
+- Keep design documents in `doc/design/`, architecture decision records in `doc/adr/`, and the outstanding-work backlog in `doc/plan/outstanding-work.md`. Delivered work is removed from the backlog rather than marked done; the design documents hold its requirements and Git history holds its record.
 - Write a `Proposed` ADR before starting a large architecture change. Changes to component boundaries, ownership, protocols, persistence models, or cross-service contracts require the proposal to be accepted before implementation begins.
 - An ADR proposal must record its context, proposed decision, rationale, consequences, and rejected alternatives in `doc/adr/adr-NNN-short-slug.md`. Number proposals sequentially, never reuse or renumber an identifier, and write a new proposal when changing an accepted architecture decision.
 - When an ADR is accepted, merge every surviving decision, rationale, consequence, and rejected alternative into the existing authoritative design documents in the same change. Replace every reference to the accepted ADR with a design-document reference. Accepted ADRs are no longer authoritative, must not be referenced anywhere in the repository, and may be deleted as soon as the merge is complete; Git history preserves the review record.

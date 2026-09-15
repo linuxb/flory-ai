@@ -4,7 +4,7 @@
 - **Date:** 2026-09-15
 - **Implements:** [01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [08](../design/08-database-schema.md)
 - **Specifies:** [01](../design/01-jit-dag-and-event-log.md), [04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [05](../design/05-context-aggregation-and-offline-evaluation.md), [08](../design/08-database-schema.md)
-- **Supersedes:** the single-table storage model delivered by [Plan 002](./plan-002-event-log-storage-and-fork.md); its fork semantics survive unchanged.
+- **Supersedes:** the single-table storage model recorded as v0.2 of [Doc 08](../design/08-database-schema.md); the lazy causal fork semantics built on it survive unchanged.
 
 ## 1. Objective
 

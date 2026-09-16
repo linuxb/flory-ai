@@ -4,11 +4,11 @@ import {FoldRegistry} from '../../../engine/src/projection.js';
 import {mockInventoryConservation, mockInventoryPermutationInvariant, mockInventoryReducer, registerMockEcommerceReducers} from './inventory.js';
 
 const run = '00000000-0000-4000-8000-000000000001';
-function event(stream_seq: number, delta: number): StoredEvent {
+function event(run_seq: number, delta: number): StoredEvent {
     return {
         run_id: run,
-        stream_seq,
-        global_seq: stream_seq,
+        run_seq,
+        global_seq: run_seq,
         event_type: 'vertex/succeeded',
         vertex_id: null,
         parent_refs: [],

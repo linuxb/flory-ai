@@ -259,8 +259,8 @@
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "required": ["stream_seq", "pin_version"],
-                        "properties": {"stream_seq": {"type": "integer", "minimum": 1}, "pin_version": {"type": "string", "minLength": 1}},
+                        "required": ["run_seq", "pin_version"],
+                        "properties": {"run_seq": {"type": "integer", "minimum": 1}, "pin_version": {"type": "string", "minLength": 1}},
                         "additionalProperties": false
                     }
                 },

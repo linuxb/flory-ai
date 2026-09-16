@@ -8,7 +8,7 @@ import (
 
 // Event is the trace subset required by transaction invariants.
 type Event struct {
-	StreamSeq int64          `json:"stream_seq"`
+	RunSeq    int64          `json:"run_seq"`
 	EventType string         `json:"event_type"`
 	VertexID  string         `json:"vertex_id,omitempty"`
 	ScopeID   string         `json:"scope_id,omitempty"`
@@ -26,7 +26,7 @@ var knownEvents = map[string]struct{}{
 // Validate checks event ownership-independent S2 trace properties I4-I7 and fail-closed reads.
 func Validate(events []Event) error {
 	ordered := append([]Event(nil), events...)
-	sort.Slice(ordered, func(first, second int) bool { return ordered[first].StreamSeq < ordered[second].StreamSeq })
+	sort.Slice(ordered, func(first, second int) bool { return ordered[first].RunSeq < ordered[second].RunSeq })
 	pivoted := map[string]bool{}
 	inheritedTryScopes := map[string]bool{}
 	bracketTerminal := map[string]string{}
@@ -35,10 +35,10 @@ func Validate(events []Event) error {
 			if event.Ignorable {
 				continue
 			}
-			return fmt.Errorf("unknown non-ignorable event type %q at stream_seq %d", event.EventType, event.StreamSeq)
+			return fmt.Errorf("unknown non-ignorable event type %q at run_seq %d", event.EventType, event.RunSeq)
 		}
 		if event.EventType == "budget/charged" && event.VertexID == "" {
-			return fmt.Errorf("budget/charged at stream_seq %d must identify its planner vertex", event.StreamSeq)
+			return fmt.Errorf("budget/charged at run_seq %d must identify its planner vertex", event.RunSeq)
 		}
 		if event.EventType == "txn/try" && event.Inherited {
 			inheritedTryScopes[event.ScopeID] = true

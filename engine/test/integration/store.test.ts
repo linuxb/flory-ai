@@ -59,7 +59,7 @@ describe('PostgreSQL event store', () => {
         await engine.appendEvents(run, [{event_type: 'run/start', payload: {schema_version: 'v1'}}]);
         await expect(coordinator.appendEvents(run, [{event_type: 'txn/try', scope_id: scopeId, vertex_id: randomUUID(), payload: {}}])).rejects.toThrow();
         await engine.appendEvents(run, [{event_type: 'run/end', payload: {status: 'success'}}]);
-        expect((await engine.readStream(run)).map((event) => event.stream_seq)).toEqual([1, 2]);
+        expect((await engine.readStream(run)).map((event) => event.run_seq)).toEqual([1, 2]);
     });
 
     it('enforces event ownership and synchronous transaction projections', async () => {
@@ -157,7 +157,7 @@ describe('PostgreSQL event store', () => {
         const source = await engine.readStream(run);
         const child = await engine.readStream(result.child_run_id);
         expect(replayIdentity(source, child).passed).toBe(true);
-        expect(child.map((event) => event.stream_seq)).toEqual([1, 2, 3, 4]);
+        expect(child.map((event) => event.run_seq)).toEqual([1, 2, 3, 4]);
         expect(child.every((event) => (event.event_type === 'run/end-seed' ? !event.inherited : event.inherited))).toBe(true);
     });
 
@@ -190,19 +190,19 @@ describe('PostgreSQL event store', () => {
         const result = await engine.fork({
             source_run_id: run,
             at_vertex_id: plannerId,
-            substitutions: [{stream_seq: 2, pin_version: 'model://planner@v2'}],
+            substitutions: [{run_seq: 2, pin_version: 'model://planner@v2'}],
             eval_up_to_seq: 7,
             fold_mode: 'recorded',
             evaluator_pin: 'eval://identity@v1',
             projector_version: 'projector@v1',
             harness_state_version: 'harness@v1',
         });
-        expect((await engine.readStream(run)).find((event) => event.stream_seq === 2)?.pin_version).toBe('model://planner@v1');
+        expect((await engine.readStream(run)).find((event) => event.run_seq === 2)?.pin_version).toBe('model://planner@v1');
         expect(result.end_seed_seq).toBe(8);
         expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([5, 7]);
         const child = await engine.readStream(result.child_run_id);
-        expect(child.find((event) => event.stream_seq === 2)?.pin_version).toBe('model://planner@v2');
-        expect(child.map((event) => event.stream_seq)).toEqual([1, 2, 5, 7, 8]);
+        expect(child.find((event) => event.run_seq === 2)?.pin_version).toBe('model://planner@v2');
+        expect(child.map((event) => event.run_seq)).toEqual([1, 2, 5, 7, 8]);
         expect(child.some((event) => event.vertex_id === toolVertex)).toBe(false);
         expect(child.some((event) => event.event_type === 'vertex/succeeded' && event.vertex_id === plannerId)).toBe(false);
     });

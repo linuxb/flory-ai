@@ -77,7 +77,7 @@ func (store *PostgresStore) Append(ctx context.Context, runID string, events ...
 	if err != nil {
 		return err
 	}
-	_, err = store.pool.Exec(ctx, `SELECT stream_seq FROM append_events($1, $2::jsonb)`, runID, encoded)
+	_, err = store.pool.Exec(ctx, `SELECT run_seq FROM append_events($1, $2::jsonb)`, runID, encoded)
 	return err
 }
 

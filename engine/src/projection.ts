@@ -15,7 +15,7 @@ export interface SurfaceVertex {
 /** The active vertex view for one run at a stream-sequence boundary. */
 export interface Surface {
     run_id: string;
-    at_stream_seq: number;
+    at_run_seq: number;
     vertices: Map<string, SurfaceVertex>;
     shadowed: Set<string>;
 }
@@ -59,9 +59,9 @@ function stringArray(value: unknown): string[] {
 }
 
 /** Folds a run's events into its active vertex surface. */
-export function surface(events: StoredEvent[], atStreamSeq = Number.MAX_SAFE_INTEGER): Surface {
+export function surface(events: StoredEvent[], atRunSeq = Number.MAX_SAFE_INTEGER): Surface {
     assertReadable(events);
-    const included = events.filter((event) => event.stream_seq <= atStreamSeq);
+    const included = events.filter((event) => event.run_seq <= atRunSeq);
     const vertices = new Map<string, SurfaceVertex>();
     const shadowed = new Set<string>();
     for (const event of included) {
@@ -72,7 +72,7 @@ export function surface(events: StoredEvent[], atStreamSeq = Number.MAX_SAFE_INT
                 role: typeof event.payload.role === 'string' ? event.payload.role : undefined,
                 tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
                 parameters: event.payload.parameters,
-                created_seq: event.stream_seq,
+                created_seq: event.run_seq,
             });
         }
         if (event.event_type === 'subgraph/shadowed') {
@@ -90,7 +90,7 @@ export function surface(events: StoredEvent[], atStreamSeq = Number.MAX_SAFE_INT
         }
     }
     for (const vertexId of shadowed) vertices.delete(vertexId);
-    return {run_id: included[0]?.run_id ?? '', at_stream_seq: included.at(-1)?.stream_seq ?? 0, vertices, shadowed};
+    return {run_id: included[0]?.run_id ?? '', at_run_seq: included.at(-1)?.run_seq ?? 0, vertices, shadowed};
 }
 
 /** Returns the active planner vertex and all of its active ancestors. */

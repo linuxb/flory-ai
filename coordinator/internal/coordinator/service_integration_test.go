@@ -58,8 +58,8 @@ func TestRuntimeBarrierAndPostPivotConfirm(t *testing.T) {
 	}
 	var pivotSeq int64
 	var earliestConfirm int64
-	if err := engine.QueryRow(ctx, `SELECT min(stream_seq) FILTER (WHERE event_type = 'txn/pivot-passed'), min(stream_seq) FILTER (WHERE event_type = 'txn/confirm')
-        FROM event_log WHERE run_id = $1`, runID).Scan(&pivotSeq, &earliestConfirm); err != nil {
+	if err := engine.QueryRow(ctx, `SELECT min(run_seq) FILTER (WHERE event_type = 'txn/pivot-passed'), min(run_seq) FILTER (WHERE event_type = 'txn/confirm')
+        FROM run_event_log WHERE run_id = $1`, runID).Scan(&pivotSeq, &earliestConfirm); err != nil {
 		t.Fatal(err)
 	}
 	if earliestConfirm <= pivotSeq {
@@ -101,7 +101,7 @@ func TestTryFailureCancelsWholeScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := engine.QueryRow(ctx, `SELECT count(*) FILTER (WHERE event_type = 'txn/cancel'), count(*) FILTER (WHERE event_type = 'txn/pivot-passed')
-        FROM event_log WHERE run_id = $1`, runID).Scan(&cancelEvents, &pivotEvents); err != nil {
+        FROM run_event_log WHERE run_id = $1`, runID).Scan(&cancelEvents, &pivotEvents); err != nil {
 		t.Fatal(err)
 	}
 	if state != "cancelled" || cancelEvents != 2 || pivotEvents != 0 {
@@ -138,7 +138,7 @@ func TestConfirmExhaustionSuspendsWithoutCommit(t *testing.T) {
 	if err := engine.QueryRow(ctx, `SELECT state FROM txn_scope WHERE run_id = $1 AND scope_id = $2`, runID, scopeID).Scan(&state); err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.QueryRow(ctx, `SELECT count(*) FROM event_log WHERE run_id = $1 AND event_type = 'txn/scope' AND payload->>'state' = 'committed'`, runID).Scan(&committedEvents); err != nil {
+	if err := engine.QueryRow(ctx, `SELECT count(*) FROM run_event_log WHERE run_id = $1 AND event_type = 'txn/scope' AND payload->>'state' = 'committed'`, runID).Scan(&committedEvents); err != nil {
 		t.Fatal(err)
 	}
 	if state != "suspended" || committedEvents != 0 {
@@ -179,7 +179,7 @@ func TestUnknownPivotStatusFailureSuspendsWithoutCancel(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := engine.QueryRow(ctx, `SELECT count(*) FILTER (WHERE event_type = 'txn/cancel'), count(*) FILTER (WHERE event_type = 'txn/pivot-passed')
-        FROM event_log WHERE run_id = $1`, runID).Scan(&cancelEvents, &pivotEvents); err != nil {
+        FROM run_event_log WHERE run_id = $1`, runID).Scan(&cancelEvents, &pivotEvents); err != nil {
 		t.Fatal(err)
 	}
 	if state != "suspended" || cancelEvents != 0 || pivotEvents != 0 {
@@ -376,7 +376,7 @@ func appendEngineEvents(t *testing.T, ctx context.Context, pool *pgxpool.Pool, r
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `SELECT stream_seq FROM append_events($1, $2::jsonb)`, runID, encoded); err != nil {
+	if _, err := pool.Exec(ctx, `SELECT run_seq FROM append_events($1, $2::jsonb)`, runID, encoded); err != nil {
 		t.Fatal(err)
 	}
 }

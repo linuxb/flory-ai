@@ -105,7 +105,7 @@ type BudgetChargedPayload struct {
 }
 
 type ForkSubstitution struct {
-	StreamSeq  int64  `json:"stream_seq"`
+	RunSeq     int64  `json:"run_seq"`
 	PinVersion string `json:"pin_version"`
 }
 

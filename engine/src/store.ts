@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {Pool, type PoolClient} from 'pg';
-import {assertEventDraft, type EventDraft, type ForkRequest, type ForkSubstitution, type StoredEvent} from './events.js';
+import {assertEventDraft, type BusinessFactDraft, type DomainAppendResult, type EventDraft, type ForkRequest, type ForkSubstitution, type StoredBusinessEvent, type StoredEvent} from './events.js';
 
 /** A service role permitted to append events. */
 export type Actor = 'engine' | 'coordinator';
@@ -12,7 +12,7 @@ export interface EventStoreOptions {
 /** Metadata describing the fork created from a source run. */
 export interface ForkResult {
     child_run_id: string;
-    /** Stream sequence of the fork's `run/end-seed` event, always `eval_up_to_seq + 1`. */
+    /** Run sequence of the fork's `run/end-seed` event, always `eval_up_to_seq + 1`. */
     end_seed_seq: number;
     /** Inherited events copied into the seed before `run/end-seed`. */
     seed_event_count: number;
@@ -27,7 +27,7 @@ export interface ForkSlice {
     deferred: StoredEvent[];
     /** Causal descendants of the substituted divergence vertex; never inherited, the fork regenerates them. */
     invalidated: StoredEvent[];
-    /** Stream sequence of the divergence vertex's `vertex/created` event. */
+    /** Run sequence of the divergence vertex's `vertex/created` event. */
     divergence_seq: number;
 }
 
@@ -61,13 +61,13 @@ export function causalDescendants(events: readonly StoredEvent[], vertexId: stri
  * vertex they form the seed, after it they are deferred for lazy merging.
  */
 export function computeForkSlice(source: readonly StoredEvent[], atVertexId: string, substitutions: readonly ForkSubstitution[], evalUpToSeq: number): ForkSlice {
-    const window = source.filter((event) => event.stream_seq <= evalUpToSeq);
+    const window = source.filter((event) => event.run_seq <= evalUpToSeq);
     const divergence = window.find((event) => event.event_type === 'vertex/created' && event.vertex_id === atVertexId);
     if (!divergence) throw new Error(`divergence vertex ${atVertexId} is not created within eval_up_to_seq ${evalUpToSeq}`);
-    const substituted = new Map(substitutions.map((item) => [item.stream_seq, item.pin_version]));
-    if (substituted.size !== substitutions.length) throw new Error('fork substitutions must not repeat a stream sequence');
+    const substituted = new Map(substitutions.map((item) => [item.run_seq, item.pin_version]));
+    if (substituted.size !== substitutions.length) throw new Error('fork substitutions must not repeat a run sequence');
     for (const sequence of substituted.keys()) {
-        const event = window.find((candidate) => candidate.stream_seq === sequence);
+        const event = window.find((candidate) => candidate.run_seq === sequence);
         if (!event?.pin_version || event.vertex_id !== atVertexId) throw new Error(`substitution ${sequence} must name a pinned event of the divergence vertex`);
     }
     const invalidatedVertices = substituted.size ? causalDescendants(window, atVertexId) : new Set<string>();
@@ -82,19 +82,19 @@ export function computeForkSlice(source: readonly StoredEvent[], atVertexId: str
     const invalidated: StoredEvent[] = [];
     for (const event of window) {
         if (isInvalidated(event)) invalidated.push(event);
-        else if (event.stream_seq <= divergence.stream_seq) seed.push(event);
+        else if (event.run_seq <= divergence.run_seq) seed.push(event);
         else deferred.push(event);
     }
     for (const sequence of substituted.keys()) {
-        if (invalidated.some((event) => event.stream_seq === sequence)) throw new Error(`substitution ${sequence} names an invalidated event`);
+        if (invalidated.some((event) => event.run_seq === sequence)) throw new Error(`substitution ${sequence} names an invalidated event`);
     }
-    return {seed, deferred, invalidated, divergence_seq: divergence.stream_seq};
+    return {seed, deferred, invalidated, divergence_seq: divergence.run_seq};
 }
 
 function rowToEvent(row: Record<string, unknown>): StoredEvent {
     return {
         run_id: String(row.run_id),
-        stream_seq: Number(row.stream_seq),
+        run_seq: Number(row.run_seq),
         global_seq: Number(row.global_seq),
         event_type: String(row.event_type),
         vertex_id: row.vertex_id ? String(row.vertex_id) : null,
@@ -109,9 +109,23 @@ function rowToEvent(row: Record<string, unknown>): StoredEvent {
     };
 }
 
+function rowToBusinessEvent(row: Record<string, unknown>): StoredBusinessEvent {
+    return {
+        stream_id: String(row.stream_id),
+        stream_seq: Number(row.stream_seq),
+        global_seq: Number(row.global_seq),
+        run_id: String(row.run_id),
+        run_seq: Number(row.run_seq),
+        event_type: String(row.event_type),
+        is_counterfactual: Boolean(row.is_counterfactual),
+        payload: (row.payload ?? {}) as Record<string, unknown>,
+        created_at: String(row.created_at),
+    };
+}
+
 function toInheritedCopy(event: StoredEvent, pinOverride?: string): Record<string, unknown> {
     return {
-        stream_seq: event.stream_seq,
+        run_seq: event.run_seq,
         event_type: event.event_type,
         vertex_id: event.vertex_id,
         parent_refs: event.parent_refs,
@@ -150,12 +164,12 @@ export class EventStore {
         await this.pool.query('SELECT create_run($1)', [runId]);
         return runId;
     }
-    /** Appends one or more validated events and returns their stream sequence numbers. */
+    /** Appends one or more validated events and returns their run sequence numbers. */
     async appendEvents(runId: string, events: EventDraft[]): Promise<number[]> {
         if (!events.length) throw new Error('appendEvents requires at least one event');
         events.forEach(assertEventDraft);
-        const result = await this.pool.query<{stream_seq: string}>('SELECT stream_seq FROM append_events($1, $2::jsonb)', [runId, JSON.stringify(events)]);
-        return result.rows.map((row) => Number(row.stream_seq));
+        const result = await this.pool.query<{run_seq: string}>('SELECT run_seq FROM append_events($1, $2::jsonb)', [runId, JSON.stringify(events)]);
+        return result.rows.map((row) => Number(row.run_seq));
     }
     /** Atomically appends a frozen-subgraph event and its vertex-created events. */
     async appendFrozenSubgraph(runId: string, frozen: EventDraft, vertices: EventDraft[]): Promise<number[]> {
@@ -165,15 +179,15 @@ export class EventStore {
         return this.appendEvents(runId, [frozen, ...vertices]);
     }
     /** Reads one run in ascending stream-sequence order, optionally through a boundary. */
-    async readStream(runId: string, atStreamSeq?: number): Promise<StoredEvent[]> {
-        const result = await this.pool.query('SELECT * FROM event_log WHERE run_id = $1 AND ($2::bigint IS NULL OR stream_seq <= $2) ORDER BY stream_seq', [runId, atStreamSeq ?? null]);
+    async readStream(runId: string, atRunSeq?: number): Promise<StoredEvent[]> {
+        const result = await this.pool.query('SELECT * FROM run_event_log WHERE run_id = $1 AND ($2::bigint IS NULL OR run_seq <= $2) ORDER BY run_seq', [runId, atRunSeq ?? null]);
         return result.rows.map(rowToEvent);
     }
 
     /**
      * Creates a lazy causal counterfactual fork at any vertex (Doc 01 §5.2, Doc 08 §4). The divergence point is a
      * vertex — planner or tool-caller, inside or outside a bracket, above or below the pivot floor.
-     * Inherited copies preserve their source `stream_seq`; the fork numbers its own events above
+     * Inherited copies preserve their source `run_seq`; the fork numbers its own events above
      * `eval_up_to_seq`, so `run/end-seed` lands at `eval_up_to_seq + 1`. Causally independent events
      * after the divergence vertex are merged lazily via {@link mergeIndependentEvents}.
      */
@@ -207,11 +221,11 @@ export class EventStore {
                     },
                 },
             ]);
-            const substituted = new Map(request.substitutions.map((item) => [item.stream_seq, item.pin_version]));
+            const substituted = new Map(request.substitutions.map((item) => [item.run_seq, item.pin_version]));
             await this.copyInheritedWith(
                 client,
                 childRunId,
-                slice.seed.map((event) => toInheritedCopy(event, substituted.get(event.stream_seq))),
+                slice.seed.map((event) => toInheritedCopy(event, substituted.get(event.run_seq))),
             );
             const seeded = await this.appendWith(client, childRunId, [
                 {
@@ -239,8 +253,8 @@ export class EventStore {
      * Lazily merges causally independent source events into a fork, no further than `throughSeq`
      * (defaulting to the fork's `eval_up_to_seq`). The causal slice is re-derived from the fork
      * provenance recorded on `run/end-seed`, already-present sequences are skipped, and the merged
-     * rows are read-only inherited copies preserving their source `stream_seq`. Returns the merged
-     * stream sequences.
+     * rows are read-only inherited copies preserving their source `run_seq`. Returns the merged
+     * run sequences.
      */
     async mergeIndependentEvents(childRunId: string, throughSeq?: number): Promise<number[]> {
         this.requireEngine();
@@ -255,8 +269,8 @@ export class EventStore {
             const limit = Math.min(throughSeq ?? provenance.eval_up_to_seq, provenance.eval_up_to_seq);
             const source = await this.readStreamWith(client, provenance.source_run_id);
             const slice = computeForkSlice(source, provenance.at_vertex_id, provenance.substitutions, provenance.eval_up_to_seq);
-            const present = new Set(child.map((event) => event.stream_seq));
-            const toMerge = slice.deferred.filter((event) => event.stream_seq <= limit && !present.has(event.stream_seq));
+            const present = new Set(child.map((event) => event.run_seq));
+            const toMerge = slice.deferred.filter((event) => event.run_seq <= limit && !present.has(event.run_seq));
             if (toMerge.length) {
                 await this.copyInheritedWith(
                     client,
@@ -265,7 +279,7 @@ export class EventStore {
                 );
             }
             await client.query('COMMIT');
-            return toMerge.map((event) => event.stream_seq);
+            return toMerge.map((event) => event.run_seq);
         } catch (error) {
             await client.query('ROLLBACK');
             throw error;
@@ -274,16 +288,47 @@ export class EventStore {
         }
     }
 
+    /**
+     * Appends one orchestration event and the business facts it caused, writing both planes in one
+     * transaction. Each sequence is allocated from a counter column on its owning row — the run row
+     * first, then the stream row, which is the lock order the whole schema keeps — so a rollback
+     * un-increments both and neither ordering develops a gap. Quarantine is decided by the
+     * database from the run's fork provenance, never by the caller.
+     */
+    async appendDomainEvents(runId: string, streamId: string, event: EventDraft, facts: BusinessFactDraft[]): Promise<DomainAppendResult[]> {
+        assertEventDraft(event);
+        if (!facts.length) throw new Error('appendDomainEvents requires at least one business fact; use appendEvents for orchestration-only appends');
+        const result = await this.pool.query<{run_seq: string; stream_seq: string}>('SELECT run_seq, stream_seq FROM append_domain_events($1, $2, $3::jsonb, $4::jsonb)', [
+            runId,
+            streamId,
+            JSON.stringify(event),
+            JSON.stringify(facts),
+        ]);
+        return result.rows.map((row) => ({run_seq: Number(row.run_seq), stream_seq: Number(row.stream_seq)}));
+    }
+
+    /**
+     * Reads one business entity in ascending stream-sequence order. Counterfactual rows are a
+     * fork's quarantined writes, so a production fold never sees them unless it asks.
+     */
+    async readBusinessStream(streamId: string, options: {throughStreamSeq?: number; includeCounterfactual?: boolean} = {}): Promise<StoredBusinessEvent[]> {
+        const result = await this.pool.query(
+            'SELECT * FROM business_event_stream WHERE stream_id = $1 AND ($2::boolean OR NOT is_counterfactual) AND ($3::bigint IS NULL OR stream_seq <= $3) ORDER BY stream_seq',
+            [streamId, options.includeCounterfactual ?? false, options.throughStreamSeq ?? null],
+        );
+        return result.rows.map(rowToBusinessEvent);
+    }
+
     private async appendWith(client: PoolClient, runId: string, events: EventDraft[]): Promise<number[]> {
         events.forEach(assertEventDraft);
-        const result = await client.query<{stream_seq: string}>('SELECT stream_seq FROM append_events($1, $2::jsonb)', [runId, JSON.stringify(events)]);
-        return result.rows.map((row) => Number(row.stream_seq));
+        const result = await client.query<{run_seq: string}>('SELECT run_seq FROM append_events($1, $2::jsonb)', [runId, JSON.stringify(events)]);
+        return result.rows.map((row) => Number(row.run_seq));
     }
     private async copyInheritedWith(client: PoolClient, runId: string, copies: Record<string, unknown>[]): Promise<void> {
         if (!copies.length) return;
-        await client.query('SELECT stream_seq FROM copy_inherited_events($1, $2::jsonb)', [runId, JSON.stringify(copies)]);
+        await client.query('SELECT run_seq FROM copy_inherited_events($1, $2::jsonb)', [runId, JSON.stringify(copies)]);
     }
     private async readStreamWith(client: PoolClient, runId: string): Promise<StoredEvent[]> {
-        return (await client.query('SELECT * FROM event_log WHERE run_id = $1 ORDER BY stream_seq', [runId])).rows.map(rowToEvent);
+        return (await client.query('SELECT * FROM run_event_log WHERE run_id = $1 ORDER BY run_seq', [runId])).rows.map(rowToEvent);
     }
 }

@@ -9,9 +9,9 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 | W1 | Formal verification stage S3 | [Doc 06 §12](../design/06-validation-harness.md#12-formal-verification-design) | Trigger-gated: waiting on first production traffic |
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
 | W3 | Deterministic routers and rule templates | [Doc 10](../design/10-deterministic-routers.md) | Not started |
-| W4 | Two-plane storage and the three-tier sequence model | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 08](../design/08-database-schema.md) | Not started |
+| W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
 
-W3 and W4 both change `idl/` and `db/migrations/`. Sequencing them so that one lands before the other avoids two simultaneous migrations of the same tables; the order is otherwise unconstrained.
+W3 changes `idl/` and `db/migrations/`; W4's remaining work adds one table and otherwise stays in the Engine, so the two no longer collide.
 
 ---
 
@@ -74,31 +74,24 @@ Make a rule-governed transition executable without a model call: a first-class `
 
 **Exclusions.** Slot-collision rebinding and template migration, a nested-router depth bound, and automatic governance actions on match-rate thresholds are the open questions in [Doc 10 §13](../design/10-deterministic-routers.md#13-open-questions). Automatic reconciliation of an unresolved non-pivot attempt stays out of scope by design: recovery is operator-authorized ([Doc 02 §4.4](../design/02-transaction-model.md#44-orphan-try-detection)).
 
-## W4 — Two-plane storage and the three-tier sequence model
+## W4 — Business-plane consumers
 
-Split storage into an orchestration plane keyed by `(run_id, run_seq)` and a business plane keyed by `(stream_id, stream_seq)`, so that one entity's history folds across all of its runs, counterfactual writes cannot reach production views, and a run's business context stays byte-identical under replay. This supersedes the single-table storage model recorded as v0.2 of [Doc 08](../design/08-database-schema.md); the lazy causal fork semantics built on it survive unchanged.
+The two planes, their sequences, and the dual-allocation append path are built. What remains is everything that *consumes* them: a fork choosing its own quarantined stream, business context pinned into `task_input`, the scenarios that hold those properties, and the read models.
 
 **Contract baseline.** `run_seq` is the only legal input to a surface fold; `stream_seq` is the only legal input to a semantic fold; `global_seq` is never a fold input. A domain event writes both planes in one transaction; a pure orchestration event writes only the run plane. A fork writes domain events to `fork:<fork_run_id>:<source_stream_id>` with `is_counterfactual = true` and never to the source entity.
 
 **Increments.**
 
-1. Rename the run-scoped sequence to `run_seq` across [`idl/event-log.schema.json`](../../idl/event-log.schema.json) and both generated contract models, then update every consumer: `engine/src/{store,projection,events}.ts`, the harness oracles, `coordinator/internal/{store,trace,eventlog}`, and the conformance fixtures.
-2. Migrate `event_log` to `run_event_log`, preserving hash partitioning by `run_id` and the primary key under its new column name, with the existing ownership and transaction triggers carried over.
-3. Add `stream`, `business_event_stream` hash partitioned by `stream_id`, and `business_stream_snapshot`, with the append function that allocates both sequences in one transaction.
-4. Route domain events through the dual-allocation path and leave pure orchestration events on the single-lock path; assert in tests that an orchestration-only append never touches a `stream` row.
-5. Implement fork quarantine: synthetic `stream_id`, `is_counterfactual = true`, and the production read filter in every semantic fold and report.
-6. Implement snapshot fold-and-pin at run start, carry `{snapshot_id, pinned_stream_seq}` in `task_input`, and resolve business context from the snapshot during assembly and replay.
-7. Add scenarios S21–S23 and their oracle assertions to the validation harness.
-8. Point the Console at `run_event_log` and domain read models at `business_event_stream`.
+1. Add `business_stream_snapshot`, fold-and-pin at run start, carry `{snapshot_id, pinned_stream_seq}` in `task_input`, and resolve business context from the snapshot during assembly and replay.
+2. Complete fork quarantine in the Engine: a fork derives its own synthetic `stream_id` rather than a caller passing one, and every semantic fold and operational report applies the `is_counterfactual` filter. The database already refuses a fork run that writes a live entity.
+3. Add scenarios S21–S23 and their oracle assertions to the validation harness.
+4. Point the Console at `run_event_log` and domain read models at `business_event_stream`.
 
 **Exit criteria.**
 
-- A surface fold reads one partition of the run plane; no query in the projection pipeline scans the business plane.
-- `(stream_id, stream_seq)` is enforced by a native unique constraint, with no partition-key workaround.
-- One entity's four-run lifecycle folds to the correct entity view in a single query, and every business row names the `(run_id, run_seq)` that produced it.
-- Forking a run leaves the source entity's head and folded view unchanged.
+- One entity's multi-run lifecycle folds to the correct entity view in a single query.
 - A run replayed after its entity has advanced produces an identical prompt hash.
-- An orchestration-only append acquires no `stream` row lock.
+- Every semantic fold and report filters `is_counterfactual`, so the flag protects a reader that forgets the namespace.
 - No reader folds `global_seq`.
 
 **Exclusions.** Stream-identity assignment policy — which domain concepts deserve an aggregate root, and how `stream_id` is derived from `task_input` — belongs with the domain teams that own the reducers. Snapshot retention and compaction, and CDC consumers of `global_seq`, are deferred.

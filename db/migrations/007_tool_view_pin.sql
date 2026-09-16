@@ -24,14 +24,14 @@ BEGIN
     IF NEW.event_type = 'txn/scope' THEN
         INSERT INTO txn_scope (scope_id, run_id, state, savepoint_seq, opened_seq, member_vertices, required_try_vertices, updated_at)
         VALUES (NEW.scope_id, NEW.run_id, COALESCE(NEW.payload->>'state', 'open'), NULLIF(NEW.payload->>'savepoint_seq', '')::BIGINT,
-                NEW.stream_seq, COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(NEW.payload->'member_vertices', '[]'::JSONB))::UUID), '{}'),
+                NEW.run_seq, COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(NEW.payload->'member_vertices', '[]'::JSONB))::UUID), '{}'),
                 COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(NEW.payload->'required_try_vertices', '[]'::JSONB))::UUID), '{}'), now())
-        ON CONFLICT (scope_id) DO UPDATE SET state = EXCLUDED.state, closed_seq = CASE WHEN EXCLUDED.state IN ('committed', 'cancelled', 'suspended') THEN NEW.stream_seq ELSE txn_scope.closed_seq END,
+        ON CONFLICT (scope_id) DO UPDATE SET state = EXCLUDED.state, closed_seq = CASE WHEN EXCLUDED.state IN ('committed', 'cancelled', 'suspended') THEN NEW.run_seq ELSE txn_scope.closed_seq END,
             updated_at = now();
     ELSIF NEW.event_type = 'txn/try' THEN
         bracket_key := NEW.payload->>'idempotency_key';
         INSERT INTO txn_bracket (idempotency_key, run_id, scope_id, state, deadline_at, try_vertex_id, try_seq, confirm_tool, cancel_tool, compensate_tool, input, retry_policy, tool_view_digest)
-        VALUES (bracket_key, NEW.run_id, NEW.scope_id, 'sealed', (NEW.payload->>'deadline_at')::TIMESTAMPTZ, NEW.vertex_id, NEW.stream_seq,
+        VALUES (bracket_key, NEW.run_id, NEW.scope_id, 'sealed', (NEW.payload->>'deadline_at')::TIMESTAMPTZ, NEW.vertex_id, NEW.run_seq,
                 NEW.payload->>'confirm_tool', NEW.payload->>'cancel_tool', NEW.payload->>'compensate_tool', COALESCE(NEW.payload->'input', '{}'::JSONB),
                 COALESCE(NEW.payload->'retry_policy', '{"max_attempts":1,"initial_backoff_ms":0,"multiplier":1,"max_backoff_ms":0}'::JSONB),
                 NULLIF(NEW.payload->>'tool_view_digest', ''));
@@ -59,7 +59,7 @@ BEGIN
                 SELECT vertex_id, 0 FROM members
                 UNION ALL
                 SELECT child.vertex_id, paths.depth + 1 FROM paths
-                JOIN event_log child ON child.run_id = NEW.run_id AND child.event_type = 'vertex/created' AND paths.vertex_id = ANY(child.parent_refs)
+                JOIN run_event_log child ON child.run_id = NEW.run_id AND child.event_type = 'vertex/created' AND paths.vertex_id = ANY(child.parent_refs)
                 JOIN members member_child ON member_child.vertex_id = child.vertex_id
             )
             SELECT NEW.run_id, NEW.scope_id, m.vertex_id, m.idempotency_key, m.inverse_tool, m.input, m.retry_policy, m.try_seq, max(paths.depth), m.tool_view_digest
@@ -70,7 +70,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM scope_cancel_member WHERE run_id = NEW.run_id AND scope_id = NEW.scope_id AND NOT completed) THEN
                 RAISE EXCEPTION 'scope % still has incomplete cancel members', NEW.scope_id;
             END IF;
-            UPDATE txn_scope SET state = 'cancelled', closed_seq = NEW.stream_seq, updated_at = now()
+            UPDATE txn_scope SET state = 'cancelled', closed_seq = NEW.run_seq, updated_at = now()
             WHERE scope_id = NEW.scope_id AND run_id = NEW.run_id AND state = 'cancelling' AND cancel_idempotency_key = NEW.payload->>'idempotency_key';
             IF NOT FOUND THEN RAISE EXCEPTION 'scope cancel completion requires matching cancelling scope %', NEW.scope_id; END IF;
             UPDATE txn_bracket SET state = 'cancelled' WHERE run_id = NEW.run_id AND scope_id = NEW.scope_id AND state = 'sealed';

@@ -17,7 +17,7 @@ export function noInheritedMutation(events: StoredEvent[]): OracleResult {
     );
     if (!inheritedScopes.size) return {name: 'O2.no_inherited_mutation', passed: true};
     const violation = events.find((event) => !event.inherited && (event.event_type === 'txn/cancel' || event.event_type === 'txn/confirm') && event.scope_id && inheritedScopes.has(event.scope_id));
-    return violation ? {name: 'O2.no_inherited_mutation', passed: false, detail: `mutation at stream_seq ${violation.stream_seq}`} : {name: 'O2.no_inherited_mutation', passed: true};
+    return violation ? {name: 'O2.no_inherited_mutation', passed: false, detail: `mutation at run_seq ${violation.run_seq}`} : {name: 'O2.no_inherited_mutation', passed: true};
 }
 /** Checks that a no-substitution fork reproduces its source surface. */
 export function replayIdentity(source: StoredEvent[], child: StoredEvent[]): OracleResult {

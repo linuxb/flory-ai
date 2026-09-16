@@ -14,7 +14,7 @@ const client = new Client({connectionString: databaseUrl});
 await client.connect();
 try {
     const tables = await client.query<{count: string}>("SELECT count(*) AS count FROM pg_tables WHERE schemaname = 'public'");
-    const marker = await client.query("SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('schema_migration', 'event_log')");
+    const marker = await client.query("SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('schema_migration', 'run_event_log', 'event_log')");
     if (Number(tables.rows[0]!.count) > 0 && marker.rowCount === 0) {
         throw new Error(`refusing to reset ${owner.database} at ${owner.host}:${owner.port}: it holds tables but no Flory migration marker, so it is probably another project's database`);
     }

@@ -1,9 +1,9 @@
--- Lazy causal fork storage (ADR-005): inherited copies preserve source stream_seq and carry
+-- Lazy causal fork storage (doc 01 5.2, doc 08 4): inherited copies preserve source run_seq and carry
 -- provenance; a fork run numbers its own events above eval_up_to_seq; inherited-try locking
 -- keys on provenance instead of run/end-seed position.
 
 ALTER TABLE run ADD COLUMN IF NOT EXISTS seed_floor BIGINT CHECK (seed_floor IS NULL OR seed_floor >= 1);
-ALTER TABLE event_log ADD COLUMN IF NOT EXISTS inherited BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE run_event_log ADD COLUMN IF NOT EXISTS inherited BOOLEAN NOT NULL DEFAULT false;
 
 CREATE OR REPLACE FUNCTION create_fork_run(p_run_id UUID, p_eval_up_to_seq BIGINT) RETURNS VOID
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -27,12 +27,12 @@ BEGIN
 END;
 $$;
 
--- Inherited copies keep their source stream_seq (never allocated from next_seq) and are marked
+-- Inherited copies keep their source run_seq (never allocated from next_seq) and are marked
 -- with inherited provenance. They must sit at or below the fork's seed floor so an inherited seq
 -- and an own seq can never collide. The transaction-local marker bypasses ownership and skips
 -- side-effect projections only while reproducing source history; it is reset before returning.
 CREATE OR REPLACE FUNCTION copy_inherited_events(p_run_id UUID, p_events JSONB)
-RETURNS TABLE(stream_seq BIGINT)
+RETURNS TABLE(run_seq BIGINT)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE item JSONB; floor_seq BIGINT; item_seq BIGINT;
 BEGIN
@@ -45,18 +45,18 @@ BEGIN
     IF floor_seq IS NULL THEN RAISE EXCEPTION 'run % is not a fork; inherited copies require a seed floor', p_run_id; END IF;
     PERFORM set_config('flory.inherit_copy', 'on', true);
     FOR item IN SELECT value FROM jsonb_array_elements(p_events) LOOP
-        item_seq := (item->>'stream_seq')::BIGINT;
+        item_seq := (item->>'run_seq')::BIGINT;
         IF item_seq IS NULL OR item_seq < 1 OR item_seq > floor_seq THEN
-            RAISE EXCEPTION 'inherited stream_seq % must lie within the seed floor %', item_seq, floor_seq;
+            RAISE EXCEPTION 'inherited run_seq % must lie within the seed floor %', item_seq, floor_seq;
         END IF;
-        INSERT INTO event_log (run_id, stream_seq, event_type, vertex_id, parent_refs, planner_id, scope_id, pin_version, ignorable, inherited, payload)
+        INSERT INTO run_event_log (run_id, run_seq, event_type, vertex_id, parent_refs, planner_id, scope_id, pin_version, ignorable, inherited, payload)
         VALUES (
             p_run_id, item_seq, item->>'event_type', NULLIF(item->>'vertex_id', '')::UUID,
             COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(item->'parent_refs', '[]'::JSONB))::UUID), '{}'),
             NULLIF(item->>'planner_id', '')::UUID, NULLIF(item->>'scope_id', '')::UUID,
             NULLIF(item->>'pin_version', ''), COALESCE((item->>'ignorable')::BOOLEAN, false), true, COALESCE(item->'payload', '{}'::JSONB)
         );
-        stream_seq := item_seq; RETURN NEXT;
+        run_seq := item_seq; RETURN NEXT;
     END LOOP;
     PERFORM set_config('flory.inherit_copy', 'off', true);
 END;
@@ -77,7 +77,7 @@ BEGIN
         END IF;
     END IF;
     IF NEW.event_type IN ('txn/confirm', 'txn/cancel') AND EXISTS (
-        SELECT 1 FROM event_log WHERE run_id = NEW.run_id AND event_type = 'txn/try' AND scope_id = NEW.scope_id AND inherited
+        SELECT 1 FROM run_event_log WHERE run_id = NEW.run_id AND event_type = 'txn/try' AND scope_id = NEW.scope_id AND inherited
     ) THEN
         RAISE EXCEPTION 'fork cannot mutate inherited transaction bracket for scope %', NEW.scope_id;
     END IF;

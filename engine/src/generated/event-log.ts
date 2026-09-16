@@ -93,7 +93,7 @@ export interface BudgetChargedPayload {
     estimated_cost?: LlmCostEstimate;
 }
 export interface ForkSubstitution {
-    stream_seq: number;
+    run_seq: number;
     pin_version: string;
 }
 export interface ForkRequest {

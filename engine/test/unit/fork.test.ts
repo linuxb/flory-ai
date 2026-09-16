@@ -7,11 +7,11 @@ const TOOL = '00000000-0000-4000-8000-000000000002';
 const GRANDCHILD = '00000000-0000-4000-8000-000000000003';
 const SIBLING = '00000000-0000-4000-8000-000000000004';
 
-function event(streamSeq: number, eventType: string, options: Partial<StoredEvent> = {}): StoredEvent {
+function event(runSeq: number, eventType: string, options: Partial<StoredEvent> = {}): StoredEvent {
     return {
         run_id: 'run-1',
-        stream_seq: streamSeq,
-        global_seq: streamSeq,
+        run_seq: runSeq,
+        global_seq: runSeq,
         event_type: eventType,
         vertex_id: null,
         parent_refs: [],
@@ -48,33 +48,33 @@ describe('computeForkSlice', () => {
     it('invalidates nothing for a no-substitution fork so everything merges', () => {
         const slice = computeForkSlice(stream, PLANNER, [], 8);
         expect(slice.invalidated).toEqual([]);
-        expect(slice.seed.map((item) => item.stream_seq)).toEqual([1, 2]);
-        expect(slice.deferred.map((item) => item.stream_seq)).toEqual([3, 4, 5, 6, 7, 8]);
+        expect(slice.seed.map((item) => item.run_seq)).toEqual([1, 2]);
+        expect(slice.deferred.map((item) => item.run_seq)).toEqual([3, 4, 5, 6, 7, 8]);
     });
 
     it('invalidates causal descendants and the divergence execution chain under a substitution', () => {
-        const slice = computeForkSlice(stream, PLANNER, [{stream_seq: 2, pin_version: 'model://planner@v2'}], 8);
-        expect(slice.invalidated.map((item) => item.stream_seq)).toEqual([3, 4, 6, 7]);
-        expect(slice.seed.map((item) => item.stream_seq)).toEqual([1, 2]);
-        expect(slice.deferred.map((item) => item.stream_seq)).toEqual([5, 8]);
+        const slice = computeForkSlice(stream, PLANNER, [{run_seq: 2, pin_version: 'model://planner@v2'}], 8);
+        expect(slice.invalidated.map((item) => item.run_seq)).toEqual([3, 4, 6, 7]);
+        expect(slice.seed.map((item) => item.run_seq)).toEqual([1, 2]);
+        expect(slice.deferred.map((item) => item.run_seq)).toEqual([5, 8]);
     });
 
     it('invalidates the divergence planner model charge under a model substitution', () => {
         const charged = [...stream, event(9, 'budget/charged', {vertex_id: PLANNER})];
-        const slice = computeForkSlice(charged, PLANNER, [{stream_seq: 2, pin_version: 'model://planner@v2'}], 9);
-        expect(slice.invalidated.map((item) => item.stream_seq)).toContain(9);
+        const slice = computeForkSlice(charged, PLANNER, [{run_seq: 2, pin_version: 'model://planner@v2'}], 9);
+        expect(slice.invalidated.map((item) => item.run_seq)).toContain(9);
     });
 
     it('diverges at a tool-caller vertex and keeps its causal ancestors in the seed', () => {
-        const slice = computeForkSlice(stream, TOOL, [{stream_seq: 4, pin_version: 'tool://check@v2'}], 8);
-        expect(slice.seed.map((item) => item.stream_seq)).toEqual([1, 2, 3, 4]);
-        expect(slice.invalidated.map((item) => item.stream_seq)).toEqual([6, 7]);
-        expect(slice.deferred.map((item) => item.stream_seq)).toEqual([5, 8]);
+        const slice = computeForkSlice(stream, TOOL, [{run_seq: 4, pin_version: 'tool://check@v2'}], 8);
+        expect(slice.seed.map((item) => item.run_seq)).toEqual([1, 2, 3, 4]);
+        expect(slice.invalidated.map((item) => item.run_seq)).toEqual([6, 7]);
+        expect(slice.deferred.map((item) => item.run_seq)).toEqual([5, 8]);
     });
 
     it('bounds the slice at eval_up_to_seq', () => {
         const slice = computeForkSlice(stream, PLANNER, [], 5);
-        expect(slice.deferred.map((item) => item.stream_seq)).toEqual([3, 4, 5]);
+        expect(slice.deferred.map((item) => item.run_seq)).toEqual([3, 4, 5]);
     });
 
     it('rejects a divergence vertex outside the evaluation window', () => {
@@ -82,7 +82,7 @@ describe('computeForkSlice', () => {
     });
 
     it('rejects a substitution that does not name a pinned event of the divergence vertex', () => {
-        expect(() => computeForkSlice(stream, PLANNER, [{stream_seq: 4, pin_version: 'tool://check@v2'}], 8)).toThrow('divergence vertex');
-        expect(() => computeForkSlice(stream, PLANNER, [{stream_seq: 3, pin_version: 'model://planner@v2'}], 8)).toThrow('pinned');
+        expect(() => computeForkSlice(stream, PLANNER, [{run_seq: 4, pin_version: 'tool://check@v2'}], 8)).toThrow('divergence vertex');
+        expect(() => computeForkSlice(stream, PLANNER, [{run_seq: 3, pin_version: 'model://planner@v2'}], 8)).toThrow('pinned');
     });
 });

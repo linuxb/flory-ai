@@ -1,6 +1,6 @@
 # Database Schema and Storage Model (08)
 
-> Status: Two-plane schema specified (v0.3); the single-table storage of v0.2 is implemented and its migration is tracked as [outstanding work W4](../plan/outstanding-work.md#w4--two-plane-storage-and-the-three-tier-sequence-model) | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [05](./05-context-aggregation-and-offline-evaluation.md), [07](./07-distributed-transaction-coordinator.md)
+> Status: Two-plane storage implemented (v0.3); `business_stream_snapshot` is specified but not yet built, and is tracked as [outstanding work W4](../plan/outstanding-work.md#w4--business-plane-consumers) | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md), [05](./05-context-aggregation-and-offline-evaluation.md), [07](./07-distributed-transaction-coordinator.md)
 
 ## 1. Executable Boundary
 

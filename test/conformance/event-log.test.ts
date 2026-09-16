@@ -3,7 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {assertEventDraft, type EventDraft} from '../../engine/src/events.js';
 
 interface FixtureEvent extends EventDraft {
-    stream_seq: number;
+    run_seq: number;
     inherited?: boolean;
 }
 
@@ -17,8 +17,8 @@ interface FixtureCase {
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/event-log-conformance.json', import.meta.url), 'utf8')) as {cases: FixtureCase[]};
 
 function validate(events: FixtureEvent[]): void {
-    for (const {stream_seq: _streamSequence, inherited: _inherited, ...event} of events) assertEventDraft(event);
-    const ordered = [...events].sort((first, second) => first.stream_seq - second.stream_seq);
+    for (const {run_seq: _runSequence, inherited: _inherited, ...event} of events) assertEventDraft(event);
+    const ordered = [...events].sort((first, second) => first.run_seq - second.run_seq);
     const pivoted = new Set<string>();
     const inheritedTryScopes = new Set<string>();
     for (const event of ordered) {
@@ -43,6 +43,14 @@ function scopeState(events: FixtureEvent[], fallback: string): string {
 }
 
 describe('cross-language event-log conformance fixture', () => {
+    it('every fixture event carries a numeric run_seq', () => {
+        // The fixture is decoded by Go as well, and neither decoder rejects an unexpected key on its
+        // own. Without this assertion a rename would leave both readers sorting on undefined.
+        for (const testCase of fixture.cases) {
+            for (const event of testCase.events) expect(typeof event.run_seq, `${testCase.name} / ${event.event_type}`).toBe('number');
+        }
+    });
+
     for (const testCase of fixture.cases) {
         it(testCase.name, () => {
             if (testCase.valid) expect(() => validate(testCase.events)).not.toThrow();

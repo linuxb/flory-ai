@@ -3,11 +3,11 @@ import {assertEventDraft, type StoredEvent} from '../../src/events.js';
 import {FoldRegistry, linearize, slice, surface} from '../../src/projection.js';
 
 const run = '00000000-0000-4000-8000-000000000001';
-function event(stream_seq: number, event_type: string, options: Partial<StoredEvent> = {}): StoredEvent {
+function event(run_seq: number, event_type: string, options: Partial<StoredEvent> = {}): StoredEvent {
     return {
         run_id: run,
-        stream_seq,
-        global_seq: stream_seq,
+        run_seq,
+        global_seq: run_seq,
         event_type,
         vertex_id: null,
         parent_refs: [],
@@ -39,6 +39,18 @@ describe('pure projections', () => {
         const active = surface(events);
         expect([...active.vertices.keys()]).toEqual(['00000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000012']);
         expect(slice(active, '00000000-0000-4000-8000-000000000012').map((item) => item.vertex_id)).toEqual(['00000000-0000-4000-8000-000000000012']);
+    });
+
+    it('folds a surface over the run plane only, and reports the run sequence it stopped at', () => {
+        const events = [
+            event(1, 'vertex/created', {vertex_id: '00000000-0000-4000-8000-000000000010', payload: {role: 'planner'}}),
+            event(2, 'vertex/created', {vertex_id: '00000000-0000-4000-8000-000000000011', parent_refs: ['00000000-0000-4000-8000-000000000010'], payload: {role: 'tool'}}),
+            event(3, 'vertex/created', {vertex_id: '00000000-0000-4000-8000-000000000012', parent_refs: ['00000000-0000-4000-8000-000000000011'], payload: {role: 'planner'}}),
+        ];
+        expect(surface(events).at_run_seq).toBe(3);
+        const truncated = surface(events, 2);
+        expect(truncated.at_run_seq).toBe(2);
+        expect([...truncated.vertices.values()].map((vertex) => vertex.created_seq)).toEqual([1, 2]);
     });
 
     it('registers supplied reducers without acquiring business semantics and linearizes by vertex id', () => {

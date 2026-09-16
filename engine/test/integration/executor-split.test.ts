@@ -125,7 +125,7 @@ describe('executor authority splits by effect class', () => {
             {event_type: 'vertex/started', vertex_id: read, payload: {attempt: 1}},
             {event_type: 'vertex/succeeded', vertex_id: read, payload: {attempts: 1, result: {available: 7}}},
         ]);
-        const recorded = await engineClient.query<{event_type: string}>('SELECT event_type FROM event_log WHERE run_id = $1 AND vertex_id = $2 ORDER BY stream_seq', [run, read]);
+        const recorded = await engineClient.query<{event_type: string}>('SELECT event_type FROM run_event_log WHERE run_id = $1 AND vertex_id = $2 ORDER BY run_seq', [run, read]);
         expect(recorded.rows.map((row) => row.event_type)).toEqual(['vertex/created', 'vertex/started', 'vertex/succeeded']);
     });
 

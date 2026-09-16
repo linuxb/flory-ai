@@ -6,14 +6,14 @@ BEGIN
     IF NEW.event_type = 'txn/scope' THEN
         INSERT INTO txn_scope (scope_id, run_id, state, savepoint_seq, opened_seq)
         VALUES (NEW.scope_id, NEW.run_id, COALESCE(NEW.payload->>'state', 'opened'),
-                NULLIF(NEW.payload->>'savepoint_seq', '')::BIGINT, NEW.stream_seq)
-        ON CONFLICT (scope_id) DO UPDATE SET state = EXCLUDED.state, closed_seq = NEW.stream_seq;
+                NULLIF(NEW.payload->>'savepoint_seq', '')::BIGINT, NEW.run_seq)
+        ON CONFLICT (scope_id) DO UPDATE SET state = EXCLUDED.state, closed_seq = NEW.run_seq;
     ELSIF NEW.event_type = 'txn/try' THEN
         bracket_key := NEW.payload->>'idempotency_key';
         IF bracket_key IS NULL THEN RAISE EXCEPTION 'txn/try requires payload.idempotency_key'; END IF;
         INSERT INTO txn_bracket (idempotency_key, run_id, scope_id, state, deadline_at, try_vertex_id, try_seq)
         VALUES (bracket_key, NEW.run_id, NEW.scope_id, 'tried',
-                NULLIF(NEW.payload->>'deadline_at', '')::TIMESTAMPTZ, NEW.vertex_id, NEW.stream_seq);
+                NULLIF(NEW.payload->>'deadline_at', '')::TIMESTAMPTZ, NEW.vertex_id, NEW.run_seq);
     ELSIF NEW.event_type = 'txn/pivot-passed' THEN
         UPDATE txn_scope SET state = 'pivot-passed', is_pivot = true, pivot_vertex_id = NEW.vertex_id
         WHERE scope_id = NEW.scope_id AND run_id = NEW.run_id AND pivot_vertex_id IS NULL;

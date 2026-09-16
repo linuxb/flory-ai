@@ -22,7 +22,7 @@ export interface EventDraft {
 /** A persisted event with database-assigned identifiers, provenance, and timestamps. */
 export interface StoredEvent extends Required<Omit<EventDraft, 'vertex_id' | 'planner_id' | 'scope_id' | 'pin_version'>> {
     run_id: string;
-    stream_seq: number;
+    run_seq: number;
     global_seq: number;
     vertex_id: string | null;
     planner_id: string | null;
@@ -31,6 +31,34 @@ export interface StoredEvent extends Required<Omit<EventDraft, 'vertex_id' | 'pl
     /** True when the row is a read-only copy inherited from a fork's source stream. */
     inherited: boolean;
     created_at: string;
+}
+
+/** One domain fact of one aggregate root, before the database allocates its stream sequence. */
+export interface BusinessFactDraft {
+    event_type: string;
+    payload: Record<string, unknown>;
+}
+
+/** A persisted business-plane row: one domain fact, ordered per entity and stamped with its cause. */
+export interface StoredBusinessEvent {
+    stream_id: string;
+    /** Per-entity position: strict, contiguous, and rollback-safe across every run of the entity. */
+    stream_seq: number;
+    global_seq: number;
+    /** The orchestration step that produced this fact. */
+    run_id: string;
+    run_seq: number;
+    event_type: string;
+    /** True for a fork's quarantined writes; production reads exclude them. */
+    is_counterfactual: boolean;
+    payload: Record<string, unknown>;
+    created_at: string;
+}
+
+/** The two plane positions one domain fact occupies, allocated in a single transaction. */
+export interface DomainAppendResult {
+    run_seq: number;
+    stream_seq: number;
 }
 
 const schema = JSON.parse(readFileSync(resolve(process.cwd(), 'idl/event-log.schema.json'), 'utf8'));

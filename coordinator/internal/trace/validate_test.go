@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,36 +10,36 @@ import (
 )
 
 func TestValidateRejectsDuplicatePivotAndInheritedMutation(t *testing.T) {
-	if err := Validate([]Event{{StreamSeq: 1, EventType: "txn/pivot-passed", ScopeID: "s", Payload: map[string]any{}},
-		{StreamSeq: 2, EventType: "txn/pivot-passed", ScopeID: "s", Payload: map[string]any{}}}); err == nil {
+	if err := Validate([]Event{{RunSeq: 1, EventType: "txn/pivot-passed", ScopeID: "s", Payload: map[string]any{}},
+		{RunSeq: 2, EventType: "txn/pivot-passed", ScopeID: "s", Payload: map[string]any{}}}); err == nil {
 		t.Fatal("expected duplicate pivot rejection")
 	}
-	if err := Validate([]Event{{StreamSeq: 1, EventType: "txn/try", ScopeID: "s", Inherited: true, Payload: map[string]any{}},
-		{StreamSeq: 4, EventType: "run/end-seed", Payload: map[string]any{}},
-		{StreamSeq: 5, EventType: "txn/cancel", ScopeID: "s", Payload: map[string]any{"phase": "requested"}}}); err == nil {
+	if err := Validate([]Event{{RunSeq: 1, EventType: "txn/try", ScopeID: "s", Inherited: true, Payload: map[string]any{}},
+		{RunSeq: 4, EventType: "run/end-seed", Payload: map[string]any{}},
+		{RunSeq: 5, EventType: "txn/cancel", ScopeID: "s", Payload: map[string]any{"phase": "requested"}}}); err == nil {
 		t.Fatal("expected inherited mutation rejection")
 	}
-	if err := Validate([]Event{{StreamSeq: 1, EventType: "txn/try", ScopeID: "s", Inherited: true, Payload: map[string]any{}},
-		{StreamSeq: 4, EventType: "run/end-seed", Payload: map[string]any{}},
-		{StreamSeq: 2, EventType: "txn/cancel", ScopeID: "s", Inherited: true, Payload: map[string]any{"phase": "requested"}}}); err != nil {
+	if err := Validate([]Event{{RunSeq: 1, EventType: "txn/try", ScopeID: "s", Inherited: true, Payload: map[string]any{}},
+		{RunSeq: 4, EventType: "run/end-seed", Payload: map[string]any{}},
+		{RunSeq: 2, EventType: "txn/cancel", ScopeID: "s", Inherited: true, Payload: map[string]any{"phase": "requested"}}}); err != nil {
 		t.Fatalf("inherited copies of source history must stay valid: %v", err)
 	}
 }
 
 func TestValidateFailsClosedAndAcceptsIgnorableUnknown(t *testing.T) {
-	if err := Validate([]Event{{StreamSeq: 1, EventType: "future/event", Payload: map[string]any{}}}); err == nil {
+	if err := Validate([]Event{{RunSeq: 1, EventType: "future/event", Payload: map[string]any{}}}); err == nil {
 		t.Fatal("expected fail-closed unknown event rejection")
 	}
-	if err := Validate([]Event{{StreamSeq: 1, EventType: "future/event", Ignorable: true, Payload: map[string]any{}}}); err != nil {
+	if err := Validate([]Event{{RunSeq: 1, EventType: "future/event", Ignorable: true, Payload: map[string]any{}}}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestValidateRequiresBudgetChargeVertex(t *testing.T) {
-	if err := Validate([]Event{{StreamSeq: 1, EventType: "budget/charged", Payload: map[string]any{"category": "llm"}}}); err == nil {
+	if err := Validate([]Event{{RunSeq: 1, EventType: "budget/charged", Payload: map[string]any{"category": "llm"}}}); err == nil {
 		t.Fatal("expected budget charge without planner vertex to be rejected")
 	}
-	if err := Validate([]Event{{StreamSeq: 1, EventType: "budget/charged", VertexID: "planner-1", Payload: map[string]any{"category": "llm"}}}); err != nil {
+	if err := Validate([]Event{{RunSeq: 1, EventType: "budget/charged", VertexID: "planner-1", Payload: map[string]any{"category": "llm"}}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -57,8 +58,20 @@ func TestCrossLanguageConformanceFixture(t *testing.T) {
 			Events             []Event `json:"events"`
 		} `json:"cases"`
 	}
-	if err := json.Unmarshal(raw, &fixture); err != nil {
+	// DisallowUnknownFields is the guard: a fixture key rename would otherwise decode every event
+	// with a zero RunSeq, leave the sort comparator always false, and keep this test green while it
+	// verified nothing.
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fixture); err != nil {
 		t.Fatal(err)
+	}
+	for _, testCase := range fixture.Cases {
+		for index, event := range testCase.Events {
+			if event.RunSeq <= 0 {
+				t.Fatalf("fixture case %q event %d decoded without a run_seq", testCase.Name, index)
+			}
+		}
 	}
 	for _, testCase := range fixture.Cases {
 		t.Run(testCase.Name, func(t *testing.T) {

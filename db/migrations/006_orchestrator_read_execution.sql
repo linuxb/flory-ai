@@ -41,9 +41,9 @@ CREATE INDEX IF NOT EXISTS work_queue_class_ready_idx ON work_queue (executor_cl
 CREATE OR REPLACE FUNCTION flory_vertex_executor_class(p_run_id UUID, p_vertex_id UUID) RETURNS TEXT
 LANGUAGE sql STABLE AS $$
     SELECT flory_executor_class(e.payload, e.scope_id)
-    FROM event_log e
+    FROM run_event_log e
     WHERE e.run_id = p_run_id AND e.vertex_id = p_vertex_id AND e.event_type = 'vertex/created'
-    ORDER BY e.stream_seq
+    ORDER BY e.run_seq
     LIMIT 1;
 $$;
 
@@ -110,7 +110,7 @@ BEGIN
         WHERE q.executor_class = 'coordinator' AND q.ready_at <= now() AND (q.lease_until IS NULL OR q.lease_until < now())
           AND NOT EXISTS (
               SELECT 1 FROM unnest(q.parent_refs) parent_id
-              WHERE NOT EXISTS (SELECT 1 FROM event_log e WHERE e.run_id = q.run_id AND e.vertex_id = parent_id AND e.event_type = 'vertex/succeeded')
+              WHERE NOT EXISTS (SELECT 1 FROM run_event_log e WHERE e.run_id = q.run_id AND e.vertex_id = parent_id AND e.event_type = 'vertex/succeeded')
           )
         ORDER BY q.ready_at, q.vertex_id FOR UPDATE SKIP LOCKED LIMIT 1
     )
@@ -133,7 +133,7 @@ BEGIN
         WHERE q.executor_class = 'orchestrator' AND q.ready_at <= now() AND (q.lease_until IS NULL OR q.lease_until < now())
           AND NOT EXISTS (
               SELECT 1 FROM unnest(q.parent_refs) parent_id
-              WHERE NOT EXISTS (SELECT 1 FROM event_log e WHERE e.run_id = q.run_id AND e.vertex_id = parent_id AND e.event_type = 'vertex/succeeded')
+              WHERE NOT EXISTS (SELECT 1 FROM run_event_log e WHERE e.run_id = q.run_id AND e.vertex_id = parent_id AND e.event_type = 'vertex/succeeded')
           )
         ORDER BY q.ready_at, q.vertex_id FOR UPDATE SKIP LOCKED LIMIT 1
     )

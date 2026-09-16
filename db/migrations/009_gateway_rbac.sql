@@ -187,8 +187,8 @@ BEGIN
     RETURN NEW;
 END $$;
 
-CREATE TRIGGER event_log_project_run_authorization
-AFTER INSERT ON event_log FOR EACH ROW EXECUTE FUNCTION project_run_authorization();
+CREATE TRIGGER run_event_log_project_run_authorization
+AFTER INSERT ON run_event_log FOR EACH ROW EXECUTE FUNCTION project_run_authorization();
 
 REVOKE ALL ON run_authorization FROM PUBLIC;
 GRANT SELECT ON run_authorization TO engine_role, coordinator_role;

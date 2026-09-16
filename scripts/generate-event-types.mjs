@@ -3,6 +3,13 @@ import {readFile, writeFile} from 'node:fs/promises';
 const check = process.argv.includes('--check');
 const schema = JSON.parse(await readFile(new URL('../idl/event-log.schema.json', import.meta.url)));
 const eventTypes = schema.allOf[0].if.properties.event_type.not.enum;
+// Only the event-type enum is schema-derived; the structs below are literals, so a rename in the
+// IDL would otherwise pass generate:check silently. $defs.forkRequest is never $ref'd either, so
+// Ajv does not validate it at append time. This assertion is the only link between the two.
+const substitutionFields = schema.$defs.forkRequest.properties.substitutions.items.required;
+if (!substitutionFields.includes('run_seq')) {
+    throw new Error('idl forkRequest substitutions must require run_seq; generated types and the IDL have drifted');
+}
 const ts =
     [
         '// Generated from idl/event-log.schema.json. Do not edit.',
@@ -81,7 +88,7 @@ const ts =
         '    estimated_cost?: LlmCostEstimate;',
         '}',
         'export interface ForkSubstitution {',
-        '    stream_seq: number;',
+        '    run_seq: number;',
         '    pin_version: string;',
         '}',
         'export interface ForkRequest {',
@@ -204,7 +211,7 @@ const go =
         '}',
         '',
         'type ForkSubstitution struct {',
-        '\tStreamSeq  int64  `json:"stream_seq"`',
+        '\tRunSeq     int64  `json:"run_seq"`',
         '\tPinVersion string `json:"pin_version"`',
         '}',
         '',

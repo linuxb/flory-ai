@@ -1,0 +1,13 @@
+{
+    "exclude": [
+        ".cache/**",
+        ".codegraph/**",
+        ".git/**",
+        "node_modules/**",
+        "doc/animations/node_modules/**",
+        "gatewayd/bin/**",
+        "spec/.tlc/**",
+        "spec/_apalache-out/**",
+        "spec/output/**"
+    ]
+}

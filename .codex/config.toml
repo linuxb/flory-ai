@@ -1,0 +1,3 @@
+[mcp_servers.codegraph]
+command = "sh"
+args = ["scripts/codegraph-mcp.sh"]

@@ -41,6 +41,24 @@ Flory needs one PostgreSQL 16-or-newer server and does not care where it comes f
 are derived from `DATABASE_URL`, so choose whichever path matches your machine; the remaining steps
 are identical.
 
+### Code intelligence
+
+The repository includes project-level CodeGraph MCP configuration for Codex and Claude Code.
+Antigravity reads its MCP configuration from the user profile, so register it once with
+`codegraph install --target=antigravity --location=global --yes`. Other stdio MCP clients can launch
+`sh scripts/codegraph-mcp.sh` from the repository root. Restart an agent after changing its MCP
+configuration.
+
+Run `codegraph init` once after cloning. The local SQLite graph stays under `.codegraph/`; only its
+`.gitignore` marker is committed. Agent MCP sessions start through `scripts/codegraph-mcp.sh`, which
+runs an incremental sync every two seconds and catches edits made by any editor or agent. Set
+`CODEGRAPH_POLL_SECONDS` to change the interval.
+
+```sh
+codegraph status
+codegraph explore "how does gateway execution reach a tool service"
+```
+
 ### Using a PostgreSQL server you already run
 
 `npm run db:bootstrap` provisions the Flory roles and database inside an existing server, which keeps
@@ -173,9 +191,14 @@ The README hero image is the animated architecture overview; its generator lives
 
 ```text
 .
+├── .claude/               # Claude Code instructions and CodeGraph permissions
+├── .codegraph/            # Local CodeGraph index directory; database files stay ignored
+├── .codex/                # Project-level Codex MCP configuration
 ├── .github/               # Repository automation and CI workflows
+├── .mcp.json              # Project-level Claude Code MCP server registration
 ├── .env.example           # Overrideable local connection and service settings
 ├── AGENTS.md              # Contributor index, development rules, and review routes
+├── codegraph.json         # CodeGraph indexing exclusions for generated and cached content
 ├── coordinator/           # Go 1.25 Distributed Transaction Coordinator service
 ├── gatewayd/              # Go 1.25 Tool Registry Gateway and its Go tool-service SDK
 ├── db/                    # PostgreSQL migrations, bootstrap, and migration utilities

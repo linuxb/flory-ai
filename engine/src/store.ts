@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {Pool, type PoolClient} from 'pg';
+import type {ScopeSnapshot} from './check-rules.js';
 import {assertEventDraft, type BusinessFactDraft, type DomainAppendResult, type EventDraft, type ForkRequest, type ForkSubstitution, type StoredBusinessEvent, type StoredEvent} from './events.js';
 
 /** A service role permitted to append events. */
@@ -145,6 +146,13 @@ interface ForkProvenance {
 }
 
 /** PostgreSQL-backed event-log store that enforces service event ownership. */
+/** What freeze admission needs to know about the run a subgraph is freezing into. */
+export interface RunAdmissionContext {
+    scopes: ScopeSnapshot[];
+    /** True on a fork run: an offline simulation, where no emitted branch may carry an effect. */
+    isCounterfactual: boolean;
+}
+
 export class EventStore {
     private readonly pool: Pool;
     constructor(private readonly options: EventStoreOptions) {
@@ -320,6 +328,34 @@ export class EventStore {
     }
 
     /**
+     * Reads everything freeze admission needs to know about a run it is about to freeze into.
+     *
+     * The two facts travel together because one gate consumes both: the scopes above decide where a
+     * router sits, and a fork run makes the whole context read-only. `half-open` is not a stored
+     * state — it is an unclosed scope holding a sealed but unconfirmed try, which is exactly what
+     * forbids a fresh scope below it. Only `committed` and `cancelled` are terminal; `cancelling`,
+     * `suspended`, `pivot-inflight` and `pivot-passed` are all still unclosed, so none of them may
+     * be mistaken for a savepoint. `seed_floor` is the authoritative record that a run is a fork.
+     */
+    async readAdmissionContext(runId: string): Promise<RunAdmissionContext> {
+        const scopes = await this.pool.query<{scope_id: string; state: string; pivots: number; sealed: boolean}>(
+            `SELECT s.scope_id,
+                    s.state,
+                    (s.pivot_vertex_id IS NOT NULL)::int AS pivots,
+                    EXISTS (SELECT 1 FROM txn_bracket b WHERE b.scope_id = s.scope_id AND b.state = 'sealed') AS sealed
+               FROM txn_scope s
+              WHERE s.run_id = $1
+              ORDER BY s.opened_seq`,
+            [runId],
+        );
+        const run = await this.pool.query<{fork: boolean}>('SELECT seed_floor IS NOT NULL AS fork FROM run WHERE run_id = $1', [runId]);
+        return {
+            scopes: scopes.rows.map((row) => ({scopeId: row.scope_id, state: snapshotState(row.state, row.sealed), pivotCount: Number(row.pivots)})),
+            isCounterfactual: run.rows[0]?.fork ?? false,
+        };
+    }
+
+    /**
      * Records one rule-template mutation in the configuration stream.
      *
      * A publication has no causing orchestration step, so it takes neither a run nor the
@@ -344,4 +380,11 @@ export class EventStore {
     private async readStreamWith(client: PoolClient, runId: string): Promise<StoredEvent[]> {
         return (await client.query('SELECT * FROM run_event_log WHERE run_id = $1 ORDER BY run_seq', [runId])).rows.map(rowToEvent);
     }
+}
+
+/** Maps a stored scope state onto the four states admission distinguishes. */
+function snapshotState(stored: string, hasSealedTry: boolean): ScopeSnapshot['state'] {
+    if (stored === 'committed') return 'committed';
+    if (stored === 'cancelled') return 'cancelled';
+    return hasSealedTry ? 'half-open' : 'open';
 }

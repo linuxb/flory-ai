@@ -1,8 +1,9 @@
-import {checkSubDag, type CheckViolation} from './check-rules.js';
+import {checkFreezeAdmission, checkSubDag, derivePlacement, type CheckViolation, type RouterPlacement, type ScopeSnapshot} from './check-rules.js';
 import type {EventDraft} from './events.js';
 import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from './gateway-client.js';
+import type {PublishedRuleTemplate} from './rule-template.js';
 import type {EventStore} from './store.js';
-import {compileVertexDrafts, lowerToProposal, normalizeWorkflow, submissionDigest, type WorkflowSubmission} from './workflow.js';
+import {compileVertexDrafts, lowerToProposal, normalizeWorkflow, routerSlotIds, submissionDigest, type RouterBinding, type WorkflowSubmission} from './workflow.js';
 
 /** Which gate refused a submission. */
 export type RejectionStage = 'resolution' | 'registry' | 'admission';
@@ -16,6 +17,17 @@ export type SubmissionResult =
 const REGISTRY_RULES = new Set(['R4', 'R6']);
 
 /**
+ * The subset of the rule-template store that freeze needs.
+ *
+ * Narrowed to two lookups so the submission path depends on resolution rather than on the store
+ * that happens to provide it, which is what lets a replay resolve from recorded history instead.
+ */
+export interface TemplateResolver {
+    resolve(reference: string): PublishedRuleTemplate | undefined;
+    resolveSlot(slotId: string): PublishedRuleTemplate | undefined;
+}
+
+/**
  * Turns a submitted workflow into frozen executable structure.
  *
  * The invariant this class exists to hold is that **every `subgraph/proposed` is followed by either
@@ -25,9 +37,15 @@ const REGISTRY_RULES = new Set(['R4', 'R6']);
  * no reader can render and no operator can act on.
  */
 export class WorkflowSubmitter {
+    /**
+     * `templates` is optional, and its absence is meaningful rather than lenient: with no resolver
+     * no router can bind a rule, every router is an unbound pass-through, and there are no branches
+     * for freeze to admit. A configuration with rules always supplies one.
+     */
     constructor(
         private readonly store: EventStore,
         private readonly gateway: GatewayClient,
+        private readonly templates?: TemplateResolver,
     ) {}
 
     /**
@@ -39,6 +57,9 @@ export class WorkflowSubmitter {
     async submit(runId: string, submission: WorkflowSubmission, authorization?: DiscoveryAuthorization): Promise<SubmissionResult> {
         const {workflow, interposed} = normalizeWorkflow(submission);
         const resolved = await this.gateway.resolveToolView(undefined, authorization);
+        // Read once, before anything is appended: admission and placement must both see the same
+        // scope state, and a later read could see a scope this very freeze went on to change.
+        const context = await this.store.readAdmissionContext(runId);
 
         const proposedSeq = await this.appendOne(runId, {
             event_type: 'subgraph/proposed',
@@ -56,7 +77,7 @@ export class WorkflowSubmitter {
         const unresolvable = resolutionViolations(workflow, resolved);
         if (unresolvable.length) return this.reject(runId, proposedSeq, 'resolution', unresolvable);
 
-        const result = checkSubDag(lowerToProposal(workflow), resolved.registry);
+        const result = checkSubDag(lowerToProposal(workflow), resolved.registry, context.scopes);
         if (!result.accepted) {
             // A malformed published contract makes every submission rejectable, so an author is told
             // which of the two it is rather than being blamed for the catalogue.
@@ -64,7 +85,14 @@ export class WorkflowSubmitter {
             return this.reject(runId, proposedSeq, stage, result.violations);
         }
 
-        const compiled = compileVertexDrafts(workflow, resolved);
+        // Freeze-time admission of the branches a router may later emit. This is the whole point of
+        // publishing rules ahead of time: a branch that is illegal where this router sits is refused
+        // now, before any tool runs, rather than when the condition that selects it happens to hold.
+        const bound = this.bindRouters(workflow, derivePlacement(context.scopes));
+        const branchViolations = admissionViolations(bound, resolved, context.scopes, context.isCounterfactual);
+        if (branchViolations.length) return this.reject(runId, proposedSeq, 'admission', branchViolations);
+
+        const compiled = compileVertexDrafts(workflow, resolved, new Map([...bound].map(([authorId, router]) => [authorId, router.binding])));
         const frozen: EventDraft = {
             event_type: 'subgraph/frozen',
             payload: {
@@ -79,6 +107,22 @@ export class WorkflowSubmitter {
         };
         const sequences = await this.store.appendFrozenSubgraph(runId, frozen, compiled.drafts);
         return {status: 'accepted', proposedSeq, frozenSeq: sequences[0]!, vertexIds: compiled.vertexIds};
+    }
+
+    /**
+     * Resolves the template every router in this submission binds, by pinned reference first and
+     * then by slot coordinate, and records where each one sits.
+     */
+    private bindRouters(workflow: WorkflowSubmission, placement: RouterPlacement): Map<string, BoundRouter> {
+        const slots = routerSlotIds(workflow);
+        const bound = new Map<string, BoundRouter>();
+        for (const vertex of workflow.vertices) {
+            if (vertex.kind !== 'router') continue;
+            const slotId = slots.get(vertex.id);
+            const template = vertex.templateRef ? this.templates?.resolve(vertex.templateRef) : slotId ? this.templates?.resolveSlot(slotId) : undefined;
+            bound.set(vertex.id, {template, binding: {placement, ...(template ? {pinVersion: template.digest} : {})}});
+        }
+        return bound;
     }
 
     private async reject(runId: string, proposedSeq: number, stage: RejectionStage, violations: CheckViolation[]): Promise<SubmissionResult> {
@@ -107,6 +151,31 @@ function resolutionViolations(workflow: WorkflowSubmission, resolved: ResolvedTo
         if (vertex.kind !== 'tool') continue;
         if (!resolved.registry.has(vertex.tool)) {
             violations.push({rule: 'R13', message: `${vertex.id} names ${vertex.tool}, absent from this run's role-scoped tool view`, vertices: [vertex.id]});
+        }
+    }
+    return violations;
+}
+
+/** One router of a submission, with whatever rule it resolved and what freeze decided about it. */
+interface BoundRouter {
+    template?: PublishedRuleTemplate;
+    binding: RouterBinding;
+}
+
+/**
+ * Admits the branches of every bound router at the placement its own router sits at.
+ *
+ * An unbound router contributes nothing: it falls through, and there is no branch to judge. A bound
+ * one is judged in full, so a rule whose *non-matching* branch is illegal here is refused at freeze
+ * rather than lying dormant until its condition holds.
+ */
+function admissionViolations(bound: ReadonlyMap<string, BoundRouter>, resolved: ResolvedToolView, scopes: readonly ScopeSnapshot[], isCounterfactual: boolean): CheckViolation[] {
+    const violations: CheckViolation[] = [];
+    for (const [authorId, router] of bound) {
+        if (!router.template) continue;
+        const outcome = checkFreezeAdmission(router.template.branches, {placement: router.binding.placement, isReadOnlyContext: isCounterfactual, roleToolView: resolved.registry}, scopes);
+        for (const violation of outcome.violations) {
+            violations.push({...violation, message: `${authorId} pins ${router.template.templateRef}: ${violation.message}`});
         }
     }
     return violations;

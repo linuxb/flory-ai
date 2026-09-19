@@ -1,6 +1,6 @@
 import {randomUUID, createHash} from 'node:crypto';
 import {canonicalJson, type EventDraft} from './events.js';
-import type {ProposalScope, ProposalVertex, SubDagProposal, VertexKind} from './check-rules.js';
+import type {ProposalScope, ProposalVertex, RouterPlacement, SubDagProposal, VertexKind} from './check-rules.js';
 import type {ResolvedToolView} from './gateway-client.js';
 import {slotIdOf} from './rule-template.js';
 
@@ -83,6 +83,21 @@ export interface CompiledSubgraph {
     scopeIds: Map<string, string>;
     /** `vertex/created` drafts in topological order. */
     drafts: EventDraft[];
+}
+
+/**
+ * What freeze decided about one router, stamped onto the vertex it creates.
+ *
+ * Both fields are derived at freeze rather than authored: placement from the recorded scope state,
+ * and the pin from resolving the template the router binds. Resolving at evaluation time instead
+ * would make a replay read whatever the registry holds at replay time, so the same log could route
+ * two different ways; pinning the digest makes the decision a function of recorded history, and
+ * makes a rule change an ordinary `pin_version` substitution that leaves topology untouched.
+ */
+export interface RouterBinding {
+    placement: RouterPlacement;
+    /** Content digest of the bound template. Absent on an unbound slot, which falls through. */
+    pinVersion?: string;
 }
 
 /** Suffix that names the router the engine interposes ahead of one planner. */
@@ -198,7 +213,12 @@ function topologicalOrder(vertices: readonly SubmittedVertex[]): SubmittedVertex
  * NOTHING`, so a reused id would produce vertices that pass every check and are silently never
  * enqueued.
  */
-export function compileVertexDrafts(workflow: WorkflowSubmission, resolved: ResolvedToolView, newId: () => string = randomUUID): CompiledSubgraph {
+export function compileVertexDrafts(
+    workflow: WorkflowSubmission,
+    resolved: ResolvedToolView,
+    bindings: ReadonlyMap<string, RouterBinding> = new Map(),
+    newId: () => string = randomUUID,
+): CompiledSubgraph {
     const vertexIds = new Map(workflow.vertices.map((vertex) => [vertex.id, newId()]));
     const scopeIds = new Map((workflow.scopes ?? []).map((scope) => [scope.id, newId()]));
     const contracts = new Map(resolved.document.tools.map((tool) => [tool.tool_id, tool]));
@@ -215,8 +235,13 @@ export function compileVertexDrafts(workflow: WorkflowSubmission, resolved: Reso
             event_type: 'vertex/created',
             vertex_id: vertexIds.get(vertex.id)!,
             parent_refs: parentRefs,
-            payload: vertexPayload(vertex, contracts, resolved, slotIds.get(vertex.id)),
+            payload: vertexPayload(vertex, contracts, resolved, slotIds.get(vertex.id), bindings.get(vertex.id)),
         };
+        // The pin is a column rather than a payload field, and deliberately so: a fork substitutes
+        // pins by column, so a bound rule is substitutable by exactly the mechanism that already
+        // substitutes a model endpoint or a tool contract.
+        const pinVersion = bindings.get(vertex.id)?.pinVersion;
+        if (pinVersion) draft.pin_version = pinVersion;
         // The scope is a column, not only a payload field: the database derives the executor class
         // from (payload, scope_id) as separate arguments, so a scoped vertex whose scope lives only
         // in the payload is routed to the Orchestrator, which then refuses it.
@@ -229,10 +254,14 @@ export function compileVertexDrafts(workflow: WorkflowSubmission, resolved: Reso
 /**
  * Derives the slot coordinate of every interposed router.
  *
+ * Exported because freeze resolves each router's template before compiling: the slot is the
+ * coordinate that resolution looks up, and recomputing it in the caller would be a second copy of
+ * the rule that decides which routers have one.
+ *
  * Only an interposed one gets a slot: a declared router already pins its template, and giving it a
  * coordinate as well would create two ways to answer the same question.
  */
-function routerSlotIds(workflow: WorkflowSubmission): Map<string, string> {
+export function routerSlotIds(workflow: WorkflowSubmission): Map<string, string> {
     const byId = new Map(workflow.vertices.map((vertex) => [vertex.id, vertex]));
     const slots = new Map<string, string>();
     for (const vertex of workflow.vertices) {
@@ -247,7 +276,13 @@ function routerSlotIds(workflow: WorkflowSubmission): Map<string, string> {
     return slots;
 }
 
-function vertexPayload(vertex: SubmittedVertex, contracts: ReadonlyMap<string, ResolvedToolView['document']['tools'][number]>, resolved: ResolvedToolView, slotId?: string): Record<string, unknown> {
+function vertexPayload(
+    vertex: SubmittedVertex,
+    contracts: ReadonlyMap<string, ResolvedToolView['document']['tools'][number]>,
+    resolved: ResolvedToolView,
+    slotId?: string,
+    binding?: RouterBinding,
+): Record<string, unknown> {
     if (vertex.kind === 'planner') return {role: 'planner', ...(vertex.goal ? {goal: vertex.goal} : {})};
     if (vertex.kind === 'confirmation-barrier') return {role: 'confirmation-barrier'};
     if (vertex.kind === 'router') {
@@ -256,6 +291,7 @@ function vertexPayload(vertex: SubmittedVertex, contracts: ReadonlyMap<string, R
             origin: vertex.id.endsWith(INTERPOSED_ROUTER_SUFFIX) ? 'interposed' : 'declared',
             ...(vertex.templateRef ? {template_ref: vertex.templateRef} : {}),
             ...(slotId ? {slot_id: slotId} : {}),
+            ...(binding ? {placement: binding.placement} : {}),
         };
     }
     const contract = contracts.get(vertex.tool);

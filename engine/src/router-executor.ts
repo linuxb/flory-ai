@@ -75,8 +75,17 @@ export class RouterExecutor {
         return {outcome, emitted: result.vertexIds};
     }
 
-    /** Resolves the pinned template, by explicit reference first and then by slot coordinate. */
+    /**
+     * Resolves the template this router decides with.
+     *
+     * `pin_version` is preferred over everything else because it is the only answer that is a
+     * function of recorded history: freeze resolved the rule and wrote its content digest onto the
+     * vertex, so a replay years later decides with the rule that was actually bound, not with
+     * whatever the registry holds now. The reference and the slot remain as fallbacks for a vertex
+     * frozen before pinning existed, and both read a mutable index.
+     */
     private bind(created: StoredEvent): PublishedRuleTemplate | undefined {
+        if (created.pin_version) return this.templates.resolve(created.pin_version);
         const payload = created.payload as {template_ref?: string; slot_id?: string};
         if (payload.template_ref) return this.templates.resolve(payload.template_ref);
         if (payload.slot_id) return this.templates.resolveSlot(payload.slot_id);

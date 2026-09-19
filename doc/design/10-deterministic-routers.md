@@ -120,10 +120,14 @@ A router has no side effects and is never a scope member, so its transaction pla
 
 | Derived placement | Condition | Consequence for an emitted branch |
 |---|---|---|
-| `at_savepoint` | Every ancestor scope is closed. | The branch opens a fresh transaction scope. |
-| `inside_scope(S)` | An ancestor scope `S` is half-open — a try is sealed but unconfirmed. | The branch joins `S`. |
+| `at_savepoint` | Every ancestor scope is closed — committed or cancelled. | The branch opens a fresh transaction scope. |
+| `inside_scope(S)` | An ancestor scope `S` is unclosed: open, or half-open with a try sealed but unconfirmed. | The branch joins `S`. |
+
+Only `committed` and `cancelled` close a scope. `cancelling`, `suspended`, and both pivot states are all still unclosed, and an open scope is no more a savepoint than a half-open one, so a router below any of them derives `inside_scope`. The same predicate decides the placement and enforces R13, which is what keeps a derived placement from ever contradicting the rule that checks it.
 
 The admission rules for each placement are R12 and R13 ([02 §3.4](./02-transaction-model.md#34-deterministic-check-rules)); region E of [the diagram](../diagram/router-admission.html) shows both placements and the two legal join shapes.
+
+Both the derived placement and the resolved template are written onto the router's `vertex/created` event at freeze — the placement in the payload, the template's content digest in the `pin_version` column ([01 §5.3](./01-jit-dag-and-event-log.md#53-pin_version-what-a-substitution-actually-changes)). Resolving the template at evaluation time instead would make a router read whatever the registry holds at replay time, so one recorded log could route two ways on two replays; pinning at freeze makes the decision a function of recorded history, and makes rebinding a slot a `pin_version` substitution that an ordinary fork performs without touching topology.
 
 ### 4.1 Routers as join nodes over parallel branches
 

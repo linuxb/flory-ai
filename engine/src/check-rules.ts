@@ -51,9 +51,10 @@ export interface SubDagProposal {
 /**
  * The closed check-rule vocabulary from transaction design document 02.
  *
- * R12 and R13 are partly implemented: R12's scope-membership clause and R13's tool-resolvability
- * clause hold today, while their placement clauses need the rule templates a router branch is
- * admitted from.
+ * Every code is enforced somewhere. `checkSubDag` covers what is decidable from a proposal alone;
+ * the placement clauses of R12 and R13 need a router's bound template and live in
+ * {@link checkFreezeAdmission}, which the submission path calls over the branches of each template
+ * it resolved.
  */
 export type RuleCode = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R8' | 'R9' | 'R10' | 'R11' | 'R12' | 'R13' | 'R14';
 
@@ -79,6 +80,19 @@ export interface ScopeSnapshot {
 
 /** Where a router sits relative to the transaction structure above it. */
 export type RouterPlacement = 'at_savepoint' | 'inside_scope';
+
+/**
+ * Derives where a router sits from the scopes recorded above it.
+ *
+ * Placement is derived, never declared. A declared one could disagree with the state it claims to
+ * describe, which is exactly the disagreement R13 exists to catch; deriving it from the same
+ * snapshot the rule reads means the two cannot drift apart. `unclosed` here is the same predicate
+ * R13 uses — an open scope is not a savepoint any more than a half-open one is, so either forces
+ * inside_scope, and only a run with nothing left open sits at a savepoint.
+ */
+export function derivePlacement(existingScopes: readonly ScopeSnapshot[]): RouterPlacement {
+    return existingScopes.some((scope) => scope.state === 'open' || scope.state === 'half-open') ? 'inside_scope' : 'at_savepoint';
+}
 
 /** The complete admission result for a proposal. */
 export interface CheckResult {

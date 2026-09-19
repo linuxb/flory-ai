@@ -127,7 +127,7 @@ describe('workflow lowering and compilation', () => {
     });
 
     it('converts the retry multiplier out of thousandths', () => {
-        const compiled = compileVertexDrafts(submission([{id: 'lookup', kind: 'tool', tool: 'record.read'}]), view(), () => '00000000-0000-4000-8000-000000000001');
+        const compiled = compileVertexDrafts(submission([{id: 'lookup', kind: 'tool', tool: 'record.read'}]), view(), new Map(), () => '00000000-0000-4000-8000-000000000001');
         const payload = compiled.drafts[0]!.payload as {retry_policy: {multiplier: number}};
         expect(payload.retry_policy.multiplier).toBe(2.5);
     });

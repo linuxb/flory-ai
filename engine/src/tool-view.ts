@@ -40,6 +40,8 @@ export interface ToolViewTool {
     retry_constraints: ToolViewRetry;
     owner: string;
     allowed_roles: string[];
+    /** Control-flow field paths a router may read, lifted into `vertex/succeeded`. */
+    log_fields?: string[];
 }
 
 /** One complete published tool view. */

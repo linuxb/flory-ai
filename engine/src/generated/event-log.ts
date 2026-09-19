@@ -20,6 +20,7 @@ export const EVENT_TYPES = [
     'txn/cancel',
     'txn/pivot-passed',
     'budget/charged',
+    'rule_template/published',
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 export type FoldMode = 'recorded' | 'model-live' | 'reads-live';

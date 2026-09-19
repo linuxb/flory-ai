@@ -33,6 +33,8 @@ type Contract struct {
 	// planner consume.
 	InputSchema  string
 	OutputSchema string
+	// LogFields names the control-flow paths an executor lifts into vertex/succeeded.
+	LogFields []string
 	// RouteID is the stable logical route, not an address. It is part of the
 	// contract's identity; which instances serve it is not.
 	EffectClass         EffectClass
@@ -131,6 +133,7 @@ func (contract Contract) Build(routeID string) (*gatewayv1.ToolContract, error) 
 		Description:  contract.Description,
 		InputSchema:  contract.InputSchema,
 		OutputSchema: contract.OutputSchema,
+		LogFields:    contract.LogFields,
 		RouteId:      routeID,
 		Adapter:      &gatewayv1.AdapterSpec{Protocol: "grpc", Operation: "flory.gateway.v1.ToolExecutionService/Execute"},
 		Txn: &gatewayv1.TransactionSpec{

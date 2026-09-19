@@ -8,7 +8,7 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 |---|---|---|---|
 | W1 | Formal verification stage S3 | [Doc 06 §12](../design/06-validation-harness.md#12-formal-verification-design) | Trigger-gated: waiting on first production traffic |
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
-| W3 | Rule templates and router evaluation | [Doc 10](../design/10-deterministic-routers.md) | Submission, admission and freeze delivered; templates and evaluation pending |
+| W3 | Router evaluation | [Doc 10](../design/10-deterministic-routers.md) | Contracts, schema and template publication delivered; binding and evaluation pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
 | W5 | Coordinator lock order, claim eligibility, and attempt evidence | [Doc 07 §3.1](../design/07-distributed-transaction-coordinator.md#31-work-scheduler), [Doc 02 §4.4](../design/02-transaction-model.md#44-orphan-try-detection), [Doc 08 §3](../design/08-database-schema.md#3-write-time-guards) | Not started; the code contradicts the documented lock order |
 
@@ -46,36 +46,28 @@ The Coordinator runtime, its PostgreSQL projections, the orphan sweep, and the r
 - S12 passes as a runtime integration scenario, and its row in Doc 06 §6 no longer says pending.
 - TCC confirm after `txn/pivot-passed` stays safe under duplicate delivery.
 
-## W3 — Rule templates and router evaluation
+## W3 — Router evaluation
 
-A submitted workflow is normalized, admitted and frozen today, and a router is a first-class vertex
-in that path: the compiler puts one in front of every planner that has parents, the checker enforces
-R14 and refuses a router that joins a scope, and the event log persists it. What a router still
-cannot do is **decide anything** — there are no rule templates to bind and no evaluator to run them.
+Templates can now be authored, admitted and recorded: `rule_template/published` is in the event
+vocabulary, a tool contract declares its log fields, `router` is a third executor class, the
+configuration stream exists, and Q1–Q6 publication derives the capability envelope and branch
+traits rather than taking them. What a router still cannot do is **run**: nothing binds a template
+to a slot and nothing evaluates one.
 
-**Contract baseline.** A template is Engine-owned, published, immutable and content-addressed. A
-router is Engine-executed, never queued, and never a scope member. Its placement is derived; its
-branches are admitted at freeze against the run's role-scoped tool view and an existing-scope
-snapshot; its failures never reach an LLM replan.
+**Contract baseline.** A router is Engine-executed, never queued, and never a scope member. Its
+placement is derived; its branches are admitted at freeze against the run's role-scoped tool view
+and an existing-scope snapshot; its failures never reach an LLM replan.
 
 **Increments.**
 
-1. Extend the shared contracts: the `rule_template/published` diff event and the tool contract's
-   log-fields schema in [`idl/`](../../idl/), regenerating both language consumers.
-2. Extend `flory_executor_class` with `router` and let `engine_role` append a router's lifecycle
-   events. Note that `work_queue.executor_class` is a STORED generated column, so the function
-   cannot be replaced in place: the column and its index must be dropped and re-added.
-3. Add the Engine-owned configuration stream with its own counter row, and the ownership-trigger
-   case admitting `rule_template/published` from `engine_role` alone.
-4. Implement Engine-side rule-template publication: the management API, Q1–Q6 admission over a
-   role-scoped tool view, derived capability envelope and branch traits, content addressing, and
-   diff events.
-5. Complete R12 and R13 and add `checkFreezeAdmission`: the `existing_scope_snapshot` third
+1. Persist published templates and resolve them: a content-addressed store, binding by
+   `template_ref` and by `SlotId`, and an unbound slot that falls through.
+2. Complete R12 and R13 and add `checkFreezeAdmission`: the `existing_scope_snapshot` third
    argument, placement derivation, and exhaustive per-branch, per-placement admission. Only R12's
    scope-membership clause and R13's tool-resolvability clause exist today.
-6. Implement router evaluation: binding resolution by `template_ref` and by `SlotId`, the closed
-   outcome vocabulary, the strict event trajectory, and fall-through invisibility in `linearize`.
-7. Add scenarios S15–S20 and the router assertions in oracles O2 and O4.
+3. Implement router evaluation: the closed outcome vocabulary, the strict event trajectory, the
+   runtime scope re-check under the lock, and fall-through invisibility in `linearize`.
+4. Add scenarios S15–S20 and the router assertions in oracles O2 and O4.
 
 **Exit criteria.**
 
@@ -84,8 +76,6 @@ snapshot; its failures never reach an LLM replan.
 - A bound non-matching template produces a byte-identical planner prompt hash to an unbound slot.
 - A failed router-emitted branch produces no `replan/boundary` and starts no planner vertex.
 - A fork substituting only a rule-template pin differs from its source in no structural way.
-- `rule_template/published` is appended only by the Engine, only to the configuration stream;
-  `gateway_role` still cannot write the event log at all.
 
 **Exclusions.** Slot-collision rebinding and template migration, a nested-router depth bound, and
 automatic governance actions on match-rate thresholds are the open questions in

@@ -179,3 +179,27 @@ describe('business plane', () => {
         expect(quarantined.every((fact) => fact.is_counterfactual)).toBe(true);
     });
 });
+
+describe('configuration stream', () => {
+    it('records a template publication with no run provenance, and refuses anything else', async () => {
+        const seq = await engine.appendConfigEvent('config:rule-templates', 'rule_template/published', {
+            template_ref: 'rule://dispatch@v1',
+            digest: `sha256:${'d'.repeat(64)}`,
+            diff: [{op: 'add', path: '', value: {}}],
+            author: 'operator@example',
+        });
+        expect(seq).toBeGreaterThan(0);
+
+        const rows = await engine.readBusinessStream('config:rule-templates');
+        const published = rows.find((row) => row.stream_seq === seq)!;
+        expect(published.event_type).toBe('rule_template/published');
+        // A publication is caused by a person, not by an orchestration step.
+        expect(published.run_id).toBeNull();
+        expect(published.run_seq).toBeNull();
+
+        // The stream carries that one event type and nothing else.
+        await expect(engine.appendConfigEvent('config:rule-templates', 'order/placed', {})).rejects.toThrow('carries only rule_template/published');
+        // And that event type belongs to no other stream.
+        await expect(engine.appendConfigEvent(`order:${randomUUID()}`, 'rule_template/published', {})).rejects.toThrow('requires a config: stream');
+    });
+});

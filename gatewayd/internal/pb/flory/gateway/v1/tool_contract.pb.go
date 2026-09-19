@@ -458,7 +458,12 @@ type ToolContract struct {
 	Owner            string            `protobuf:"bytes,14,opt,name=owner,proto3" json:"owner,omitempty"`
 	// Business roles authorised to discover and execute this contract. The
 	// reserved value "*" makes a tool public; an empty list is invalid.
-	AllowedRoles  []string `protobuf:"bytes,15,rep,name=allowed_roles,json=allowedRoles,proto3" json:"allowed_roles,omitempty"`
+	AllowedRoles []string `protobuf:"bytes,15,rep,name=allowed_roles,json=allowedRoles,proto3" json:"allowed_roles,omitempty"`
+	// Control-flow field paths this tool's executor lifts out of its output and
+	// into vertex/succeeded, e.g. "status" or "risk.score". A deterministic
+	// router evaluates against these and nothing else, so a rule can decide a
+	// branch without dereferencing the blob the bulk output streams to.
+	LogFields     []string `protobuf:"bytes,16,rep,name=log_fields,json=logFields,proto3" json:"log_fields,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -598,6 +603,13 @@ func (x *ToolContract) GetAllowedRoles() []string {
 	return nil
 }
 
+func (x *ToolContract) GetLogFields() []string {
+	if x != nil {
+		return x.LogFields
+	}
+	return nil
+}
+
 var File_flory_gateway_v1_tool_contract_proto protoreflect.FileDescriptor
 
 const file_flory_gateway_v1_tool_contract_proto_rawDesc = "" +
@@ -623,7 +635,7 @@ const file_flory_gateway_v1_tool_contract_proto_rawDesc = "" +
 	"\x15_idempotent_retryable\"G\n" +
 	"\vAdapterSpec\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x1c\n" +
-	"\toperation\x18\x02 \x01(\tR\toperation\"\xf2\x04\n" +
+	"\toperation\x18\x02 \x01(\tR\toperation\"\x91\x05\n" +
 	"\fToolContract\x12\x17\n" +
 	"\atool_id\x18\x01 \x01(\tR\x06toolId\x12!\n" +
 	"\ftool_version\x18\x02 \x01(\tR\vtoolVersion\x12 \n" +
@@ -641,7 +653,9 @@ const file_flory_gateway_v1_tool_contract_proto_rawDesc = "" +
 	"timeout_ms\x18\f \x01(\rR\ttimeoutMs\x12O\n" +
 	"\x11retry_constraints\x18\r \x01(\v2\".flory.gateway.v1.RetryConstraintsR\x10retryConstraints\x12\x14\n" +
 	"\x05owner\x18\x0e \x01(\tR\x05owner\x12#\n" +
-	"\rallowed_roles\x18\x0f \x03(\tR\fallowedRoles*\x9b\x01\n" +
+	"\rallowed_roles\x18\x0f \x03(\tR\fallowedRoles\x12\x1d\n" +
+	"\n" +
+	"log_fields\x18\x10 \x03(\tR\tlogFields*\x9b\x01\n" +
 	"\vEffectClass\x12\x1c\n" +
 	"\x18EFFECT_CLASS_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11EFFECT_CLASS_NONE\x10\x01\x12\x1b\n" +

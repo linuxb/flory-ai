@@ -99,4 +99,9 @@ message ToolContract {
     // Business roles authorised to discover and execute this contract. The
     // reserved value "*" makes a tool public; an empty list is invalid.
     repeated string allowed_roles = 15;
+    // Control-flow field paths this tool's executor lifts out of its output and
+    // into vertex/succeeded, e.g. "status" or "risk.score". A deterministic
+    // router evaluates against these and nothing else, so a rule can decide a
+    // branch without dereferencing the blob the bulk output streams to.
+    repeated string log_fields = 16;
 }

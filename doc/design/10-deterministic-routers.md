@@ -71,7 +71,7 @@ A router's authority is a strict subset of a planner's: it may emit only sub-DAG
 
 A rule template is strictly declarative: an ordered list of `(condition, sub_dag_template)` pairs.
 
-- A **condition** is a pure boolean predicate over upstream tool-output summary fields, for example `tool-a.output.risk_score < 30`. It dereferences no blob, reads no clock, and performs no network I/O.
+- A **condition** is a pure boolean predicate over upstream tool-output summary fields, for example `order.lookup.output.risk_score < 30`. It dereferences no blob, reads no clock, and performs no network I/O. The prefix names a **tool type**, not a vertex: a template is published before it is bound to any graph, so the only upstream name it can carry is one the catalogue also knows — which is the same key a slot identity is built from.
 - A **branch sub-DAG** is instantiated on match. It may contain tool callers, confirmation barriers, nested routers, and downstream planners.
 
 Conditions are totally ordered and evaluated with first-match semantics. A template is a published, immutable, content-addressed contract, and it is **Engine-owned**: a rule template is planning structure — the same authority that admits a planner's proposal admits a router's branches — so the Engine publishes it, admits it under Q1–Q6 (§3.4), and records every mutation. `gatewayd` publishes the tool view those branches are resolved and admitted against, and nothing else about a template ([09 §1](./09-tool-registry-gateway.md#1-purpose-and-boundary)).
@@ -103,7 +103,7 @@ A template is admitted before it can be bound to any router. The gate is Engine-
 
 | Code | Rule |
 |---|---|
-| Q1 | Every condition references only **summary fields** of upstream payloads, as named by the producing tool's log-fields schema ([09 §3](./09-tool-registry-gateway.md#3-registration-and-the-tool-view-contract)). No blob dereference, no clock read, no network I/O. |
+| Q1 | Every condition references only **summary fields** of upstream payloads, as named by the producing tool's log-fields schema ([09 §3](./09-tool-registry-gateway.md#3-registration-and-the-tool-view-contract)). No blob dereference, no clock read, no network I/O. A path is resolved against the log fields rather than the output schema, and the two are not interchangeable: the output schema describes the payload that streams to blob storage, so accepting a path because it appears there would admit a rule that can only be evaluated by dereferencing a blob. A tool that declares no log fields is not silently trusted — none of its fields can be referenced. |
 | Q2 | Every tool referenced by every branch resolves inside a published tool view with a known `effect_class`. |
 | Q3 | Template metadata is **derived at publication, never declared**: a template-level capability envelope (`max_effect_class`, `can_open_scope`, `can_provide_pivot`, `is_pure_read_only`) for constant-time catalogue pruning, and per-branch morphological traits (`opens_scope`, `has_pivot`, `max_effect`) preserved for freeze-time admission. The envelope summarizes; the traits are what keep branch heterogeneity from being erased by that summary. |
 | Q4 | Each branch sub-DAG independently passes `checkSubDag` in isolation. |

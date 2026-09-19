@@ -45,9 +45,12 @@ export interface StoredBusinessEvent {
     /** Per-entity position: strict, contiguous, and rollback-safe across every run of the entity. */
     stream_seq: number;
     global_seq: number;
-    /** The orchestration step that produced this fact. */
-    run_id: string;
-    run_seq: number;
+    /**
+     * The orchestration step that produced this fact. Null only on the configuration stream, whose
+     * rows are caused by a person publishing a template rather than by a run.
+     */
+    run_id: string | null;
+    run_seq: number | null;
     event_type: string;
     /** True for a fork's quarantined writes; production reads exclude them. */
     is_counterfactual: boolean;

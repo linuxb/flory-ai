@@ -64,6 +64,9 @@ type Tool struct {
 	Retry             Retry           `json:"retry_constraints"`
 	Owner             string          `json:"owner"`
 	AllowedRoles      []string        `json:"allowed_roles,omitempty"`
+	// Control-flow fields a router may read. Optional, so a contract that declares
+	// none encodes exactly as before and keeps its digest.
+	LogFields []string `json:"log_fields,omitempty"`
 }
 
 // Document is one complete published tool view.
@@ -164,6 +167,7 @@ func FromProto(contract *gatewayv1.ToolContract) (Tool, error) {
 		Description:  contract.GetDescription(),
 		InputSchema:  inputSchema,
 		OutputSchema: outputSchema,
+		LogFields:    contract.GetLogFields(),
 		RouteID:      contract.GetRouteId(),
 		Adapter:      Adapter{Protocol: contract.GetAdapter().GetProtocol(), Operation: contract.GetAdapter().GetOperation()},
 		Txn: Transaction{

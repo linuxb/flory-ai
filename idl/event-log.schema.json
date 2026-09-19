@@ -40,7 +40,8 @@
                                 "txn/confirm",
                                 "txn/cancel",
                                 "txn/pivot-passed",
-                                "budget/charged"
+                                "budget/charged",
+                                "rule_template/published"
                             ]
                         }
                     }
@@ -56,6 +57,7 @@
             "if": {"properties": {"event_type": {"const": "subgraph/proposed"}}, "required": ["event_type"]},
             "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphProposedPayload"}}}
         },
+        {"if": {"properties": {"event_type": {"const": "rule_template/published"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/ruleTemplatePublishedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "subgraph/frozen"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphFrozenPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "subgraph/rejected"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphRejectedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "vertex/created"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/vertexCreatedPayload"}}}},
@@ -139,6 +141,43 @@
                 "cancel_tool": {"type": "string", "minLength": 1},
                 "compensate_tool": {"type": "string", "minLength": 1},
                 "status_tool": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+        },
+        "ruleTemplatePublishedPayload": {
+            "type": "object",
+            "required": ["template_ref", "digest", "diff", "author"],
+            "properties": {
+                "template_ref": {"type": "string", "minLength": 1},
+                "digest": {"$ref": "#/$defs/toolViewDigest"},
+                "predecessor_digest": {"$ref": "#/$defs/toolViewDigest"},
+                "diff": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["op", "path"],
+                        "properties": {
+                            "op": {"enum": ["add", "remove", "replace", "move", "copy", "test"]},
+                            "path": {"type": "string"},
+                            "from": {"type": "string"},
+                            "value": {}
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "author": {"type": "string", "minLength": 1},
+                "slot_id": {"type": "string", "minLength": 1},
+                "capability": {
+                    "type": "object",
+                    "required": ["max_effect_class", "can_open_scope", "can_provide_pivot", "is_pure_read_only"],
+                    "properties": {
+                        "max_effect_class": {"enum": ["none", "bufferable", "reversible", "irreversible"]},
+                        "can_open_scope": {"type": "boolean"},
+                        "can_provide_pivot": {"type": "boolean"},
+                        "is_pure_read_only": {"type": "boolean"}
+                    },
+                    "additionalProperties": false
+                }
             },
             "additionalProperties": false
         },

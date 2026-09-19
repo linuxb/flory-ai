@@ -114,8 +114,8 @@ function rowToBusinessEvent(row: Record<string, unknown>): StoredBusinessEvent {
         stream_id: String(row.stream_id),
         stream_seq: Number(row.stream_seq),
         global_seq: Number(row.global_seq),
-        run_id: String(row.run_id),
-        run_seq: Number(row.run_seq),
+        run_id: row.run_id === null ? null : String(row.run_id),
+        run_seq: row.run_seq === null ? null : Number(row.run_seq),
         event_type: String(row.event_type),
         is_counterfactual: Boolean(row.is_counterfactual),
         payload: (row.payload ?? {}) as Record<string, unknown>,
@@ -317,6 +317,19 @@ export class EventStore {
             [streamId, options.includeCounterfactual ?? false, options.throughStreamSeq ?? null],
         );
         return result.rows.map(rowToBusinessEvent);
+    }
+
+    /**
+     * Records one rule-template mutation in the configuration stream.
+     *
+     * A publication has no causing orchestration step, so it takes neither a run nor the
+     * dual-allocation path: it is the one data-plane row with no `(run_id, run_seq)` provenance,
+     * and the database constrains that exception rather than merely allowing it.
+     */
+    async appendConfigEvent(streamId: string, eventType: string, payload: Record<string, unknown>): Promise<number> {
+        this.requireEngine();
+        const result = await this.pool.query<{append_config_event: string}>('SELECT append_config_event($1, $2, $3::jsonb) AS append_config_event', [streamId, eventType, JSON.stringify(payload)]);
+        return Number(result.rows[0]!.append_config_event);
     }
 
     private async appendWith(client: PoolClient, runId: string, events: EventDraft[]): Promise<number[]> {

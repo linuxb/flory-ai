@@ -21,6 +21,7 @@ var knownEvents = map[string]struct{}{
 	"run/start": {}, "run/end": {}, "run/end-seed": {}, "subgraph/proposed": {}, "subgraph/frozen": {}, "subgraph/rejected": {}, "subgraph/shadowed": {},
 	"replan/boundary": {}, "fork/created": {}, "vertex/created": {}, "vertex/started": {}, "vertex/succeeded": {}, "vertex/failed": {}, "vertex/retried": {},
 	"txn/scope": {}, "txn/try": {}, "txn/confirm": {}, "txn/cancel": {}, "txn/pivot-passed": {}, "budget/charged": {},
+	"rule_template/published": {},
 }
 
 // Validate checks event ownership-independent S2 trace properties I4-I7 and fail-closed reads.

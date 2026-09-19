@@ -8,11 +8,10 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 |---|---|---|---|
 | W1 | Formal verification stage S3 | [Doc 06 §12](../design/06-validation-harness.md#12-formal-verification-design) | Trigger-gated: waiting on first production traffic |
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
-| W3 | Router scenarios | [Doc 10](../design/10-deterministic-routers.md) | Freeze-time admission delivered; scenario coverage pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
 | W5 | Coordinator lock order, claim eligibility, and attempt evidence | [Doc 07 §3.1](../design/07-distributed-transaction-coordinator.md#31-work-scheduler), [Doc 02 §4.4](../design/02-transaction-model.md#44-orphan-try-detection), [Doc 08 §3](../design/08-database-schema.md#3-write-time-guards) | Not started; the code contradicts the documented lock order |
 
-W3's remaining work is confined to the validation harness and W4's stays in the Engine apart from one table; W5 is the only stream that rewrites the Coordinator's claim path, so it should not run concurrently with either.
+W4 stays in the Engine apart from one table; W5 is the only stream that rewrites the Coordinator's claim path, so the two should not run concurrently.
 
 ---
 
@@ -46,30 +45,11 @@ The Coordinator runtime, its PostgreSQL projections, the orphan sweep, and the r
 - S12 passes as a runtime integration scenario, and its row in Doc 06 §6 no longer says pending.
 - TCC confirm after `txn/pivot-passed` stays safe under duplicate delivery.
 
-## W3 — Router scenarios
-
-A router now decides, and freeze now admits what it may decide. Templates are published under
-Q1–Q6, resolved at freeze by reference or slot coordinate, pinned onto the router as a
-`pin_version`, and admitted branch by branch at the placement derived from the run's scope state —
-so a branch that is illegal where the router sits is refused before any tool runs, whether or not
-its condition would ever have held. What remains is the scenario coverage that holds all of it.
-
-**Increment.**
-
-Add scenarios S15–S20 and the router assertions in oracles O2 and O4. Doc 06's scenario format does
-not exist in code — `runFixture` is a stub with no callers — so this is partly about building the
-harness the rows assume.
-
-**Exit criteria.**
-
-- A fork substituting only a rule-template pin differs from its source in no structural way.
-- Oracle O2 asserts the router trajectory and the absence of a deterministic replan on real logs.
-
-**Exclusions.** Slot-collision rebinding and template migration, a nested-router depth bound, and
-automatic governance actions on match-rate thresholds are the open questions in
-[Doc 10 §13](../design/10-deterministic-routers.md#13-open-questions). Branch inputs are also
-deferred: a template branch names tools but binds no parameters, so an emitted vertex carries an
-empty input until the template language grows a way to reference upstream output.
+**Also waiting on the recovery loop.** Scenario S16 asserts that a failure inside a router-emitted
+branch never reaches a planner. Its oracle, `O2.no_deterministic_replan`, is delivered and has a
+negative control, but no engine code appends `replan/boundary` yet, so the assertion currently
+holds vacuously over a constructed failure rather than over a recovery loop exercising restraint.
+It becomes a real scenario the day recovery is implemented, and the oracle is what will hold it.
 
 ## W4 — Business-plane consumers
 

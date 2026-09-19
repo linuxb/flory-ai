@@ -7,19 +7,20 @@ import {loadToolRegistry, type ToolViewDocument, type ToolViewTool} from '../../
 import {WorkflowSubmitter} from '../../src/submission.js';
 import {RuleTemplateStore, slotIdOf, type RuleTemplateDraft} from '../../src/rule-template.js';
 import {RouterExecutor} from '../../src/router-executor.js';
-import {routerAdmission, routerInvisibility, rulePinSubstitution} from '../../src/harness/oracles.js';
+import {noDeterministicReplan, routerAdmission, routerInvisibility, rulePinSubstitution} from '../../src/harness/oracles.js';
 import {surface} from '../../src/projection.js';
 import type {StoredEvent} from '../../src/events.js';
 import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../../src/gateway-client.js';
 import type {WorkflowSubmission} from '../../src/workflow.js';
 
 /**
- * Scenario rows S15, S15b, S17 and S20 of the validation harness matrix (doc 06 section 6).
+ * Scenario rows S15, S15b, S16, S17, S18 and S20 of the harness matrix (doc 06 section 6).
  *
  * Each row exists to kill one accident, and each is written so that removing the discipline it
- * names makes it fail: S15 and S15b that freeze admits branches rather than the runtime
- * discovering them, S17 that a fall-through router is invisible in a prompt, S20 that a rule is a
- * pin and substituting it is not a structural edit.
+ * names makes it fail: S15, S15b and S18 that freeze admits branches rather than the runtime
+ * discovering them, S16 that a deterministic failure never reaches a model, S17 that a
+ * fall-through router is invisible in a prompt, S20 that a rule is a pin and substituting it is
+ * not a structural edit.
  */
 
 const engine = new EventStore({connectionString: engineDatabaseUrl, actor: 'engine'});
@@ -288,3 +289,84 @@ describe('S20 — rule-template counterfactual', () => {
 function pinOf(events: StoredEvent[], vertexId: string): string | null {
     return events.find((event) => event.event_type === 'vertex/created' && event.vertex_id === vertexId)!.pin_version;
 }
+
+describe('S16 — deterministic branch failure', () => {
+    it('reaches no planner, and the oracle that says so can fail', async () => {
+        const type = `returns-s16-${randomUUID().slice(0, 8)}`;
+        await templates.publish(
+            {
+                templateRef: `rule://track-${randomUUID()}@v1`,
+                author: 'operator@example',
+                slotId: slotIdOf(type, ['record.read'], 'decide'),
+                branches: [trackingBranch('record.read.output.status == "shipped"')],
+            },
+            fullView,
+        );
+        const {run, routerId, lookupId, plannerId} = await routedRun(type);
+        await completeLookup(run, lookupId, 'shipped');
+        const evaluation = await routers.evaluate(run, routerId);
+        const emitted = evaluation.emitted!.get('track')!;
+
+        // The branch the router chose fails permanently. The outcome belongs to the Coordinator.
+        await engine.appendEvents(run, [{event_type: 'vertex/started', vertex_id: emitted, payload: {attempt: 1}}]);
+        await engine.appendEvents(run, [{event_type: 'vertex/failed', vertex_id: emitted, payload: {error_class: 'permanent', reason: 'refused'}}]);
+        expect(noDeterministicReplan(await engine.readStream(run))).toMatchObject({passed: true});
+
+        // Negative control: had the engine answered that failure by calling the planner, the oracle
+        // must say so. An oracle that cannot fail is decoration.
+        await engine.appendEvents(run, [{event_type: 'vertex/started', vertex_id: plannerId, payload: {attempt: 1}}]);
+        expect(noDeterministicReplan(await engine.readStream(run))).toMatchObject({passed: false});
+    });
+});
+
+describe('S18 — router joining two distinct open scopes', () => {
+    /** Opens `count` independent scopes in a run, none of which is closed. */
+    async function openScopes(run: string, count: number): Promise<void> {
+        for (let index = 0; index < count; index += 1) {
+            await coordinator.appendEvents(run, [{event_type: 'txn/scope', scope_id: randomUUID(), payload: {state: 'open'}}]);
+        }
+    }
+
+    it('refuses a template that is not purely read-only, and admits one that is', async () => {
+        const effectful = `returns-s18-effect-${randomUUID().slice(0, 8)}`;
+        await templates.publish(
+            {
+                templateRef: `rule://hold-${randomUUID()}@v1`,
+                author: 'operator@example',
+                slotId: slotIdOf(effectful, ['record.read'], 'decide'),
+                branches: [
+                    {
+                        condition: 'record.read.output.status == "held"',
+                        subDag: {vertices: [{id: 'hold', kind: 'tool', tool: 'record.hold', parents: [], scopeId: 'hold-scope'}], scopes: [{id: 'hold-scope', members: ['hold']}]},
+                    },
+                ],
+            },
+            fullView,
+        );
+        const effectRun = await startRun();
+        await openScopes(effectRun, 2);
+        const refused = await submitter.submit(effectRun, workflow(effectful));
+
+        // Flory has no runtime scope merge, so a router must never be the place where two
+        // independent transactions silently fuse.
+        expect(refused.status).toBe('rejected');
+        if (refused.status !== 'rejected') throw new Error('unreachable');
+        expect(refused.violations.some((violation) => violation.rule === 'R12')).toBe(true);
+        expect(routerAdmission(await engine.readStream(effectRun))).toMatchObject({passed: true});
+
+        // The same join is admitted for a template that only reads: it binds to neither scope.
+        const readOnly = `returns-s18-read-${randomUUID().slice(0, 8)}`;
+        await templates.publish(
+            {
+                templateRef: `rule://track-${randomUUID()}@v1`,
+                author: 'operator@example',
+                slotId: slotIdOf(readOnly, ['record.read'], 'decide'),
+                branches: [trackingBranch('record.read.output.status == "shipped"')],
+            },
+            fullView,
+        );
+        const readRun = await startRun();
+        await openScopes(readRun, 2);
+        expect((await submitter.submit(readRun, workflow(readOnly))).status).toBe('accepted');
+    });
+});

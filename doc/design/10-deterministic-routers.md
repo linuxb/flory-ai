@@ -137,6 +137,8 @@ When a router joins parallel branches, freeze admission evaluates its pinned tem
 
 **Disjoint scope isolation.** If parallel branches belong to distinct, uncoordinated scopes, they must commit or close before the join whenever the router's template can emit a pivot, because one pivot cannot bind two independent scopes. Joining distinct open scopes is admitted only when the template is purely read-only — every branch carries `effect_class: none` — where the router reads outputs without binding to either scope.
 
+**A branch that joins `S` cannot yet be written.** Publication admission runs `checkSubDag` over each branch in isolation (Q4), and R10 requires every side-effecting vertex to name a scope. A template is published before it is bound to any graph, so the only scope it can name is one it declares itself — which makes the branch scope-opening, and therefore inadmissible at an `inside_scope` placement. Every side-effecting template is consequently refused at an `inside_scope` placement today, whether one ancestor scope is unclosed or several. Expressing a join requires a way for a branch to declare that it inherits its placement's scope rather than opening one, which is deferred with the other template-language gaps in §13.
+
 Flory defines **no runtime scope-merge protocol**. Atomicity across parallel branches is declared at freeze time or it does not exist.
 
 ### 4.2 Scope widening
@@ -351,3 +353,5 @@ A router adds three event rows per thought junction (`vertex/created`, `vertex/s
 - Slot-collision policy when two templates are registered for one `SlotId` across workflow types that hash identically: currently a publication-time refusal, but no rebinding or migration path is specified.
 - Whether nested routers should bound their own depth, and where that bound belongs — registration admission or freeze admission.
 - Match-rate thresholds that should trigger an automatic governance review rather than a dashboard reading (§10).
+- How a branch declares that it joins its placement's scope instead of opening one (§4.1). Without it no side-effecting template is admissible at an `inside_scope` placement, so the two legal join shapes reduce in practice to the read-only one.
+- Branch inputs. A branch names tools but binds no parameters, so an emitted vertex carries an empty input until the template language gains a way to reference upstream output.

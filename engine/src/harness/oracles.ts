@@ -111,3 +111,39 @@ function shapeOf(events: StoredEvent[]): string {
         })),
     );
 }
+
+/**
+ * O2.no_deterministic_replan: a failure inside a router-emitted branch never calls a model.
+ *
+ * A branch emitted by a router is told apart from the planner the router feeds by when it was
+ * created, not by its shape: both hang off the router, but the planner is frozen in the same
+ * subgraph as the router, before the router has ever run, while an emitted branch can only be
+ * created after the router started. The router's own `vertex/started` is therefore the dividing
+ * line, and not its `vertex/succeeded`: a router emits its branch first and reports success after,
+ * so success is already too late to separate the two.
+ * Once a deterministic branch fails, the transaction outcome belongs to the Coordinator; handing a
+ * policy failure to a model would let it invent a way around a rule that was meant to bind, so a
+ * planner starting anywhere after that failure is itself the defect ([03 §2.5](../../doc/design/03-replan-and-recovery.md)).
+ */
+export function noDeterministicReplan(events: StoredEvent[]): OracleResult {
+    const name = 'O2.no_deterministic_replan';
+    const created = events.filter((event) => event.event_type === 'vertex/created' && event.vertex_id);
+    const routers = new Set(created.filter((event) => (event.payload as {role?: string}).role === 'router').map((event) => event.vertex_id!));
+    const startedAt = new Map(events.filter((event) => event.event_type === 'vertex/started' && event.vertex_id && routers.has(event.vertex_id)).map((event) => [event.vertex_id!, event.run_seq]));
+
+    // A vertex is on a deterministic branch when a running router emitted it, or when it descends
+    // from one that was.
+    const deterministic = new Set<string>();
+    for (const event of created) {
+        const emittedBy = event.parent_refs.some((parent) => (startedAt.get(parent) ?? Infinity) < event.run_seq);
+        if (emittedBy || event.parent_refs.some((parent) => deterministic.has(parent))) deterministic.add(event.vertex_id!);
+    }
+
+    const failure = events.find((event) => event.event_type === 'vertex/failed' && event.vertex_id && deterministic.has(event.vertex_id));
+    if (!failure) return {name, passed: true};
+    const replan = events.find((event) => event.event_type === 'replan/boundary' && event.run_seq > failure.run_seq);
+    if (replan) return {name, passed: false, detail: `replan/boundary at run_seq ${replan.run_seq} follows a deterministic branch failure at ${failure.run_seq}`};
+    const planners = new Set(created.filter((event) => (event.payload as {role?: string}).role === 'planner').map((event) => event.vertex_id!));
+    const called = events.find((event) => event.event_type === 'vertex/started' && event.run_seq > failure.run_seq && event.vertex_id && planners.has(event.vertex_id));
+    return called ? {name, passed: false, detail: `planner ${called.vertex_id} started after a deterministic branch failure at run_seq ${failure.run_seq}`} : {name, passed: true};
+}

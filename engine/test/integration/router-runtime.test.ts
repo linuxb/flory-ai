@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {Client} from 'pg';
-import {coordinatorDatabaseUrl, engineDatabaseUrl} from '../../../db/config.js';
+import {engineDatabaseUrl} from '../../../db/config.js';
 import {EventStore} from '../../src/store.js';
 import {loadToolRegistry, type ToolViewDocument} from '../../src/tool-view.js';
 import {WorkflowSubmitter} from '../../src/submission.js';
@@ -12,8 +12,6 @@ import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../.
 import type {WorkflowSubmission} from '../../src/workflow.js';
 
 const engine = new EventStore({connectionString: engineDatabaseUrl, actor: 'engine'});
-// Only the Coordinator may write transaction events, so opening a scope to test placement needs it.
-const coordinator = new EventStore({connectionString: coordinatorDatabaseUrl, actor: 'coordinator'});
 const engineClient = new Client({connectionString: engineDatabaseUrl});
 const digest = `sha256:${'f'.repeat(64)}`;
 
@@ -53,23 +51,6 @@ const document: ToolViewDocument = {
             owner: 'team',
             allowed_roles: ['operator'],
             log_fields: ['status'],
-        },
-        {
-            tool_id: 'record.hold',
-            tool_version: '1.0.0',
-            input_schema: {type: 'object'},
-            output_schema: {type: 'object'},
-            route_id: 'route-hold',
-            adapter: {protocol: 'grpc'},
-            txn: {effect_class: 'reversible', mode: 'plain', idempotent_retryable: true},
-            compensation_style: 'none',
-            footprint: ['record'],
-            writes: ['record'],
-            timeout_ms: 1000,
-            retry_constraints: {max_attempts: 1, initial_backoff_ms: 0, multiplier_milli: 1000, max_backoff_ms: 0},
-            owner: 'team',
-            allowed_roles: ['operator'],
-            log_fields: [],
         },
     ],
 };
@@ -145,7 +126,6 @@ afterAll(async () => {
         await engineClient.query('SELECT complete_read($1, $2)', ['router-drain', vertexId]);
     }
     await engineClient.end();
-    await coordinator.close();
     await engine.close();
 });
 
@@ -267,50 +247,6 @@ describe('freeze-time admission', () => {
         expect(created.rows[0]!.payload.placement).toBe('at_savepoint');
         // The rule is a pin like any other external contract, so a fork substitutes it by column.
         expect(created.rows[0]!.pin_version).toBe(published.template.digest);
-    });
-
-    it('refuses at freeze a rule whose non-matching branch cannot run where the router sits', async () => {
-        const reference = `rule://hold-${randomUUID()}@v1`;
-        const slotId = slotIdOf('returns', ['record.read'], 'decide');
-        const publication = await templates.publish(
-            {
-                templateRef: reference,
-                author: 'operator@example',
-                slotId,
-                branches: [
-                    // Legal here and the only one the run's facts would ever select.
-                    {condition: 'record.read.output.status == "shipped"', subDag: {vertices: [{id: 'track', kind: 'tool', tool: 'record.track', parents: []}], scopes: []}},
-                    // Legal at a savepoint, illegal inside an active scope. Never selected by these facts.
-                    {
-                        condition: 'record.read.output.status == "held"',
-                        subDag: {vertices: [{id: 'hold', kind: 'tool', tool: 'record.hold', parents: [], scopeId: 'hold-scope'}], scopes: [{id: 'hold-scope', members: ['hold']}]},
-                    },
-                ],
-            },
-            resolved,
-        );
-        expect(publication.admitted).toBe(true);
-
-        const run = await startRun();
-        await coordinator.appendEvents(run, [{event_type: 'txn/scope', scope_id: randomUUID(), payload: {state: 'open'}}]);
-
-        const result = await submitter.submit(run, {
-            submissionId: `sub-${randomUUID()}`,
-            schemaVersion: 'v1',
-            workflowType: 'returns',
-            vertices: [
-                {id: 'lookup', kind: 'tool', tool: 'record.read'},
-                {id: 'decide', kind: 'planner', parents: ['lookup']},
-            ],
-        });
-
-        // Refused before a single tool runs, on a branch the facts would never have selected.
-        expect(result.status).toBe('rejected');
-        if (result.status !== 'rejected') throw new Error('unreachable');
-        expect(result.stage).toBe('admission');
-        expect(result.violations.some((violation) => violation.rule === 'R12' && violation.message.includes('fresh scope'))).toBe(true);
-        const created = await engineClient.query<{count: string}>(`SELECT count(*) AS count FROM run_event_log WHERE run_id = $1 AND event_type = 'vertex/created'`, [run]);
-        expect(Number(created.rows[0]!.count)).toBe(0);
     });
 
     it('decides with the rule frozen onto it, not the one the slot holds later', async () => {

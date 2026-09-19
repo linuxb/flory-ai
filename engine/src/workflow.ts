@@ -1,0 +1,259 @@
+import {randomUUID, createHash} from 'node:crypto';
+import {canonicalJson, type EventDraft} from './events.js';
+import type {ProposalScope, ProposalVertex, SubDagProposal, VertexKind} from './check-rules.js';
+import type {ResolvedToolView} from './gateway-client.js';
+
+/** Fields every submitted vertex carries, whatever its role. */
+export interface SubmittedVertexBase {
+    /** Author-chosen and human-readable. Never a UUID; the compiler allocates those. */
+    id: string;
+    parents?: string[];
+    /** Author-chosen scope name, resolved to a UUID at compile time. */
+    scope?: string;
+}
+
+/** A submitted tool call. */
+export interface SubmittedToolVertex extends SubmittedVertexBase {
+    kind: 'tool';
+    tool: string;
+    input?: Record<string, unknown>;
+    idempotencyKey?: string;
+    confirmedOutput?: boolean;
+}
+
+/** A submitted decision point that calls a model. */
+export interface SubmittedPlannerVertex extends SubmittedVertexBase {
+    kind: 'planner';
+    goal?: string;
+}
+
+/** A submitted deterministic branch point. */
+export interface SubmittedRouterVertex extends SubmittedVertexBase {
+    kind: 'router';
+    /** Pins a published rule template. Absent means an unbound slot, which falls through. */
+    templateRef?: string;
+}
+
+/** A submitted barrier that waits for every required try to seal. */
+export interface SubmittedBarrierVertex extends SubmittedVertexBase {
+    kind: 'confirmation-barrier';
+}
+
+/** One vertex of a submitted workflow. */
+export type SubmittedVertex = SubmittedToolVertex | SubmittedPlannerVertex | SubmittedRouterVertex | SubmittedBarrierVertex;
+
+/** A workflow as its author wrote it, before the engine normalizes or compiles anything. */
+export interface WorkflowSubmission {
+    /** Caller-chosen idempotency key for this submission. */
+    submissionId: string;
+    schemaVersion: 'v1';
+    vertices: SubmittedVertex[];
+    scopes?: Array<{id: string; members: string[]}>;
+}
+
+/** A submission after the engine has inserted every router R14 requires. */
+export interface NormalizedWorkflow {
+    workflow: WorkflowSubmission;
+    /** Author ids of the routers the engine inserted, for the proposal record. */
+    interposed: string[];
+}
+
+/** The compiled form of one submission: the symbol table plus the events that persist it. */
+export interface CompiledSubgraph {
+    /** Author id to allocated vertex UUID. */
+    vertexIds: Map<string, string>;
+    /** Author scope name to allocated scope UUID. */
+    scopeIds: Map<string, string>;
+    /** `vertex/created` drafts in topological order. */
+    drafts: EventDraft[];
+}
+
+/** Suffix that names the router the engine interposes ahead of one planner. */
+export const INTERPOSED_ROUTER_SUFFIX = '#router';
+
+/**
+ * Reports whether a planner still needs a router interposed ahead of it.
+ *
+ * The invariant the compiler produces is stronger than R14's prohibition and much simpler to reason
+ * about: **every planner that has parents reaches them through exactly one router**. Rather than
+ * classifying each parent, all of them move behind one junction, which is also what a slot identity
+ * assumes — one planner, one junction, keyed by the set of what flows into it.
+ *
+ * A parentless planner is left alone: it begins the run, so there is no incoming edge to intercept
+ * and nothing upstream for a rule to read.
+ */
+function needsInterposedRouter(parents: readonly string[], byId: ReadonlyMap<string, SubmittedVertex>): boolean {
+    if (!parents.length) return false;
+    // Already canonical, which is what makes the pass idempotent.
+    return !(parents.length === 1 && byId.get(parents[0]!)!.kind === 'router');
+}
+
+/**
+ * Puts a router in front of every planner that has parents.
+ *
+ * This is deliberately stronger than R14, which only prohibits a tool caller from handing control
+ * straight to a planner. Guaranteeing the junction per planner rather than per edge means business
+ * policy has one interception point wherever a decision is made, and it removes the question of
+ * what each parent role should do.
+ *
+ * Idempotent by construction: after one pass every such planner has exactly one parent and that
+ * parent is a router, so a second pass finds nothing to do. That is what lets the invariant be
+ * asserted as a post-condition rather than trusted.
+ */
+export function normalizeWorkflow(submission: WorkflowSubmission): NormalizedWorkflow {
+    const byId = new Map(submission.vertices.map((vertex) => [vertex.id, vertex]));
+    for (const vertex of submission.vertices) {
+        for (const parent of vertex.parents ?? []) {
+            if (!byId.has(parent)) throw new Error(`workflow names unknown parent ${parent} for ${vertex.id}`);
+        }
+    }
+    const vertices: SubmittedVertex[] = [];
+    const interposed: string[] = [];
+    for (const vertex of submission.vertices) {
+        if (vertex.kind !== 'planner') {
+            vertices.push(vertex);
+            continue;
+        }
+        const parents = vertex.parents ?? [];
+        if (!needsInterposedRouter(parents, byId)) {
+            vertices.push(vertex);
+            continue;
+        }
+        const routerId = `${vertex.id}${INTERPOSED_ROUTER_SUFFIX}`;
+        // A deterministic id, not a random one: replay and pin-substitution forks both require the
+        // frozen graph to be reproducible, and a random id would make a no-substitution fork diverge
+        // structurally from its source.
+        if (byId.has(routerId)) throw new Error(`cannot interpose a router for ${vertex.id}: ${routerId} already exists`);
+        vertices.push({id: routerId, kind: 'router', parents: [...parents]});
+        vertices.push({...vertex, parents: [routerId]});
+        interposed.push(routerId);
+    }
+    return {workflow: {...submission, vertices}, interposed};
+}
+
+/**
+ * Lowers a submission into the structure the checker admits.
+ *
+ * Deliberately lossy and one-way. `checkSubDag` accepts only a proposal and an immutable tool view
+ * and performs no I/O, so everything the checker must not read — tool input, the template pin, the
+ * planner's goal — is dropped here. Nothing ever lifts a proposal back into a submission.
+ */
+export function lowerToProposal(workflow: WorkflowSubmission): SubDagProposal {
+    const vertices: ProposalVertex[] = workflow.vertices.map((vertex) => ({
+        id: vertex.id,
+        parents: [...(vertex.parents ?? [])],
+        kind: vertex.kind as VertexKind,
+        ...(vertex.kind === 'tool' ? {tool: vertex.tool} : {}),
+        ...(vertex.scope ? {scopeId: vertex.scope} : {}),
+        ...(vertex.kind === 'tool' && vertex.confirmedOutput ? {confirmedOutput: true} : {}),
+        ...(vertex.kind === 'router' && vertex.templateRef ? {templateRef: vertex.templateRef} : {}),
+    }));
+    const scopes: ProposalScope[] = (workflow.scopes ?? []).map((scope) => ({id: scope.id, members: [...scope.members]}));
+    return {vertices, scopes};
+}
+
+/** Orders vertices so every parent is emitted before its children. */
+function topologicalOrder(vertices: readonly SubmittedVertex[]): SubmittedVertex[] {
+    const byId = new Map(vertices.map((vertex) => [vertex.id, vertex]));
+    const ordered: SubmittedVertex[] = [];
+    const placed = new Set<string>();
+    const visiting = new Set<string>();
+    const visit = (id: string): void => {
+        if (placed.has(id)) return;
+        if (visiting.has(id)) throw new Error(`workflow contains a cycle at ${id}`);
+        visiting.add(id);
+        const vertex = byId.get(id)!;
+        for (const parent of vertex.parents ?? []) visit(parent);
+        visiting.delete(id);
+        placed.add(id);
+        ordered.push(vertex);
+    };
+    for (const vertex of vertices) visit(vertex.id);
+    return ordered;
+}
+
+/**
+ * Compiles a normalized workflow into the `vertex/created` drafts that persist it.
+ *
+ * `newId` is injected so this stays a pure function of its arguments and a unit test can pin the
+ * output. Vertex ids are freshly allocated per freeze and never derived from the submission:
+ * `work_queue.vertex_id` is a globally unique primary key and its insert is `ON CONFLICT DO
+ * NOTHING`, so a reused id would produce vertices that pass every check and are silently never
+ * enqueued.
+ */
+export function compileVertexDrafts(workflow: WorkflowSubmission, resolved: ResolvedToolView, newId: () => string = randomUUID): CompiledSubgraph {
+    const vertexIds = new Map(workflow.vertices.map((vertex) => [vertex.id, newId()]));
+    const scopeIds = new Map((workflow.scopes ?? []).map((scope) => [scope.id, newId()]));
+    const contracts = new Map(resolved.document.tools.map((tool) => [tool.tool_id, tool]));
+    const drafts: EventDraft[] = [];
+    for (const vertex of topologicalOrder(workflow.vertices)) {
+        const parentRefs = (vertex.parents ?? []).map((parent) => vertexIds.get(parent)!);
+        const scopeId = vertex.scope ? scopeIds.get(vertex.scope) : undefined;
+        if (vertex.scope && !scopeId) throw new Error(`${vertex.id} names undeclared scope ${vertex.scope}`);
+        const draft: EventDraft = {
+            event_type: 'vertex/created',
+            vertex_id: vertexIds.get(vertex.id)!,
+            parent_refs: parentRefs,
+            payload: vertexPayload(vertex, contracts, resolved),
+        };
+        // The scope is a column, not only a payload field: the database derives the executor class
+        // from (payload, scope_id) as separate arguments, so a scoped vertex whose scope lives only
+        // in the payload is routed to the Orchestrator, which then refuses it.
+        if (scopeId) draft.scope_id = scopeId;
+        drafts.push(draft);
+    }
+    return {vertexIds, scopeIds, drafts};
+}
+
+function vertexPayload(vertex: SubmittedVertex, contracts: ReadonlyMap<string, ResolvedToolView['document']['tools'][number]>, resolved: ResolvedToolView): Record<string, unknown> {
+    if (vertex.kind === 'planner') return {role: 'planner', ...(vertex.goal ? {goal: vertex.goal} : {})};
+    if (vertex.kind === 'confirmation-barrier') return {role: 'confirmation-barrier'};
+    if (vertex.kind === 'router') {
+        return {
+            role: 'router',
+            origin: vertex.id.endsWith(INTERPOSED_ROUTER_SUFFIX) ? 'interposed' : 'declared',
+            ...(vertex.templateRef ? {template_ref: vertex.templateRef} : {}),
+        };
+    }
+    const contract = contracts.get(vertex.tool);
+    if (!contract) throw new Error(`${vertex.id} names ${vertex.tool}, absent from the resolved tool view`);
+    const retry = contract.retry_constraints;
+    return {
+        role: 'tool',
+        tool: contract.tool_id,
+        tool_version: contract.tool_version,
+        tool_view_digest: resolved.identity.tool_view_digest,
+        input: vertex.input ?? {},
+        retry_policy: {
+            max_attempts: retry.max_attempts,
+            initial_backoff_ms: retry.initial_backoff_ms,
+            // The view carries thousandths so its canonical encoding stays integer-valued; the event
+            // schema wants a plain number. Copying it straight through publishes a 1000x multiplier
+            // that still satisfies the schema's `minimum: 1`.
+            multiplier: retry.multiplier_milli / 1000,
+            max_backoff_ms: retry.max_backoff_ms,
+        },
+        // effect_class is what the database routes on. Omitting `txn` makes the lookup NULL, which
+        // silently turns a read into Coordinator work.
+        txn: {
+            effect_class: contract.txn.effect_class,
+            mode: contract.txn.mode,
+            ...(vertex.idempotencyKey ? {idempotency_key: vertex.idempotencyKey} : {}),
+            ...(contract.txn.try_timeout_s ? {try_timeout_s: contract.txn.try_timeout_s} : {}),
+            ...(contract.txn.confirm_tool ? {confirm_tool: contract.txn.confirm_tool} : {}),
+            ...(contract.txn.cancel_tool ? {cancel_tool: contract.txn.cancel_tool} : {}),
+            ...(contract.txn.compensate_tool ? {compensate_tool: contract.txn.compensate_tool} : {}),
+            ...(contract.txn.status_tool ? {status_tool: contract.txn.status_tool} : {}),
+        },
+    };
+}
+
+/**
+ * Returns the content address of a submission.
+ *
+ * Uses the event log's canonical encoding rather than the tool view's, which refuses non-integer
+ * numbers that a submitted tool input may legitimately contain.
+ */
+export function submissionDigest(submission: WorkflowSubmission): string {
+    return `sha256:${createHash('sha256').update(canonicalJson(submission), 'utf8').digest('hex')}`;
+}

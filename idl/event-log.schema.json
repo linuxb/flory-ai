@@ -56,6 +56,8 @@
             "if": {"properties": {"event_type": {"const": "subgraph/proposed"}}, "required": ["event_type"]},
             "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphProposedPayload"}}}
         },
+        {"if": {"properties": {"event_type": {"const": "subgraph/frozen"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphFrozenPayload"}}}},
+        {"if": {"properties": {"event_type": {"const": "subgraph/rejected"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphRejectedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "vertex/created"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/vertexCreatedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "txn/scope"}}, "required": ["event_type"]}, "then": {"required": ["scope_id"], "properties": {"payload": {"$ref": "#/$defs/txnScopePayload"}}}},
         {
@@ -140,10 +142,76 @@
             },
             "additionalProperties": false
         },
+        "subgraphFrozenPayload": {
+            "type": "object",
+            "required": ["proposed_seq", "tool_view_digest", "vertices"],
+            "properties": {
+                "proposed_seq": {"type": "integer", "minimum": 1},
+                "tool_view_ref": {"type": "string", "minLength": 1},
+                "tool_view_digest": {"$ref": "#/$defs/toolViewDigest"},
+                "vertices": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["author_id", "vertex_id", "role"],
+                        "properties": {
+                            "author_id": {"type": "string", "minLength": 1},
+                            "vertex_id": {"type": "string", "format": "uuid"},
+                            "role": {"enum": ["planner", "tool", "router", "confirmation-barrier"]}
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "scopes": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["author_id", "scope_id"],
+                        "properties": {"author_id": {"type": "string", "minLength": 1}, "scope_id": {"type": "string", "format": "uuid"}},
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
+        "subgraphRejectedPayload": {
+            "type": "object",
+            "required": ["proposed_seq", "stage", "violations"],
+            "properties": {
+                "proposed_seq": {"type": "integer", "minimum": 1},
+                "stage": {"enum": ["resolution", "registry", "admission"]},
+                "violations": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["rule", "message", "vertices"],
+                        "properties": {
+                            "rule": {"enum": ["R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12", "R13", "R14"]},
+                            "message": {"type": "string", "minLength": 1},
+                            "vertices": {"type": "array", "items": {"type": "string", "minLength": 1}}
+                        },
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "additionalProperties": false
+        },
         "vertexCreatedPayload": {
             "oneOf": [
                 {"type": "object", "required": ["role"], "properties": {"role": {"const": "planner"}}, "additionalProperties": true},
                 {"type": "object", "required": ["role"], "properties": {"role": {"const": "confirmation-barrier"}}, "additionalProperties": false},
+                {
+                    "type": "object",
+                    "required": ["role", "origin"],
+                    "properties": {
+                        "role": {"const": "router"},
+                        "origin": {"enum": ["declared", "interposed"]},
+                        "template_ref": {"type": "string", "minLength": 1},
+                        "slot_id": {"type": "string", "minLength": 1},
+                        "placement": {"enum": ["at_savepoint", "inside_scope"]}
+                    },
+                    "additionalProperties": false
+                },
                 {
                     "type": "object",
                     "required": ["role", "tool", "tool_version", "tool_view_digest", "input", "retry_policy", "txn"],

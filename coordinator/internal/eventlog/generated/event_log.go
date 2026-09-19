@@ -54,6 +54,14 @@ type TransactionSpec struct {
 	StatusTool     string          `json:"status_tool,omitempty"`
 }
 
+type RouterVertexPayload struct {
+	Role        string `json:"role"`
+	Origin      string `json:"origin"`
+	TemplateRef string `json:"template_ref,omitempty"`
+	SlotID      string `json:"slot_id,omitempty"`
+	Placement   string `json:"placement,omitempty"`
+}
+
 type ToolVertexPayload struct {
 	Role           string                 `json:"role"`
 	Tool           string                 `json:"tool"`

@@ -52,6 +52,14 @@ export interface TransactionSpec {
     compensate_tool?: string;
     status_tool?: string;
 }
+export interface RouterVertexPayload {
+    role: 'router';
+    origin: 'declared' | 'interposed';
+    template_ref?: string;
+    slot_id?: string;
+    placement?: 'at_savepoint' | 'inside_scope';
+}
+
 export interface ToolVertexPayload {
     role: 'tool';
     tool: string;

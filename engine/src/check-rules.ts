@@ -17,14 +17,23 @@ export interface ToolDefinition {
     tryTimeoutS?: number;
 }
 
-/** A proposed executable vertex or an engine-inserted confirmation barrier. */
+/**
+ * A proposed vertex role. These are spelled exactly as the event-log `role` values, so lowering a
+ * proposal into `vertex/created` events is an identity mapping rather than a lookup table that can
+ * drift from the schema.
+ */
+export type VertexKind = 'planner' | 'tool' | 'router' | 'confirmation-barrier';
+
+/** A proposed executable vertex, deterministic router, planner, or engine-inserted barrier. */
 export interface ProposalVertex {
     id: string;
     parents: string[];
-    kind: 'tool' | 'confirmation-barrier';
+    kind: VertexKind;
     tool?: string;
     scopeId?: string;
     confirmedOutput?: boolean;
+    /** Pinned rule template on an author-declared router; absent on an engine-interposed one. */
+    templateRef?: string;
 }
 
 /** A planner-declared transaction scope and its members. */
@@ -39,8 +48,14 @@ export interface SubDagProposal {
     scopes: ProposalScope[];
 }
 
-/** The closed check-rule vocabulary from transaction design document 02. */
-export type RuleCode = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R8' | 'R9' | 'R10' | 'R11';
+/**
+ * The closed check-rule vocabulary from transaction design document 02.
+ *
+ * R12 and R13 are partly implemented: R12's scope-membership clause and R13's tool-resolvability
+ * clause hold today, while their placement clauses need the rule templates a router branch is
+ * admitted from.
+ */
+export type RuleCode = 'R1' | 'R2' | 'R3' | 'R4' | 'R5' | 'R6' | 'R7' | 'R8' | 'R9' | 'R10' | 'R11' | 'R12' | 'R13' | 'R14';
 
 /** One deterministic admission violation. */
 export interface CheckViolation {
@@ -70,6 +85,14 @@ export class ToolRegistry {
         const definition = this.definitions.get(name);
         if (!definition) throw new Error(`unknown tool: ${name}`);
         return definition;
+    }
+
+    /**
+     * Reports whether a tool is published in this view. Callers that turn an unpublished tool into
+     * an admission violation use this first; {@link get} stays fail-closed for everyone else.
+     */
+    has(name: string): boolean {
+        return this.definitions.has(name);
     }
 
     /** Reports registry defects governed by R4 and R6. */
@@ -114,7 +137,18 @@ function isUndoable(tool: ToolDefinition): boolean {
 function buildContext(proposal: SubDagProposal, registry: ToolRegistry): GraphContext {
     const vertices = new Map(proposal.vertices.map((vertex) => [vertex.id, vertex]));
     const tools = new Map<string, ToolDefinition>();
-    for (const vertex of proposal.vertices) if (vertex.kind === 'tool' && vertex.tool) tools.set(vertex.id, registry.get(vertex.tool));
+    // Only tool vertices enter `tools`, and that is load-bearing rather than incidental: R10 and
+    // `pivotIds` both iterate this map, so a planner or router is never asked for a scope and can
+    // never be counted as a pivot (doc 10 section 2: a router is never a scope member). A non-tool
+    // vertex carrying a tool name is a structural contradiction, not a rule violation, so it fails
+    // loudly here instead of being silently dropped from every rule.
+    for (const vertex of proposal.vertices) {
+        if (vertex.kind !== 'tool') {
+            if (vertex.tool) throw new Error(`${vertex.id} is a ${vertex.kind} and must not name a tool`);
+            continue;
+        }
+        if (vertex.tool) tools.set(vertex.id, registry.get(vertex.tool));
+    }
     const ancestors = new Map<string, Set<string>>();
     const visitAncestors = (id: string, visiting = new Set<string>()): Set<string> => {
         const cached = ancestors.get(id);
@@ -151,7 +185,13 @@ function add(violations: CheckViolation[], rule: RuleCode, message: string, vert
     if (!violations.some((violation) => violation.rule === rule && violation.vertices.join('\0') === vertices.join('\0'))) violations.push({rule, message, vertices});
 }
 
-/** Applies Doc 02 R1-R11 to a complete proposal without I/O or ambient state. */
+/**
+ * Applies the Doc 02 check rules to a complete proposal without I/O or ambient state.
+ *
+ * A proposal containing a router is admitted here for its *own* structure only. The branches that
+ * router may emit live in a pinned rule template and are admitted separately at freeze, so this
+ * function's verdict is necessary but not sufficient for a graph with routers.
+ */
 export function checkSubDag(proposal: SubDagProposal, registry: ToolRegistry): CheckResult {
     const violations = [...registry.validate()];
     const context = buildContext(proposal, registry);
@@ -201,10 +241,34 @@ export function checkSubDag(proposal: SubDagProposal, registry: ToolRegistry): C
     for (const [childId, child] of context.vertices) {
         for (const parentId of child.parents) {
             const parent = context.vertices.get(parentId)!;
+            // Only a tool caller produces an output another scope could read dirtily. Without this
+            // guard `parentTool?.effectClass !== 'none'` reads `undefined !== 'none'` as true, so a
+            // non-tool parent would be treated as having side effects.
+            if (parent.kind !== 'tool') continue;
             const parentTool = context.tools.get(parentId);
             if (parent.scopeId && child.scopeId && parent.scopeId !== child.scopeId && parentTool?.effectClass !== 'none' && !parent.confirmedOutput) {
                 add(violations, 'R7', `${childId} reads an unconfirmed cross-scope output from ${parentId}`, [parentId, childId]);
             }
+        }
+    }
+
+    // R14: a tool caller may not hand control straight to a planner. Every such edge carries a
+    // router, which the engine interposes during normalization when the author did not supply one.
+    for (const [childId, child] of context.vertices) {
+        if (child.kind !== 'planner') continue;
+        for (const parentId of child.parents) {
+            if (context.vertices.get(parentId)!.kind !== 'tool') continue;
+            add(violations, 'R14', `${parentId} has planner ${childId} as a direct successor without an interposed router`, [parentId, childId]);
+        }
+    }
+
+    // R12 (scope membership): a planner or router has no side effects and never joins a scope.
+    // This is what exempts both from R10, so it has to be enforced rather than assumed.
+    for (const [vertexId, vertex] of context.vertices) {
+        if (vertex.kind === 'tool' || vertex.kind === 'confirmation-barrier') continue;
+        if (vertex.scopeId) add(violations, 'R12', `${vertexId} is a ${vertex.kind} and may not declare a transaction scope`, [vertexId]);
+        for (const scope of proposal.scopes) {
+            if (scope.members.includes(vertexId)) add(violations, 'R12', `${vertexId} is a ${vertex.kind} and may not be a member of scope ${scope.id}`, [vertexId]);
         }
     }
 

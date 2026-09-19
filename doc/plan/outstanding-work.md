@@ -8,10 +8,11 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 |---|---|---|---|
 | W1 | Formal verification stage S3 | [Doc 06 §12](../design/06-validation-harness.md#12-formal-verification-design) | Trigger-gated: waiting on first production traffic |
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
-| W3 | Deterministic routers and rule templates | [Doc 10](../design/10-deterministic-routers.md) | Not started |
+| W3 | Rule templates and router evaluation | [Doc 10](../design/10-deterministic-routers.md) | Submission, admission and freeze delivered; templates and evaluation pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
+| W5 | Coordinator lock order, claim eligibility, and attempt evidence | [Doc 07 §3.1](../design/07-distributed-transaction-coordinator.md#31-work-scheduler), [Doc 02 §4.4](../design/02-transaction-model.md#44-orphan-try-detection), [Doc 08 §3](../design/08-database-schema.md#3-write-time-guards) | Not started; the code contradicts the documented lock order |
 
-W3 changes `idl/` and `db/migrations/`; W4's remaining work adds one table and otherwise stays in the Engine, so the two no longer collide.
+W3's remaining work and W4's both stay in the Engine apart from one table each; W5 is the only stream that rewrites the Coordinator's claim path, so it should not run concurrently with either.
 
 ---
 
@@ -45,34 +46,50 @@ The Coordinator runtime, its PostgreSQL projections, the orphan sweep, and the r
 - S12 passes as a runtime integration scenario, and its row in Doc 06 §6 no longer says pending.
 - TCC confirm after `txn/pivot-passed` stays safe under duplicate delivery.
 
-## W3 — Deterministic routers and rule templates
+## W3 — Rule templates and router evaluation
 
-Make a rule-governed transition executable without a model call: a first-class `router` vertex, published rule templates, freeze-time exhaustive admission, and the runtime fencing that keeps a deterministic branch inside the transaction protocol.
+A submitted workflow is normalized, admitted and frozen today, and a router is a first-class vertex
+in that path: the compiler puts one in front of every planner that has parents, the checker enforces
+R14 and refuses a router that joins a scope, and the event log persists it. What a router still
+cannot do is **decide anything** — there are no rule templates to bind and no evaluator to run them.
 
-**Contract baseline.** Interposition is mandatory, so a run with no template bound has the same topology as one with a template bound. A router is Engine-executed, never queued, and never a scope member. Its placement is derived; its branches are admitted at freeze against the run's role-scoped tool view and an existing-scope snapshot; its failures never reach an LLM replan.
+**Contract baseline.** A template is Engine-owned, published, immutable and content-addressed. A
+router is Engine-executed, never queued, and never a scope member. Its placement is derived; its
+branches are admitted at freeze against the run's role-scoped tool view and an existing-scope
+snapshot; its failures never reach an LLM replan.
 
 **Increments.**
 
-1. Extend the shared contracts: `router` in the `vertex/created` role union, the `rule_template/published` diff event, and the tool contract's log-fields schema in [`idl/`](../../idl/), regenerating both language consumers.
-2. Extend `flory_executor_class` with `router`, exclude routers from `enqueue_vertex_work`, and add the `txn_attempt` evidence table with its migration.
-3. Add the Engine-owned configuration stream with its own counter row, and the ownership-trigger case admitting `rule_template/published` from `engine_role` alone.
-4. Implement R12, R13, and R14 in `engine/src/check-rules.ts`, including the third `existing_scope_snapshot` argument and exhaustive per-branch, per-placement admission.
-5. Implement Engine-side rule-template publication: the management API, Q1–Q6 admission over a role-scoped tool view, derived capability envelope and branch traits, content addressing, and diff events.
-6. Implement router evaluation in the Engine: binding resolution by `template_ref` and by `SlotId`, the closed outcome vocabulary, the strict event trajectory, and fall-through invisibility in `linearize`.
-7. Enforce the single lock order and claim-eligibility table in the Coordinator, and rewrite the sweeper around durable attempt evidence: defer on a live lease, suspend on an unresolved attempt, cancel only a clean scope.
-8. Add scenarios S15–S20 and the router assertions in oracles O2 and O4 to the validation harness.
+1. Extend the shared contracts: the `rule_template/published` diff event and the tool contract's
+   log-fields schema in [`idl/`](../../idl/), regenerating both language consumers.
+2. Extend `flory_executor_class` with `router` and let `engine_role` append a router's lifecycle
+   events. Note that `work_queue.executor_class` is a STORED generated column, so the function
+   cannot be replaced in place: the column and its index must be dropped and re-added.
+3. Add the Engine-owned configuration stream with its own counter row, and the ownership-trigger
+   case admitting `rule_template/published` from `engine_role` alone.
+4. Implement Engine-side rule-template publication: the management API, Q1–Q6 admission over a
+   role-scoped tool view, derived capability envelope and branch traits, content addressing, and
+   diff events.
+5. Complete R12 and R13 and add `checkFreezeAdmission`: the `existing_scope_snapshot` third
+   argument, placement derivation, and exhaustive per-branch, per-placement admission. Only R12's
+   scope-membership clause and R13's tool-resolvability clause exist today.
+6. Implement router evaluation: binding resolution by `template_ref` and by `SlotId`, the closed
+   outcome vocabulary, the strict event trajectory, and fall-through invisibility in `linearize`.
+7. Add scenarios S15–S20 and the router assertions in oracles O2 and O4.
 
 **Exit criteria.**
 
-- A tool-caller-to-planner edge cannot survive a freeze without a router, whether or not the proposal supplied one.
-- A template whose *non-matching* branch is illegal at the bound placement is rejected at freeze, before any tool runs.
+- A template whose *non-matching* branch is illegal at the bound placement is rejected at freeze,
+  before any tool runs.
 - A bound non-matching template produces a byte-identical planner prompt hash to an unbound slot.
 - A failed router-emitted branch produces no `replan/boundary` and starts no planner vertex.
-- A scope holding an unresolved attempt suspends; no `txn/cancel {phase: requested}` is appended for it.
 - A fork substituting only a rule-template pin differs from its source in no structural way.
-- `rule_template/published` is appended only by the Engine, only to the configuration stream; `gateway_role` still cannot write the event log at all.
+- `rule_template/published` is appended only by the Engine, only to the configuration stream;
+  `gateway_role` still cannot write the event log at all.
 
-**Exclusions.** Slot-collision rebinding and template migration, a nested-router depth bound, and automatic governance actions on match-rate thresholds are the open questions in [Doc 10 §13](../design/10-deterministic-routers.md#13-open-questions). Automatic reconciliation of an unresolved non-pivot attempt stays out of scope by design: recovery is operator-authorized ([Doc 02 §4.4](../design/02-transaction-model.md#44-orphan-try-detection)).
+**Exclusions.** Slot-collision rebinding and template migration, a nested-router depth bound, and
+automatic governance actions on match-rate thresholds are the open questions in
+[Doc 10 §13](../design/10-deterministic-routers.md#13-open-questions).
 
 ## W4 — Business-plane consumers
 
@@ -95,3 +112,35 @@ The two planes, their sequences, and the dual-allocation append path are built. 
 - No reader folds `global_seq`.
 
 **Exclusions.** Stream-identity assignment policy — which domain concepts deserve an aggregate root, and how `stream_id` is derived from `task_input` — belongs with the domain teams that own the reducers. Snapshot retention and compaction, and CDC consumers of `global_seq`, are deferred.
+
+## W5 — Coordinator lock order, claim eligibility, and attempt evidence
+
+Split out of W3, which had lumped it in: none of it concerns routers. The documents describe a
+discipline the code does not keep, so this stream closes a divergence rather than adding a feature.
+
+**The divergence.** [Doc 08 §3](../design/08-database-schema.md#3-write-time-guards) and
+`AGENTS.md` state one lock order, `txn_scope` before `work_queue`. The implementation does the
+reverse and across transaction boundaries: `claim_ready_work` takes `work_queue FOR UPDATE SKIP
+LOCKED` and never touches `txn_scope`, while `admit_pivot` and `request_scope_cancel` take the
+scope first and then call `append_events`, which takes the run row. That is a genuine deadlock
+cycle, not a stylistic mismatch.
+
+**Increments.**
+
+1. Add the `txn_attempt` table and record an attempt's identity, idempotency key and start durably
+   before any side-effecting request leaves the executor. No such table exists today, and nothing
+   is written before the adapter call.
+2. Enforce one lock order on every state-altering path, and add the claim-eligibility filter by
+   scope state to `claim_ready_work`.
+3. Rewrite the sweeper around attempt evidence: defer on a live lease, suspend on an unresolved
+   attempt, and cancel only a scope with an expired sealed try, no live lease and no unresolved
+   attempt.
+
+**Exit criteria.**
+
+- A scope holding an unresolved attempt suspends; no `txn/cancel {phase: requested}` is appended
+  for it, and neither automatic cancellation nor redispatch occurs.
+- Cancellation and claiming race decisively in both directions.
+- Already-admitted post-pivot forward work stays claimable while pre-pivot work and backward
+  cancellation are blocked.
+- The lock order in the code matches the one the documents state.

@@ -240,3 +240,79 @@ export function diffTemplates(previous: RuleTemplateDraft | undefined, next: Rul
     }
     return operations;
 }
+
+/**
+ * Derives the stable topological coordinate an auto-interposed router resolves its template by.
+ *
+ * Keyed by the *set* of upstream tool types rather than by vertex identity, so the same junction in
+ * the same kind of workflow resolves the same way however its vertices happen to be named.
+ */
+export function slotIdOf(workflowType: string, upstreamToolTypes: readonly string[], targetPlannerTemplate: string): string {
+    const canonical = canonicalJson({workflowType, upstream: [...upstreamToolTypes].sort(), target: targetPlannerTemplate});
+    return `slot:${createHash('sha256').update(canonical, 'utf8').digest('hex').slice(0, 32)}`;
+}
+
+/** The minimum an append path must offer for a publication to be recorded. */
+export interface ConfigurationSink {
+    appendConfigEvent(streamId: string, eventType: string, payload: Record<string, unknown>): Promise<number>;
+}
+
+/**
+ * Holds published templates and the slots they are bound to.
+ *
+ * The store is the resolvable index; the configuration stream is the record. Recording every
+ * mutation as a diff event is what lets a historical position be replayed without consulting this
+ * index at all, which is why publication writes both and reads only one.
+ */
+export class RuleTemplateStore {
+    private readonly byRef = new Map<string, PublishedRuleTemplate>();
+    private readonly byDigest = new Map<string, PublishedRuleTemplate>();
+    private readonly drafts = new Map<string, RuleTemplateDraft>();
+    private readonly bySlot = new Map<string, string>();
+
+    constructor(private readonly sink: ConfigurationSink) {}
+
+    /** Admits a template, records the mutation, and makes it resolvable. */
+    async publish(draft: RuleTemplateDraft, resolved: ResolvedToolView): Promise<PublicationResult> {
+        const result = publishRuleTemplate(draft, resolved);
+        if (!result.admitted) return result;
+
+        const previous = this.drafts.get(draft.templateRef);
+        await this.sink.appendConfigEvent(CONFIGURATION_STREAM_ID, 'rule_template/published', {
+            template_ref: draft.templateRef,
+            digest: result.template.digest,
+            ...(previous ? {predecessor_digest: digestOfTemplate(previous)} : {}),
+            diff: diffTemplates(previous, draft),
+            author: draft.author,
+            ...(draft.slotId ? {slot_id: draft.slotId} : {}),
+            capability: {
+                max_effect_class: result.template.capability.maxEffectClass,
+                can_open_scope: result.template.capability.canOpenScope,
+                can_provide_pivot: result.template.capability.canProvidePivot,
+                is_pure_read_only: result.template.capability.isPureReadOnly,
+            },
+        });
+
+        this.drafts.set(draft.templateRef, draft);
+        this.byRef.set(draft.templateRef, result.template);
+        this.byDigest.set(result.template.digest, result.template);
+        if (draft.slotId) this.bySlot.set(draft.slotId, draft.templateRef);
+        return result;
+    }
+
+    /** Resolves a pinned template in constant time by URI or by content digest. */
+    resolve(reference: string): PublishedRuleTemplate | undefined {
+        return this.byRef.get(reference) ?? this.byDigest.get(reference);
+    }
+
+    /**
+     * Resolves whatever is bound to a slot.
+     *
+     * An unregistered slot is not an error: the router is a transparent pass-through, which is what
+     * keeps topology identical whether or not a rule is bound.
+     */
+    resolveSlot(slotId: string): PublishedRuleTemplate | undefined {
+        const reference = this.bySlot.get(slotId);
+        return reference ? this.byRef.get(reference) : undefined;
+    }
+}

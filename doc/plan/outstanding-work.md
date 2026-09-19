@@ -8,7 +8,7 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 |---|---|---|---|
 | W1 | Formal verification stage S3 | [Doc 06 §12](../design/06-validation-harness.md#12-formal-verification-design) | Trigger-gated: waiting on first production traffic |
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
-| W3 | Router evaluation | [Doc 10](../design/10-deterministic-routers.md) | Contracts, schema and template publication delivered; binding and evaluation pending |
+| W3 | Router scenarios and freeze-time wiring | [Doc 10](../design/10-deterministic-routers.md) | Evaluation delivered; freeze-time admission not yet called, scenarios pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
 | W5 | Coordinator lock order, claim eligibility, and attempt evidence | [Doc 07 §3.1](../design/07-distributed-transaction-coordinator.md#31-work-scheduler), [Doc 02 §4.4](../design/02-transaction-model.md#44-orphan-try-detection), [Doc 08 §3](../design/08-database-schema.md#3-write-time-guards) | Not started; the code contradicts the documented lock order |
 
@@ -46,40 +46,38 @@ The Coordinator runtime, its PostgreSQL projections, the orphan sweep, and the r
 - S12 passes as a runtime integration scenario, and its row in Doc 06 §6 no longer says pending.
 - TCC confirm after `txn/pivot-passed` stays safe under duplicate delivery.
 
-## W3 — Router evaluation
+## W3 — Router scenarios and freeze-time wiring
 
-Templates can now be authored, admitted and recorded: `rule_template/published` is in the event
-vocabulary, a tool contract declares its log fields, `router` is a third executor class, the
-configuration stream exists, and Q1–Q6 publication derives the capability envelope and branch
-traits rather than taking them. What a router still cannot do is **run**: nothing binds a template
-to a slot and nothing evaluates one.
-
-**Contract baseline.** A router is Engine-executed, never queued, and never a scope member. Its
-placement is derived; its branches are admitted at freeze against the run's role-scoped tool view
-and an existing-scope snapshot; its failures never reach an LLM replan.
+A router now decides. Templates are published and admitted under Q1–Q6, resolved by reference or
+by slot coordinate, evaluated against the summary fields their upstream tools lifted, and a matched
+branch is emitted and frozen onto the router that decided it. A fall-through is invisible in the
+planner's prompt. What remains is wiring freeze admission into the submission path, and the
+scenario coverage that holds all of it.
 
 **Increments.**
 
-1. Persist published templates and resolve them: a content-addressed store, binding by
-   `template_ref` and by `SlotId`, and an unbound slot that falls through.
-2. Complete R12 and R13 and add `checkFreezeAdmission`: the `existing_scope_snapshot` third
-   argument, placement derivation, and exhaustive per-branch, per-placement admission. Only R12's
-   scope-membership clause and R13's tool-resolvability clause exist today.
-3. Implement router evaluation: the closed outcome vocabulary, the strict event trajectory, the
-   runtime scope re-check under the lock, and fall-through invisibility in `linearize`.
-4. Add scenarios S15–S20 and the router assertions in oracles O2 and O4.
+1. Call `checkFreezeAdmission` from the freeze path. It is implemented and unit-tested, but nothing
+   invokes it yet: a submission containing a router is admitted for its own structure only, and its
+   template's branches are checked when the router runs rather than when the graph freezes. Doing
+   this needs the run's scope snapshot, which no caller assembles today.
+2. Derive `placement` at freeze and record it on the router vertex. The payload field exists and
+   is always absent.
+3. Add scenarios S15–S20 and the router assertions in oracles O2 and O4. Doc 06's scenario format
+   does not exist in code — `runFixture` is a stub with no callers — so this increment is partly
+   about building the harness the rows assume.
 
 **Exit criteria.**
 
 - A template whose *non-matching* branch is illegal at the bound placement is rejected at freeze,
   before any tool runs.
-- A bound non-matching template produces a byte-identical planner prompt hash to an unbound slot.
-- A failed router-emitted branch produces no `replan/boundary` and starts no planner vertex.
 - A fork substituting only a rule-template pin differs from its source in no structural way.
+- Oracle O2 asserts the router trajectory and the absence of a deterministic replan on real logs.
 
 **Exclusions.** Slot-collision rebinding and template migration, a nested-router depth bound, and
 automatic governance actions on match-rate thresholds are the open questions in
-[Doc 10 §13](../design/10-deterministic-routers.md#13-open-questions).
+[Doc 10 §13](../design/10-deterministic-routers.md#13-open-questions). Branch inputs are also
+deferred: a template branch names tools but binds no parameters, so an emitted vertex carries an
+empty input until the template language grows a way to reference upstream output.
 
 ## W4 — Business-plane consumers
 

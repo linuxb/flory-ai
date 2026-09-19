@@ -64,6 +64,22 @@ export interface CheckViolation {
     vertices: string[];
 }
 
+/**
+ * One ancestor transaction scope as it stands at the freeze that introduces a router.
+ *
+ * `half-open` means a try is sealed but unconfirmed, which is the state that forbids opening a
+ * fresh scope: an open scope is not a savepoint.
+ */
+export interface ScopeSnapshot {
+    scopeId: string;
+    state: 'open' | 'half-open' | 'committed' | 'cancelled';
+    /** Pivots already bound to this scope in earlier freezes; R3 counts across them. */
+    pivotCount: number;
+}
+
+/** Where a router sits relative to the transaction structure above it. */
+export type RouterPlacement = 'at_savepoint' | 'inside_scope';
+
 /** The complete admission result for a proposal. */
 export interface CheckResult {
     accepted: boolean;
@@ -192,10 +208,11 @@ function add(violations: CheckViolation[], rule: RuleCode, message: string, vert
  * router may emit live in a pinned rule template and are admitted separately at freeze, so this
  * function's verdict is necessary but not sufficient for a graph with routers.
  */
-export function checkSubDag(proposal: SubDagProposal, registry: ToolRegistry): CheckResult {
+export function checkSubDag(proposal: SubDagProposal, registry: ToolRegistry, existingScopes: readonly ScopeSnapshot[] = []): CheckResult {
     const violations = [...registry.validate()];
     const context = buildContext(proposal, registry);
     const pivots = pivotIds(context);
+    const routerIds = [...context.vertices.values()].filter((vertex) => vertex.kind === 'router').map((vertex) => vertex.id);
 
     for (const [vertexId, tool] of context.tools) {
         const vertex = context.vertices.get(vertexId)!;
@@ -223,6 +240,27 @@ export function checkSubDag(proposal: SubDagProposal, registry: ToolRegistry): C
                 if (ancestor?.effectClass === 'reversible' && intersects(ancestor.footprint, pivotTool.footprint) && !members.has(ancestorId)) {
                     add(violations, 'R11', `${scope.id} omits required predecessor ${ancestorId}`, [ancestorId, pivotId]);
                 }
+            }
+        }
+    }
+
+    // R12 placement, and R3 across freezes. Both are gated on the proposal actually containing a
+    // router: without the gate, a caller that starts passing a real snapshot would begin reporting
+    // violations on ordinary planner proposals no router ever touched.
+    if (routerIds.length) {
+        const halfOpen = existingScopes.filter((scope) => scope.state === 'half-open');
+        const known = new Set(existingScopes.map((scope) => scope.scopeId));
+        for (const scope of proposal.scopes) {
+            if (halfOpen.length && !known.has(scope.id)) {
+                add(violations, 'R12', `${scope.id} opens a fresh scope inside half-open scope ${halfOpen[0]!.scopeId}`, [...scope.members]);
+            }
+            const existing = existingScopes.find((candidate) => candidate.scopeId === scope.id);
+            const members = context.scopeMembers.get(scope.id)!;
+            const scopePivots = pivots.filter((id) => members.has(id));
+            // A branch pivot is admitted when the scope holds none: it supplies S's unique commit
+            // point. It is refused only when that commit point already exists.
+            if (existing && existing.pivotCount + scopePivots.length > 1) {
+                add(violations, 'R3', `${scope.id} already holds a pivot in this run's scope snapshot`, scopePivots);
             }
         }
     }
@@ -304,6 +342,81 @@ export function checkSubDag(proposal: SubDagProposal, registry: ToolRegistry): C
                     relatedPivots.every((pivotId) => context.ancestors.get(pivotId)?.has(vertex.id)),
             );
             if (!protectedByBarrier) add(violations, 'R9', `${firstId} and ${secondId} have conflicting parallel writes before a pivot`, [firstId, secondId]);
+        }
+    }
+
+    return {accepted: violations.length === 0, violations};
+}
+
+/** Where one router slot sits, and the view its branches are admitted against. */
+export interface SlotPlacementContext {
+    placement: RouterPlacement;
+    /** True on an offline simulation fork, where no branch may carry an effect. */
+    isReadOnlyContext: boolean;
+    roleToolView: ToolRegistry;
+}
+
+/** One branch of a pinned template, as freeze admission consumes it. */
+export interface AdmissibleBranch {
+    condition: string;
+    subDag: SubDagProposal;
+    opensScope: boolean;
+    hasPivot: boolean;
+    maxEffect: EffectClass;
+}
+
+/**
+ * Admits every branch of a pinned template against the placement it will actually land in.
+ *
+ * The defect a deterministic rule creates is late detection: an illegal branch found after an
+ * irreversible pivot has passed, when the proposing planner is already below the backtrack floor.
+ * So every branch is checked at the freeze that introduces the router, not only the one that will
+ * eventually match.
+ *
+ * Violations are pushed rather than deduplicated: two branches can fail the same way with no vertex
+ * id to tell them apart, and collapsing those would hide the second defect behind the first.
+ */
+export function checkFreezeAdmission(branches: readonly AdmissibleBranch[], slot: SlotPlacementContext, existingScopes: readonly ScopeSnapshot[] = []): CheckResult {
+    const violations: CheckViolation[] = [];
+
+    // R13: a declared placement can disagree with the recorded scope state, and cancellation never
+    // converts an inside_scope branch into a fresh transaction at a savepoint.
+    const unclosed = existingScopes.find((scope) => scope.state === 'open' || scope.state === 'half-open');
+    if (slot.placement === 'at_savepoint' && unclosed) {
+        violations.push({rule: 'R13', message: `router slot declares at_savepoint while ancestor scope ${unclosed.scopeId} is unclosed`, vertices: []});
+    }
+
+    for (const [index, branch] of branches.entries()) {
+        if (slot.isReadOnlyContext && branch.maxEffect !== 'none') {
+            violations.push({rule: 'R10', message: `branch ${index} emits a side effect in a read-only slot`, vertices: []});
+            continue;
+        }
+
+        // R13: every tool a branch names must exist in this run's role-scoped view. Checked before
+        // checkSubDag, whose registry lookup throws rather than reports on an unknown tool.
+        const missing = branch.subDag.vertices.filter((vertex) => vertex.kind === 'tool' && vertex.tool && !slot.roleToolView.has(vertex.tool));
+        for (const vertex of missing) {
+            violations.push({rule: 'R13', message: `branch ${index} references ${vertex.tool}, absent from this run's role-scoped tool view`, vertices: [vertex.id]});
+        }
+        if (missing.length) continue;
+
+        if (slot.placement === 'inside_scope') {
+            if (branch.opensScope) {
+                violations.push({rule: 'R12', message: `branch ${index} cannot open a fresh scope inside an active one`, vertices: []});
+            }
+            const active = existingScopes.find((scope) => scope.state === 'half-open');
+            if (branch.hasPivot && (active?.pivotCount ?? 0) > 0) {
+                violations.push({rule: 'R3', message: `branch ${index} introduces a second pivot into scope ${active!.scopeId}`, vertices: []});
+            }
+        } else if (branch.maxEffect !== 'none' && !branch.opensScope) {
+            // At a savepoint a side-effecting branch must be bounded by a scope. The engine would
+            // synthesize the minimum here once footprint grouping lands; until then the template
+            // has to declare it, and R10 is the honest refusal.
+            violations.push({rule: 'R10', message: `branch ${index} has a side effect but declares no scope`, vertices: []});
+        }
+
+        for (const violation of checkSubDag(branch.subDag, slot.roleToolView, existingScopes).violations) {
+            violations.push({rule: violation.rule, message: `branch ${index}: ${violation.message}`, vertices: violation.vertices});
         }
     }
 

@@ -10,6 +10,8 @@ export interface SurfaceVertex {
     parameters?: unknown;
     result?: unknown;
     status?: string;
+    /** On a router: the condition that matched, or null when it fell through. */
+    matched_condition?: string | null;
     created_seq: number;
 }
 /** The active vertex view for one run at a stream-sequence boundary. */
@@ -26,6 +28,8 @@ export interface ContextItem {
     tool?: string;
     result?: unknown;
     status?: string;
+    /** Present only on a router that matched, explaining why its branch exists. */
+    condition?: string;
 }
 /** A pure, versioned domain reducer consumed by the framework projection pipeline. */
 export interface FoldReducer<View> {
@@ -85,7 +89,13 @@ export function surface(events: StoredEvent[], atRunSeq = Number.MAX_SAFE_INTEGE
             const vertex = vertices.get(event.vertex_id);
             if (vertex) {
                 vertex.status = event.event_type.slice('vertex/'.length);
-                if (event.event_type === 'vertex/succeeded') vertex.result = event.payload.result;
+                if (event.event_type === 'vertex/succeeded') {
+                    vertex.result = event.payload.result;
+                    if ('matched_condition' in event.payload) {
+                        const matched = event.payload.matched_condition;
+                        vertex.matched_condition = typeof matched === 'string' ? matched : null;
+                    }
+                }
             }
         }
     }
@@ -108,9 +118,27 @@ export function slice(view: Surface, plannerVertexId: string): SurfaceVertex[] {
     return [...included].map((id) => view.vertices.get(id)!).sort((a, b) => a.vertex_id.localeCompare(b.vertex_id));
 }
 
-/** Sorts active vertices by identifier and converts them to context items. */
+/**
+ * Sorts active vertices by identifier and converts them to context items.
+ *
+ * A router appears only when it matched, and then only as the condition that explains the branch
+ * it emitted. One that fell through is omitted entirely, so the downstream planner receives a
+ * context byte-identical to a run in which no router existed. That matters because interposition
+ * is mandatory: rendering fall-throughs would add a line at every junction of every prompt and
+ * destroy the prefix stability the cache dividend rests on.
+ */
 export function linearize(vertices: SurfaceVertex[]): ContextItem[] {
-    return [...vertices].sort((a, b) => a.vertex_id.localeCompare(b.vertex_id)).map(({vertex_id, role, tool, result, status}) => ({vertex_id, role, tool, result, status}));
+    return [...vertices]
+        .filter((vertex) => vertex.role !== 'router' || typeof vertex.matched_condition === 'string')
+        .sort((a, b) => a.vertex_id.localeCompare(b.vertex_id))
+        .map(({vertex_id, role, tool, result, status, matched_condition}) => ({
+            vertex_id,
+            role,
+            tool,
+            result,
+            status,
+            ...(typeof matched_condition === 'string' ? {condition: matched_condition} : {}),
+        }));
 }
 
 /** Serializes a versioned planner context and returns its integrity hash. */

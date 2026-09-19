@@ -2,6 +2,7 @@ import {randomUUID, createHash} from 'node:crypto';
 import {canonicalJson, type EventDraft} from './events.js';
 import type {ProposalScope, ProposalVertex, SubDagProposal, VertexKind} from './check-rules.js';
 import type {ResolvedToolView} from './gateway-client.js';
+import {slotIdOf} from './rule-template.js';
 
 /** Fields every submitted vertex carries, whatever its role. */
 export interface SubmittedVertexBase {
@@ -49,6 +50,22 @@ export interface WorkflowSubmission {
     schemaVersion: 'v1';
     vertices: SubmittedVertex[];
     scopes?: Array<{id: string; members: string[]}>;
+    /**
+     * Names the kind of workflow this is, for slot identity.
+     *
+     * A slot is keyed by workflow type, upstream tool types, and the planner it feeds, so that the
+     * same junction in the same kind of workflow resolves the same rule however its vertices are
+     * named.
+     */
+    workflowType?: string;
+    /**
+     * Existing vertex ids that every root of this submission attaches to.
+     *
+     * A router emitting a branch is the case this exists for: the branch is authored without
+     * knowing the graph it lands in, so the engine supplies the causal edge back to the router
+     * rather than the template naming a vertex it cannot know.
+     */
+    attachTo?: string[];
 }
 
 /** A submission after the engine has inserted every router R14 requires. */
@@ -185,16 +202,20 @@ export function compileVertexDrafts(workflow: WorkflowSubmission, resolved: Reso
     const vertexIds = new Map(workflow.vertices.map((vertex) => [vertex.id, newId()]));
     const scopeIds = new Map((workflow.scopes ?? []).map((scope) => [scope.id, newId()]));
     const contracts = new Map(resolved.document.tools.map((tool) => [tool.tool_id, tool]));
+    const slotIds = routerSlotIds(workflow);
     const drafts: EventDraft[] = [];
     for (const vertex of topologicalOrder(workflow.vertices)) {
-        const parentRefs = (vertex.parents ?? []).map((parent) => vertexIds.get(parent)!);
+        const declared = vertex.parents ?? [];
+        // A root of this submission inherits the attach point; a vertex with parents inside the
+        // submission already has its causal position.
+        const parentRefs = declared.length ? declared.map((parent) => vertexIds.get(parent)!) : [...(workflow.attachTo ?? [])];
         const scopeId = vertex.scope ? scopeIds.get(vertex.scope) : undefined;
         if (vertex.scope && !scopeId) throw new Error(`${vertex.id} names undeclared scope ${vertex.scope}`);
         const draft: EventDraft = {
             event_type: 'vertex/created',
             vertex_id: vertexIds.get(vertex.id)!,
             parent_refs: parentRefs,
-            payload: vertexPayload(vertex, contracts, resolved),
+            payload: vertexPayload(vertex, contracts, resolved, slotIds.get(vertex.id)),
         };
         // The scope is a column, not only a payload field: the database derives the executor class
         // from (payload, scope_id) as separate arguments, so a scoped vertex whose scope lives only
@@ -205,7 +226,28 @@ export function compileVertexDrafts(workflow: WorkflowSubmission, resolved: Reso
     return {vertexIds, scopeIds, drafts};
 }
 
-function vertexPayload(vertex: SubmittedVertex, contracts: ReadonlyMap<string, ResolvedToolView['document']['tools'][number]>, resolved: ResolvedToolView): Record<string, unknown> {
+/**
+ * Derives the slot coordinate of every interposed router.
+ *
+ * Only an interposed one gets a slot: a declared router already pins its template, and giving it a
+ * coordinate as well would create two ways to answer the same question.
+ */
+function routerSlotIds(workflow: WorkflowSubmission): Map<string, string> {
+    const byId = new Map(workflow.vertices.map((vertex) => [vertex.id, vertex]));
+    const slots = new Map<string, string>();
+    for (const vertex of workflow.vertices) {
+        if (vertex.kind !== 'router' || vertex.templateRef || !vertex.id.endsWith(INTERPOSED_ROUTER_SUFFIX)) continue;
+        const upstream = (vertex.parents ?? [])
+            .map((parent) => byId.get(parent))
+            .filter((parent): parent is SubmittedVertex & {kind: 'tool'} => parent?.kind === 'tool')
+            .map((parent) => parent.tool);
+        const target = vertex.id.slice(0, -INTERPOSED_ROUTER_SUFFIX.length);
+        slots.set(vertex.id, slotIdOf(workflow.workflowType ?? 'default', upstream, target));
+    }
+    return slots;
+}
+
+function vertexPayload(vertex: SubmittedVertex, contracts: ReadonlyMap<string, ResolvedToolView['document']['tools'][number]>, resolved: ResolvedToolView, slotId?: string): Record<string, unknown> {
     if (vertex.kind === 'planner') return {role: 'planner', ...(vertex.goal ? {goal: vertex.goal} : {})};
     if (vertex.kind === 'confirmation-barrier') return {role: 'confirmation-barrier'};
     if (vertex.kind === 'router') {
@@ -213,6 +255,7 @@ function vertexPayload(vertex: SubmittedVertex, contracts: ReadonlyMap<string, R
             role: 'router',
             origin: vertex.id.endsWith(INTERPOSED_ROUTER_SUFFIX) ? 'interposed' : 'declared',
             ...(vertex.templateRef ? {template_ref: vertex.templateRef} : {}),
+            ...(slotId ? {slot_id: slotId} : {}),
         };
     }
     const contract = contracts.get(vertex.tool);

@@ -59,6 +59,15 @@ export interface Contract {
     compensating?: boolean;
     footprint?: readonly string[];
     writes?: readonly string[];
+    /**
+     * Result fields this tool lifts into its `vertex/succeeded` event as a summary.
+     *
+     * A deterministic router decides on these and only these: the full result streams to blob
+     * storage, so a rule that read anything else could only be evaluated by dereferencing a blob.
+     * Each entry is a path into the result object, dotted for a nested field. Declaring none means
+     * no rule may reference this tool at all, which is the safe default rather than an oversight.
+     */
+    logFields?: readonly string[];
     timeoutMs: number;
     retry?: Retry;
     owner: string;
@@ -118,6 +127,7 @@ export function buildContract(contract: Contract, routeId: string): ToolContract
         }),
         owner: contract.owner,
         allowedRoles: [...contract.allowedRoles],
+        logFields: [...(contract.logFields ?? [])],
     });
 }
 

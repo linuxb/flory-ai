@@ -6,6 +6,7 @@ import {startInventoryService} from '../mocks/ecommerce/inventory-service.js';
 import {startLogisticsService} from '../mocks/ecommerce/logistics-service.js';
 import {startPaymentService} from '../mocks/ecommerce/payment-service.js';
 import {MockCommerceWorld} from '../mocks/ecommerce/services.js';
+import {startSourcingService} from '../mocks/ecommerce/sourcing-service.js';
 
 interface ResetRequest {
     seed?: string;
@@ -15,7 +16,7 @@ interface ResetRequest {
 /**
  * The deterministic test world.
  *
- * It owns the ledgers, the fault schedule, and the oracle snapshot, and it hosts four tool services. It is not itself
+ * It owns the ledgers, the fault schedule, and the oracle snapshot, and it hosts five tool services. It is not itself
  * a tool service and contains no gateway protocol: registration, heartbeat, and health belong to the SDK, and the
  * contracts belong to the services that implement them.
  */
@@ -29,13 +30,19 @@ export class Sandbox {
         return this.world;
     }
 
-    /** Starts the four tool services and registers them with the gateway. */
+    /** Starts the five tool services and registers them with the gateway. */
     async start(gatewayUrl: string, heartbeatIntervalMs?: number): Promise<void> {
         const options = {gatewayUrl, faults: this.faults, heartbeatIntervalMs};
         // The world is read through this.world on every call, so a reset swaps the ledgers underneath the services
         // without restarting them -- and therefore without disturbing the published tool view.
         const proxy = new Proxy({} as MockCommerceWorld, {get: (_target, property) => this.world[property as keyof MockCommerceWorld]});
-        this.services = await Promise.all([startInventoryService(proxy, options), startPaymentService(proxy, options), startLogisticsService(proxy, options), startChannelService(proxy, options)]);
+        this.services = await Promise.all([
+            startInventoryService(proxy, options),
+            startPaymentService(proxy, options),
+            startLogisticsService(proxy, options),
+            startChannelService(proxy, options),
+            startSourcingService(proxy, options),
+        ]);
         for (const service of this.services) {
             await service.register();
             service.start();

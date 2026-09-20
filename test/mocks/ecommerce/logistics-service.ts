@@ -10,6 +10,7 @@ export function startLogisticsService(world: MockCommerceWorld, options: MockSer
                 description: 'Price a shipment without reserving anything',
                 inputSchema: '{"type":"object","properties":{"carrier":{"type":"string"},"postcode":{"type":"string"}},' + '"required":["carrier","postcode"],"additionalProperties":false}',
                 footprint: ['carrier:{carrier}'],
+                logFields: ['price'],
             }),
             run: (args) => ({price: world.logistics.quote(String(args.carrier), String(args.postcode))}),
         },

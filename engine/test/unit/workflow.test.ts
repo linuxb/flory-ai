@@ -27,6 +27,32 @@ function view(): ResolvedToolView {
                 owner: 'team',
                 allowed_roles: ['operator'],
             },
+            {
+                tool_id: 'record.reserve',
+                tool_version: '1.0.0',
+                input_schema: {type: 'object'},
+                output_schema: {type: 'object'},
+                route_id: 'route-reserve',
+                adapter: {protocol: 'grpc'},
+                // Declares which field of its input names the operation, which is what makes two
+                // calls the same call.
+                txn: {
+                    effect_class: 'reversible',
+                    mode: 'tcc',
+                    idempotent_retryable: true,
+                    idempotency_key_path: '$.order_id',
+                    try_timeout_s: 60,
+                    confirm_tool: 'record.read',
+                    cancel_tool: 'record.read',
+                },
+                compensation_style: 'delta',
+                footprint: ['record'],
+                writes: ['record'],
+                timeout_ms: 1000,
+                retry_constraints: {max_attempts: 3, initial_backoff_ms: 100, multiplier_milli: 2500, max_backoff_ms: 5000},
+                owner: 'team',
+                allowed_roles: ['operator'],
+            },
         ],
     };
     return {identity: {tool_view_ref: 'tool-views/x.json', tool_view_digest: digest}, document, registry: loadToolRegistry(document)};
@@ -159,5 +185,32 @@ describe('workflow lowering and compilation', () => {
         const first = compileVertexDrafts(input, view());
         const second = compileVertexDrafts(input, view());
         expect(first.vertexIds.get('lookup')).not.toBe(second.vertexIds.get('lookup'));
+    });
+});
+
+describe('frozen idempotency key', () => {
+    /** Reads the transaction block a compiled tool vertex carries. */
+    function txnOf(vertices: WorkflowSubmission['vertices'], scopes?: WorkflowSubmission['scopes']): Record<string, unknown> {
+        const compiled = compileVertexDrafts(submission(vertices, scopes), view());
+        return (compiled.drafts[0]!.payload as {txn: Record<string, unknown>}).txn;
+    }
+
+    it('resolves the key the contract says names the operation', () => {
+        const txn = txnOf([{id: 'hold', kind: 'tool', tool: 'record.reserve', scope: 's', input: {order_id: 'ORDER-1', sku: 'SKU-1'}}], [{id: 's', members: ['hold']}]);
+        // `txn_bracket` is keyed by this, so leaving it unset makes the first bracket in the
+        // database collide with every later one.
+        expect(txn.idempotency_key).toBe('record.reserve:ORDER-1');
+    });
+
+    it('lets an author override it, and leaves a tool that declares no key path alone', () => {
+        const overridden = txnOf([{id: 'hold', kind: 'tool', tool: 'record.reserve', scope: 's', idempotencyKey: 'chosen', input: {order_id: 'ORDER-1'}}], [{id: 's', members: ['hold']}]);
+        expect(overridden.idempotency_key).toBe('chosen');
+        expect(txnOf([{id: 'look', kind: 'tool', tool: 'record.read'}])).not.toHaveProperty('idempotency_key');
+    });
+
+    it('fails the freeze when the declared path names nothing in the input', () => {
+        // An empty key would be accepted by the schema and then collide at the first other bracket,
+        // so refusing here is the only outcome that stays visible.
+        expect(() => txnOf([{id: 'hold', kind: 'tool', tool: 'record.reserve', scope: 's', input: {sku: 'SKU-1'}}], [{id: 's', members: ['hold']}])).toThrow('resolves to nothing');
     });
 });

@@ -4,6 +4,7 @@ import type {SubDagProposal} from '../../../engine/src/check-rules.js';
 export class MockInventoryService {
     private readonly onHand = new Map<string, number>();
     private readonly holds = new Map<string, {sku: string; quantity: number}>();
+    private readonly received = new Set<string>();
     readonly ledger: Array<{operation: string; key: string; sku: string; quantity: number}> = [];
 
     constructor(initial: Record<string, number>) {
@@ -14,6 +15,15 @@ export class MockInventoryService {
     check(sku: string): number {
         const held = [...this.holds.values()].filter((hold) => hold.sku === sku).reduce((total, hold) => total + hold.quantity, 0);
         return (this.onHand.get(sku) ?? 0) - held;
+    }
+
+    /** Lands wholesale stock in the warehouse, idempotently per purchase order. */
+    receive(purchaseOrderId: string, sku: string, quantity: number): number {
+        if (this.received.has(purchaseOrderId)) return this.onHand.get(sku) ?? 0;
+        this.received.add(purchaseOrderId);
+        this.onHand.set(sku, (this.onHand.get(sku) ?? 0) + quantity);
+        this.ledger.push({operation: 'receive', key: purchaseOrderId, sku, quantity});
+        return this.onHand.get(sku) ?? 0;
     }
 
     /** Creates one idempotent reservation. */
@@ -103,12 +113,78 @@ export class MockChannelService {
     }
 }
 
+/** One supplier's standing terms for one product, as a B2B catalogue would publish them. */
+export interface SupplierTerms {
+    supplier_id: string;
+    sku: string;
+    category: string;
+    unit_cost: number;
+    moq: number;
+    lead_time_days: number;
+}
+
+/**
+ * A test-only wholesale catalogue the retailer sources from.
+ *
+ * Deterministic and read-only: sourcing is where a retailer gathers facts, and every side effect in
+ * this world belongs to the actors below it. Keeping it effect-free is what lets a rule template
+ * decide on its output at a savepoint without opening a transaction.
+ */
+export class MockSupplierService {
+    private readonly terms: readonly SupplierTerms[] = [
+        {supplier_id: 'SUP-ANHUI', sku: 'SKU-ESP-01', category: 'portable-espresso', unit_cost: 34, moq: 50, lead_time_days: 21},
+        {supplier_id: 'SUP-SHENZHEN', sku: 'SKU-ESP-02', category: 'portable-espresso', unit_cost: 41, moq: 20, lead_time_days: 9},
+        {supplier_id: 'SUP-VIC', sku: 'SKU-ESP-03', category: 'portable-espresso', unit_cost: 58, moq: 10, lead_time_days: 3},
+    ];
+
+    /** Lists the catalogue for one category, cheapest first. */
+    search(category: string): SupplierTerms[] {
+        return this.terms.filter((entry) => entry.category === category).sort((first, second) => first.unit_cost - second.unit_cost);
+    }
+
+    /**
+     * Returns one supplier's terms for a quantity, and whether it will actually sell at it.
+     *
+     * A quantity below the minimum order is answered, not refused: it is a fact about the supplier,
+     * and a quote tool that threw on it would turn ordinary commercial information into a tool
+     * failure the workflow has to recover from.
+     */
+    quote(supplierId: string, quantity: number): SupplierTerms & {total_cost: number; quotable: boolean; reason: string} {
+        const entry = this.terms.find((candidate) => candidate.supplier_id === supplierId);
+        if (!entry) throw new Error(`unknown mock supplier ${supplierId}`);
+        const quotable = quantity >= entry.moq;
+        return {
+            ...entry,
+            total_cost: entry.unit_cost * quantity,
+            quotable,
+            reason: quotable ? 'terms available at this quantity' : `minimum order is ${entry.moq}`,
+        };
+    }
+}
+
+/** A test-only demand signal, the read a retailer prices and sizes an order against. */
+export class MockMarketService {
+    private readonly signals: Record<string, {trend: string; sell_price: number; competitor_count: number; monthly_units: number}> = {
+        'portable-espresso': {trend: 'surging', sell_price: 89, competitor_count: 4, monthly_units: 1800},
+        'wired-earbuds': {trend: 'declining', sell_price: 12, competitor_count: 57, monthly_units: 300},
+    };
+
+    /** Returns the demand signal for a category, or throws when the platform tracks none. */
+    demand(category: string): {trend: string; sell_price: number; competitor_count: number; monthly_units: number} {
+        const signal = this.signals[category];
+        if (!signal) throw new Error(`no mock demand signal for ${category}`);
+        return signal;
+    }
+}
+
 /** Aggregates all actor views while keeping their ledgers available to test oracles. */
 export class MockCommerceWorld {
-    readonly inventory = new MockInventoryService({'SKU-1': 100});
+    readonly inventory = new MockInventoryService({'SKU-1': 100, 'SKU-ESP-01': 0, 'SKU-ESP-02': 0, 'SKU-ESP-03': 6});
     readonly payment = new MockPaymentService();
     readonly logistics = new MockLogisticsService();
     readonly channel = new MockChannelService();
+    readonly supplier = new MockSupplierService();
+    readonly market = new MockMarketService();
 }
 
 /** Builds a two-scope DAG with parallel reads/tries, a confirmation barrier, and two sequential pivots. */

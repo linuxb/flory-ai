@@ -297,6 +297,7 @@ function vertexPayload(
     const contract = contracts.get(vertex.tool);
     if (!contract) throw new Error(`${vertex.id} names ${vertex.tool}, absent from the resolved tool view`);
     const retry = contract.retry_constraints;
+    const idempotencyKey = vertex.idempotencyKey ?? derivedIdempotencyKey(vertex, contract);
     return {
         role: 'tool',
         tool: contract.tool_id,
@@ -317,7 +318,7 @@ function vertexPayload(
         txn: {
             effect_class: contract.txn.effect_class,
             mode: contract.txn.mode,
-            ...(vertex.idempotencyKey ? {idempotency_key: vertex.idempotencyKey} : {}),
+            ...(idempotencyKey ? {idempotency_key: idempotencyKey} : {}),
             ...(contract.txn.try_timeout_s ? {try_timeout_s: contract.txn.try_timeout_s} : {}),
             ...(contract.txn.confirm_tool ? {confirm_tool: contract.txn.confirm_tool} : {}),
             ...(contract.txn.cancel_tool ? {cancel_tool: contract.txn.cancel_tool} : {}),
@@ -325,6 +326,42 @@ function vertexPayload(
             ...(contract.txn.status_tool ? {status_tool: contract.txn.status_tool} : {}),
         },
     };
+}
+
+/**
+ * Resolves the idempotency key a contract's declared key path names.
+ *
+ * Frozen here rather than chosen at execution: a bracket is keyed by it, and an attempt retried
+ * after a crash must present the same key or it becomes a second operation. A planner cannot supply
+ * it either — it would be inventing the identity of a side effect it is not accountable for.
+ *
+ * The declared path is honoured literally, because it is the contract's own statement of what makes
+ * two calls the same call. A tool keyed on the order says that two reserves for one order are one
+ * operation; if they are not, the contract is where that is fixed, not here.
+ *
+ * A declared path that the frozen input does not satisfy fails the freeze. The alternative is an
+ * empty key, and `txn_bracket` is keyed by it, so an empty one makes the first bracket anywhere in
+ * the database collide with every later one.
+ */
+function derivedIdempotencyKey(vertex: SubmittedToolVertex, contract: ResolvedToolView['document']['tools'][number]): string | undefined {
+    const path = contract.txn.idempotency_key_path;
+    if (!path) return undefined;
+    const segments = path
+        .replace(/^\$\.?/, '')
+        .split('.')
+        .filter(Boolean);
+    let current: unknown = vertex.input ?? {};
+    for (const segment of segments) {
+        if (!current || typeof current !== 'object' || Array.isArray(current)) {
+            current = undefined;
+            break;
+        }
+        current = (current as Record<string, unknown>)[segment];
+    }
+    if (typeof current !== 'string' && typeof current !== 'number') {
+        throw new Error(`${vertex.id} calls ${contract.tool_id}, whose idempotency key path ${path} resolves to nothing in its input`);
+    }
+    return `${contract.tool_id}:${current}`;
 }
 
 /**

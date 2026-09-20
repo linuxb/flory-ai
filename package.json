@@ -26,6 +26,8 @@
     "test:rbac": "bash scripts/rbac-e2e.sh",
     "e2e:up": "node scripts/e2e-up.mjs",
     "record:tool-view": "node scripts/record-tool-view.mjs",
+    "demo:coordinator": "go -C coordinator run ./cmd/coordinator",
+    "demo:retail": "tsx scripts/demo/b2b2c-retail.ts",
     "test": "vitest run",
     "verify": "npm run generate:check && npm run build && npm run test"
   },

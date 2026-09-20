@@ -41,6 +41,8 @@ interface ToolPayload {
  * only refuses to act outside it.
  */
 export class ReadExecutor {
+    private readonly logFieldCache = new Map<string, Map<string, readonly string[]>>();
+
     constructor(
         private readonly store: EventStore,
         private readonly pool: Pool,
@@ -74,7 +76,14 @@ export class ReadExecutor {
                 attempt: item.attempt,
             });
             if (result.outcome === 'succeeded') {
-                await this.store.appendEvents(item.runId, [{event_type: 'vertex/succeeded', vertex_id: item.vertexId, payload: {attempts: item.attempt, result: result.result ?? {}}}]);
+                const summary = await this.summarize(item, result.result ?? {});
+                await this.store.appendEvents(item.runId, [
+                    {
+                        event_type: 'vertex/succeeded',
+                        vertex_id: item.vertexId,
+                        payload: {attempts: item.attempt, result: result.result ?? {}, ...(Object.keys(summary).length ? {log_fields: summary} : {})},
+                    },
+                ]);
                 await this.complete(item.vertexId);
                 return {vertexId: item.vertexId, outcome: 'succeeded'};
             }
@@ -94,6 +103,40 @@ export class ReadExecutor {
             await this.complete(item.vertexId);
             return {vertexId: item.vertexId, outcome: 'refused', detail};
         }
+    }
+
+    /**
+     * Lifts the summary fields this tool's contract declares out of its result.
+     *
+     * A deterministic router decides on these and nothing else, so if they are not lifted here they
+     * do not exist as far as any rule is concerned. The contract is read from the view the vertex is
+     * pinned to rather than the current one: a tool that has since stopped declaring a field must
+     * not change how an already-frozen graph is summarized.
+     *
+     * A declared field absent from the result is left out rather than written as null. A router then
+     * refuses to decide, which is the correct outcome: a missing field and a field that is genuinely
+     * null are different facts, and collapsing them would route real business on a guess.
+     */
+    private async summarize(item: ReadWorkItem, result: Record<string, unknown>): Promise<Record<string, unknown>> {
+        const declared = await this.declaredLogFields(item.toolViewDigest, item.tool);
+        const summary: Record<string, unknown> = {};
+        for (const field of declared) {
+            const value = valueAtPath(result, field);
+            if (value !== undefined) summary[field] = value;
+        }
+        return summary;
+    }
+
+    /** Reads one tool's declared log fields from its pinned view, caching by the digest that names it. */
+    private async declaredLogFields(toolViewDigest: string, tool: string): Promise<readonly string[]> {
+        let fields = this.logFieldCache.get(toolViewDigest);
+        if (!fields) {
+            const resolved = await this.gateway.resolveToolView(toolViewDigest);
+            // A content address never names two documents, so one resolution per digest is enough.
+            fields = new Map(resolved.document.tools.map((contract) => [contract.tool_id, contract.log_fields ?? []]));
+            this.logFieldCache.set(toolViewDigest, fields);
+        }
+        return fields.get(tool) ?? [];
     }
 
     private async claim(): Promise<ReadWorkItem | null> {
@@ -125,4 +168,14 @@ export class ReadExecutor {
     private async release(vertexId: string, delayMs = 1000): Promise<void> {
         await this.pool.query('SELECT release_read($1, $2, $3)', [this.worker, vertexId, delayMs]);
     }
+}
+
+/** Resolves one dotted path inside a result object, or undefined when any step is missing. */
+function valueAtPath(result: Record<string, unknown>, path: string): unknown {
+    let current: unknown = result;
+    for (const segment of path.split('.')) {
+        if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+        current = (current as Record<string, unknown>)[segment];
+    }
+    return current;
 }

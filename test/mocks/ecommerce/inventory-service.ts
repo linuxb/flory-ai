@@ -15,6 +15,7 @@ export function startInventoryService(world: MockCommerceWorld, options: MockSer
                 description: 'Report stock available after open holds',
                 inputSchema: '{"type":"object","properties":{"sku":{"type":"string"}},"required":["sku"],"additionalProperties":false}',
                 footprint: ['inventory:{sku}'],
+                logFields: ['available'],
             }),
             run: (args) => ({available: world.inventory.check(String(args.sku))}),
         },

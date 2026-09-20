@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {Pool, type PoolClient} from 'pg';
-import type {ScopeSnapshot} from './check-rules.js';
+import type {ScopeAdmissionBlock, ScopeSnapshot} from './check-rules.js';
 import {assertEventDraft, type BusinessFactDraft, type DomainAppendResult, type EventDraft, type ForkRequest, type ForkSubstitution, type StoredBusinessEvent, type StoredEvent} from './events.js';
 
 /** A service role permitted to append events. */
@@ -153,6 +153,12 @@ export interface RunAdmissionContext {
     isCounterfactual: boolean;
 }
 
+/**
+ * What a freeze decided once it could see the run's scopes under lock: the events to append, or a
+ * refusal whose reasons the caller already holds.
+ */
+export type FreezeDecision = {admitted: true; events: EventDraft[]} | {admitted: false};
+
 export class EventStore {
     private readonly pool: Pool;
     constructor(private readonly options: EventStoreOptions) {
@@ -179,12 +185,43 @@ export class EventStore {
         const result = await this.pool.query<{run_seq: string}>('SELECT run_seq FROM append_events($1, $2::jsonb)', [runId, JSON.stringify(events)]);
         return result.rows.map((row) => Number(row.run_seq));
     }
-    /** Atomically appends a frozen-subgraph event and its vertex-created events. */
-    async appendFrozenSubgraph(runId: string, frozen: EventDraft, vertices: EventDraft[]): Promise<number[]> {
+    /**
+     * Takes one freeze decision and its append inside a single transaction that holds the run's
+     * scope rows.
+     *
+     * Reading the scope state and appending afterwards is not the same thing as deciding under the
+     * lock. Between the two, a sweeper can fence the very scope the decision was made about, and
+     * the vertices this freeze writes would then queue work under a cancellation already in
+     * progress. Holding `txn_scope FOR UPDATE` across the append is also the schema's lock order
+     * (Doc 08 §3) — scope first, then the `work_queue` rows the enqueue trigger inserts — which is
+     * what lets branch admission, worker claiming and sweeper cancellation serialize through one
+     * row instead of deadlocking against each other.
+     *
+     * `decide` runs exactly once, inside the open transaction, and must stay pure: any I/O of its
+     * own would be performed while holding those locks.
+     */
+    async freezeUnderScopeLock(runId: string, decide: (context: RunAdmissionContext) => FreezeDecision): Promise<number[] | null> {
         this.requireEngine();
-        if (frozen.event_type !== 'subgraph/frozen' || vertices.some((event) => event.event_type !== 'vertex/created'))
-            throw new Error('frozen subgraph requires one frozen event followed by vertex/created events');
-        return this.appendEvents(runId, [frozen, ...vertices]);
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const decision = decide(await this.readAdmissionContextWith(client, runId));
+            if (!decision.admitted) {
+                await client.query('ROLLBACK');
+                return null;
+            }
+            const [frozen, ...vertices] = decision.events;
+            if (frozen?.event_type !== 'subgraph/frozen' || vertices.some((event) => event.event_type !== 'vertex/created'))
+                throw new Error('frozen subgraph requires one frozen event followed by vertex/created events');
+            const sequences = await this.appendWith(client, runId, decision.events);
+            await client.query('COMMIT');
+            return sequences;
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
     }
     /** Reads one run in ascending stream-sequence order, optionally through a boundary. */
     async readStream(runId: string, atRunSeq?: number): Promise<StoredEvent[]> {
@@ -328,34 +365,6 @@ export class EventStore {
     }
 
     /**
-     * Reads everything freeze admission needs to know about a run it is about to freeze into.
-     *
-     * The two facts travel together because one gate consumes both: the scopes above decide where a
-     * router sits, and a fork run makes the whole context read-only. `half-open` is not a stored
-     * state — it is an unclosed scope holding a sealed but unconfirmed try, which is exactly what
-     * forbids a fresh scope below it. Only `committed` and `cancelled` are terminal; `cancelling`,
-     * `suspended`, `pivot-inflight` and `pivot-passed` are all still unclosed, so none of them may
-     * be mistaken for a savepoint. `seed_floor` is the authoritative record that a run is a fork.
-     */
-    async readAdmissionContext(runId: string): Promise<RunAdmissionContext> {
-        const scopes = await this.pool.query<{scope_id: string; state: string; pivots: number; sealed: boolean}>(
-            `SELECT s.scope_id,
-                    s.state,
-                    (s.pivot_vertex_id IS NOT NULL)::int AS pivots,
-                    EXISTS (SELECT 1 FROM txn_bracket b WHERE b.scope_id = s.scope_id AND b.state = 'sealed') AS sealed
-               FROM txn_scope s
-              WHERE s.run_id = $1
-              ORDER BY s.opened_seq`,
-            [runId],
-        );
-        const run = await this.pool.query<{fork: boolean}>('SELECT seed_floor IS NOT NULL AS fork FROM run WHERE run_id = $1', [runId]);
-        return {
-            scopes: scopes.rows.map((row) => ({scopeId: row.scope_id, state: snapshotState(row.state, row.sealed), pivotCount: Number(row.pivots)})),
-            isCounterfactual: run.rows[0]?.fork ?? false,
-        };
-    }
-
-    /**
      * Records one rule-template mutation in the configuration stream.
      *
      * A publication has no causing orchestration step, so it takes neither a run nor the
@@ -368,6 +377,25 @@ export class EventStore {
         return Number(result.rows[0]!.append_config_event);
     }
 
+    /**
+     * Reads everything freeze admission needs to know about the run it is freezing into, holding
+     * every one of that run's scope rows for the rest of the transaction.
+     *
+     * The two facts travel together because one gate consumes both: the scopes above decide where a
+     * router sits, and a fork run makes the whole context read-only. `half-open` is not a stored
+     * state — it is an unclosed scope holding a sealed but unconfirmed try, which is exactly what
+     * forbids a fresh scope below it. Only `committed` and `cancelled` are terminal; `cancelling`,
+     * `suspended`, `pivot-inflight` and `pivot-passed` are all still unclosed, so none of them may
+     * be mistaken for a savepoint. `seed_floor` is the authoritative record that a run is a fork.
+     */
+    private async readAdmissionContextWith(client: PoolClient, runId: string): Promise<RunAdmissionContext> {
+        const scopes = await client.query<{scope_id: string; state: string; pivot_count: number; has_sealed_try: boolean; has_expired_try: boolean}>(
+            'SELECT scope_id, state, pivot_count, has_sealed_try, has_expired_try FROM lock_run_scopes($1)',
+            [runId],
+        );
+        const run = await client.query<{fork: boolean}>('SELECT seed_floor IS NOT NULL AS fork FROM run WHERE run_id = $1', [runId]);
+        return {scopes: scopes.rows.map(rowToScopeSnapshot), isCounterfactual: run.rows[0]?.fork ?? false};
+    }
     private async appendWith(client: PoolClient, runId: string, events: EventDraft[]): Promise<number[]> {
         events.forEach(assertEventDraft);
         const result = await client.query<{run_seq: string}>('SELECT run_seq FROM append_events($1, $2::jsonb)', [runId, JSON.stringify(events)]);
@@ -382,9 +410,32 @@ export class EventStore {
     }
 }
 
+/** Maps one locked scope row onto the snapshot the pure checker reads. */
+function rowToScopeSnapshot(row: {scope_id: string; state: string; pivot_count: number; has_sealed_try: boolean; has_expired_try: boolean}): ScopeSnapshot {
+    const block = admissionBlock(row.state, row.has_expired_try);
+    return {
+        scopeId: row.scope_id,
+        state: snapshotState(row.state, row.has_sealed_try),
+        pivotCount: Number(row.pivot_count),
+        ...(block ? {admissionBlock: block} : {}),
+    };
+}
+
 /** Maps a stored scope state onto the four states admission distinguishes. */
 function snapshotState(stored: string, hasSealedTry: boolean): ScopeSnapshot['state'] {
     if (stored === 'committed') return 'committed';
     if (stored === 'cancelled') return 'cancelled';
     return hasSealedTry ? 'half-open' : 'open';
+}
+
+/**
+ * Reports why a scope refuses new work, when it does.
+ *
+ * `snapshotState` deliberately collapses every unclosed state onto `open` or `half-open`, because
+ * that is all the structural rules need to know. Admission needs the distinction it drops: a
+ * fencing scope and an open one look identical to R12 and behave nothing alike.
+ */
+function admissionBlock(stored: string, hasExpiredSealedTry: boolean): ScopeAdmissionBlock | undefined {
+    if (stored === 'cancelling' || stored === 'suspended' || stored === 'pivot-inflight' || stored === 'pivot-passed') return stored;
+    return hasExpiredSealedTry ? 'expired-try' : undefined;
 }

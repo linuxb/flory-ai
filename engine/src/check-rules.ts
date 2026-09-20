@@ -76,7 +76,23 @@ export interface ScopeSnapshot {
     state: 'open' | 'half-open' | 'committed' | 'cancelled';
     /** Pivots already bound to this scope in earlier freezes; R3 counts across them. */
     pivotCount: number;
+    /** Why this scope can no longer take new work, when it cannot. Absent on a scope that can. */
+    admissionBlock?: ScopeAdmissionBlock;
 }
+
+/**
+ * A runtime reason a scope refuses work, as distinct from the structural reasons R1-R14 give.
+ *
+ * Each names a scope whose shape is fine and whose moment has passed: one that is fencing, one
+ * waiting for a person, one reserved for an admitted pivot, one that has passed its pivot and may
+ * now run only what was admitted before it, and one whose sealed try is past its deadline and is
+ * therefore already a cancellation candidate. Freezing work under any of them queues a vertex that
+ * claim eligibility will refuse, or worse, one that races the fence.
+ *
+ * A committed or cancelled scope is not here: both are terminal, so neither gates what comes after
+ * it, and a freeze at that savepoint is the ordinary case.
+ */
+export type ScopeAdmissionBlock = 'cancelling' | 'suspended' | 'pivot-inflight' | 'pivot-passed' | 'expired-try';
 
 /** Where a router sits relative to the transaction structure above it. */
 export type RouterPlacement = 'at_savepoint' | 'inside_scope';
@@ -92,6 +108,31 @@ export type RouterPlacement = 'at_savepoint' | 'inside_scope';
  */
 export function derivePlacement(existingScopes: readonly ScopeSnapshot[]): RouterPlacement {
     return existingScopes.some((scope) => scope.state === 'open' || scope.state === 'half-open') ? 'inside_scope' : 'at_savepoint';
+}
+
+/**
+ * Refuses a freeze into a scope that can no longer run what it would queue.
+ *
+ * This is the runtime half of R12, and the reason Doc 02 §3.4 says freeze admission does not
+ * promise zero runtime rejection: the structural rules judge shape, which does not change, while a
+ * scope's state does. It has to be evaluated under the scope lock that the freeze then commits
+ * with, or it is only a guess about the moment it was read.
+ */
+export function checkScopeAdmission(existingScopes: readonly ScopeSnapshot[]): CheckResult {
+    const violations: CheckViolation[] = [];
+    for (const scope of existingScopes) {
+        if (!scope.admissionBlock) continue;
+        violations.push({rule: 'R12', message: `scope ${scope.scopeId} admits no new work: ${blockReason(scope.admissionBlock)}`, vertices: []});
+    }
+    return {accepted: violations.length === 0, violations};
+}
+
+/** States one admission block in the terms the log records it in. */
+function blockReason(block: ScopeAdmissionBlock): string {
+    if (block === 'expired-try') return 'it holds a sealed try past its deadline';
+    if (block === 'pivot-inflight') return 'its pivot is inflight and its outcome is unresolved';
+    if (block === 'pivot-passed') return 'its pivot has passed, so it runs only work admitted before it';
+    return `it is ${block}`;
 }
 
 /** The complete admission result for a proposal. */

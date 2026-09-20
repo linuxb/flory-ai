@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {checkSubDag, ToolRegistry, type ProposalVertex, type RuleCode, type SubDagProposal} from '../../src/check-rules.js';
+import {checkScopeAdmission, checkSubDag, ToolRegistry, type ProposalVertex, type RuleCode, type ScopeSnapshot, type SubDagProposal} from '../../src/check-rules.js';
 
 function validRegistry(): ToolRegistry {
     const registry = new ToolRegistry();
@@ -209,5 +209,30 @@ describe('Doc 02 check rules', () => {
             ],
         );
         expect(checkSubDag(graph, validRegistry()).violations.map((violation) => violation.rule)).not.toContain('R7');
+    });
+});
+
+describe('runtime scope admission', () => {
+    function scope(scopeId: string, admissionBlock?: ScopeSnapshot['admissionBlock']): ScopeSnapshot {
+        return {scopeId, state: 'half-open', pivotCount: 0, ...(admissionBlock ? {admissionBlock} : {})};
+    }
+
+    it('admits a run whose scopes can all still take work', () => {
+        expect(checkScopeAdmission([scope('healthy'), {scopeId: 'closed', state: 'committed', pivotCount: 1}])).toEqual({accepted: true, violations: []});
+    });
+
+    it('refuses each state that has passed the moment work could run in it', () => {
+        for (const block of ['cancelling', 'suspended', 'pivot-inflight', 'pivot-passed', 'expired-try'] as const) {
+            const result = checkScopeAdmission([scope(`scope-${block}`, block)]);
+            expect(result.accepted).toBe(false);
+            expect(result.violations.map((violation) => violation.rule)).toEqual(['R12']);
+            expect(result.violations[0]!.message).toContain(`scope-${block}`);
+        }
+    });
+
+    it('reports every blocked scope rather than the first, because a repair has to see them all', () => {
+        const result = checkScopeAdmission([scope('first', 'cancelling'), scope('second'), scope('third', 'expired-try')]);
+        expect(result.violations).toHaveLength(2);
+        expect(result.violations.map((violation) => violation.message).join(' ')).toContain('past its deadline');
     });
 });

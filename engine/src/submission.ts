@@ -1,4 +1,4 @@
-import {checkFreezeAdmission, checkSubDag, derivePlacement, type CheckViolation, type RouterPlacement, type ScopeSnapshot} from './check-rules.js';
+import {checkFreezeAdmission, checkScopeAdmission, checkSubDag, derivePlacement, type CheckViolation, type RouterPlacement, type ScopeSnapshot} from './check-rules.js';
 import type {EventDraft} from './events.js';
 import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from './gateway-client.js';
 import type {PublishedRuleTemplate} from './rule-template.js';
@@ -57,9 +57,6 @@ export class WorkflowSubmitter {
     async submit(runId: string, submission: WorkflowSubmission, authorization?: DiscoveryAuthorization): Promise<SubmissionResult> {
         const {workflow, interposed} = normalizeWorkflow(submission);
         const resolved = await this.gateway.resolveToolView(undefined, authorization);
-        // Read once, before anything is appended: admission and placement must both see the same
-        // scope state, and a later read could see a scope this very freeze went on to change.
-        const context = await this.store.readAdmissionContext(runId);
 
         const proposedSeq = await this.appendOne(runId, {
             event_type: 'subgraph/proposed',
@@ -77,36 +74,57 @@ export class WorkflowSubmitter {
         const unresolvable = resolutionViolations(workflow, resolved);
         if (unresolvable.length) return this.reject(runId, proposedSeq, 'resolution', unresolvable);
 
-        const result = checkSubDag(lowerToProposal(workflow), resolved.registry, context.scopes);
-        if (!result.accepted) {
-            // A malformed published contract makes every submission rejectable, so an author is told
-            // which of the two it is rather than being blamed for the catalogue.
-            const stage: RejectionStage = result.violations.every((violation) => REGISTRY_RULES.has(violation.rule)) ? 'registry' : 'admission';
-            return this.reject(runId, proposedSeq, stage, result.violations);
-        }
+        // Everything that reads scope state happens inside one locked transaction, and a clean
+        // decision's freeze commits with it. Admission and placement must see the same scopes as
+        // each other and as the append: a read taken before the lock could describe a scope this
+        // very freeze then queues work under while a sweeper is fencing it.
+        let refusal: {stage: RejectionStage; violations: CheckViolation[]} | undefined;
+        let vertexIds = new Map<string, string>();
+        const sequences = await this.store.freezeUnderScopeLock(runId, (context) => {
+            const runtime = checkScopeAdmission(context.scopes);
+            if (!runtime.accepted) {
+                refusal = {stage: 'admission', violations: runtime.violations};
+                return {admitted: false};
+            }
 
-        // Freeze-time admission of the branches a router may later emit. This is the whole point of
-        // publishing rules ahead of time: a branch that is illegal where this router sits is refused
-        // now, before any tool runs, rather than when the condition that selects it happens to hold.
-        const bound = this.bindRouters(workflow, derivePlacement(context.scopes));
-        const branchViolations = admissionViolations(bound, resolved, context.scopes, context.isCounterfactual);
-        if (branchViolations.length) return this.reject(runId, proposedSeq, 'admission', branchViolations);
+            const result = checkSubDag(lowerToProposal(workflow), resolved.registry, context.scopes);
+            if (!result.accepted) {
+                // A malformed published contract makes every submission rejectable, so an author is
+                // told which of the two it is rather than being blamed for the catalogue.
+                const stage: RejectionStage = result.violations.every((violation) => REGISTRY_RULES.has(violation.rule)) ? 'registry' : 'admission';
+                refusal = {stage, violations: result.violations};
+                return {admitted: false};
+            }
 
-        const compiled = compileVertexDrafts(workflow, resolved, new Map([...bound].map(([authorId, router]) => [authorId, router.binding])));
-        const frozen: EventDraft = {
-            event_type: 'subgraph/frozen',
-            payload: {
-                proposed_seq: proposedSeq,
-                tool_view_ref: resolved.identity.tool_view_ref,
-                tool_view_digest: resolved.identity.tool_view_digest,
-                // The author id has nowhere to live on a vertex payload, which is closed, so the
-                // mapping is recorded here. It is also the delta a console renders a new branch from.
-                vertices: workflow.vertices.map((vertex) => ({author_id: vertex.id, vertex_id: compiled.vertexIds.get(vertex.id)!, role: vertex.kind})),
-                scopes: [...compiled.scopeIds].map(([authorId, scopeId]) => ({author_id: authorId, scope_id: scopeId})),
-            },
-        };
-        const sequences = await this.store.appendFrozenSubgraph(runId, frozen, compiled.drafts);
-        return {status: 'accepted', proposedSeq, frozenSeq: sequences[0]!, vertexIds: compiled.vertexIds};
+            // Freeze-time admission of the branches a router may later emit. This is the whole point
+            // of publishing rules ahead of time: a branch that is illegal where this router sits is
+            // refused now, before any tool runs, rather than when the condition that selects it
+            // happens to hold.
+            const bound = this.bindRouters(workflow, derivePlacement(context.scopes));
+            const branchViolations = admissionViolations(bound, resolved, context.scopes, context.isCounterfactual);
+            if (branchViolations.length) {
+                refusal = {stage: 'admission', violations: branchViolations};
+                return {admitted: false};
+            }
+
+            const compiled = compileVertexDrafts(workflow, resolved, new Map([...bound].map(([authorId, router]) => [authorId, router.binding])));
+            vertexIds = compiled.vertexIds;
+            const frozen: EventDraft = {
+                event_type: 'subgraph/frozen',
+                payload: {
+                    proposed_seq: proposedSeq,
+                    tool_view_ref: resolved.identity.tool_view_ref,
+                    tool_view_digest: resolved.identity.tool_view_digest,
+                    // The author id has nowhere to live on a vertex payload, which is closed, so the
+                    // mapping is recorded here. It is also the delta a console renders a new branch from.
+                    vertices: workflow.vertices.map((vertex) => ({author_id: vertex.id, vertex_id: compiled.vertexIds.get(vertex.id)!, role: vertex.kind})),
+                    scopes: [...compiled.scopeIds].map(([authorId, scopeId]) => ({author_id: authorId, scope_id: scopeId})),
+                },
+            };
+            return {admitted: true, events: [frozen, ...compiled.drafts]};
+        });
+        if (refusal) return this.reject(runId, proposedSeq, refusal.stage, refusal.violations);
+        return {status: 'accepted', proposedSeq, frozenSeq: sequences![0]!, vertexIds};
     }
 
     /**

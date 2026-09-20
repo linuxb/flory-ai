@@ -9,9 +9,8 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 | W1 | Formal verification stage S3 | [Doc 06 §12](../design/06-validation-harness.md#12-formal-verification-design) | Trigger-gated: waiting on first production traffic |
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
-| W5 | Coordinator lock order, claim eligibility, and attempt evidence | [Doc 07 §3.1](../design/07-distributed-transaction-coordinator.md#31-work-scheduler), [Doc 02 §4.4](../design/02-transaction-model.md#44-orphan-try-detection), [Doc 08 §3](../design/08-database-schema.md#3-write-time-guards) | Not started; the code contradicts the documented lock order |
 
-W4 stays in the Engine apart from one table; W5 is the only stream that rewrites the Coordinator's claim path, so the two should not run concurrently.
+W4 stays in the Engine apart from one table, so it does not contend with the remaining streams.
 
 ---
 
@@ -72,35 +71,3 @@ The two planes, their sequences, and the dual-allocation append path are built. 
 - No reader folds `global_seq`.
 
 **Exclusions.** Stream-identity assignment policy — which domain concepts deserve an aggregate root, and how `stream_id` is derived from `task_input` — belongs with the domain teams that own the reducers. Snapshot retention and compaction, and CDC consumers of `global_seq`, are deferred.
-
-## W5 — Coordinator lock order, claim eligibility, and attempt evidence
-
-Split out of W3, which had lumped it in: none of it concerns routers. The documents describe a
-discipline the code does not keep, so this stream closes a divergence rather than adding a feature.
-
-**The divergence.** [Doc 08 §3](../design/08-database-schema.md#3-write-time-guards) and
-`AGENTS.md` state one lock order, `txn_scope` before `work_queue`. The implementation does the
-reverse and across transaction boundaries: `claim_ready_work` takes `work_queue FOR UPDATE SKIP
-LOCKED` and never touches `txn_scope`, while `admit_pivot` and `request_scope_cancel` take the
-scope first and then call `append_events`, which takes the run row. That is a genuine deadlock
-cycle, not a stylistic mismatch.
-
-**Increments.**
-
-1. Add the `txn_attempt` table and record an attempt's identity, idempotency key and start durably
-   before any side-effecting request leaves the executor. No such table exists today, and nothing
-   is written before the adapter call.
-2. Enforce one lock order on every state-altering path, and add the claim-eligibility filter by
-   scope state to `claim_ready_work`.
-3. Rewrite the sweeper around attempt evidence: defer on a live lease, suspend on an unresolved
-   attempt, and cancel only a scope with an expired sealed try, no live lease and no unresolved
-   attempt.
-
-**Exit criteria.**
-
-- A scope holding an unresolved attempt suspends; no `txn/cancel {phase: requested}` is appended
-  for it, and neither automatic cancellation nor redispatch occurs.
-- Cancellation and claiming race decisively in both directions.
-- Already-admitted post-pivot forward work stays claimable while pre-pivot work and backward
-  cancellation are blocked.
-- The lock order in the code matches the one the documents state.

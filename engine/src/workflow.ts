@@ -66,6 +66,17 @@ export interface WorkflowSubmission {
      * rather than the template naming a vertex it cannot know.
      */
     attachTo?: string[];
+    /**
+     * Who decided this submission exists.
+     *
+     * `submitted` is an author or a planner proposing work; `router` is a rule template emitting a
+     * branch with no model consulted. The distinction is the whole point of a deterministic router
+     * and it is invisible in the graph's shape, so a reader that had to infer it would be left
+     * comparing a parent router's start sequence against its child's creation — or parsing a
+     * submission id. Recording it makes an operator's most basic question about a branch — did a
+     * model choose this? — answerable from the event that created it.
+     */
+    source?: 'submitted' | 'router';
 }
 
 /** A submission after the engine has inserted every router R14 requires. */

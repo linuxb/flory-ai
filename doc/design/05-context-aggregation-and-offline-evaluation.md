@@ -90,7 +90,7 @@ evaluate({
 }) → evaluation_result
 ```
 
-The engine forks at the divergence vertex, substitutes the pins, invalidates the vertex's causal descendants, regenerates that chain while lazily merging causally independent events up to `eval_up_to_seq`, then hands the evaluator **two surfaces** — one folded from the source run, one from the fork — at comparable positions. Any domain events the fork produces land in its own quarantined stream and are invisible to production folds ([01 §5.2](./01-jit-dag-and-event-log.md#52-fork-is-a-lazy-causal-counterfactual-on-an-immutable-history)). The evaluator is scenario-specific and owns the entire notion of "better":
+The engine forks at the divergence vertex, substitutes the pins, invalidates the vertex's causal descendants, regenerates that chain while lazily merging causally independent events up to `eval_up_to_seq`, then hands the evaluator **two surfaces** — one folded from the source run, one from the fork — at comparable positions. Any domain events the fork produces land in its own quarantined stream and are invisible to production folds ([01 §5.2](./01-jit-dag-and-event-log.md#52-fork-is-a-bounded-causal-counterfactual-on-an-immutable-history)). The evaluator is scenario-specific and owns the entire notion of "better":
 
 | Evaluator | Compares | Typical use |
 |---|---|---|

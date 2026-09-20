@@ -138,7 +138,7 @@ describe('PostgreSQL event store', () => {
         await Promise.all([first.end(), second.end()]);
     });
 
-    it('forks lazily, numbers own events above eval_up_to_seq, and reproduces a no-substitution surface after merge', async () => {
+    it('inherits everything at creation, numbers its own events above eval_up_to_seq, and reproduces a no-substitution surface', async () => {
         const run = await plannerRun();
         const result = await engine.fork({
             source_run_id: run,
@@ -151,9 +151,8 @@ describe('PostgreSQL event store', () => {
             harness_state_version: 'harness@v1',
         });
         expect(result.end_seed_seq).toBe(4);
-        expect(result.seed_event_count).toBe(2);
-        expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([3]);
-        expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([]);
+        // Two ancestors and one causally independent event, all copied in the creating transaction.
+        expect(result.inherited_event_count).toBe(3);
         const source = await engine.readStream(run);
         const child = await engine.readStream(result.child_run_id);
         expect(replayIdentity(source, child).passed).toBe(true);
@@ -199,7 +198,6 @@ describe('PostgreSQL event store', () => {
         });
         expect((await engine.readStream(run)).find((event) => event.run_seq === 2)?.pin_version).toBe('model://planner@v1');
         expect(result.end_seed_seq).toBe(8);
-        expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([5, 7]);
         const child = await engine.readStream(result.child_run_id);
         expect(child.find((event) => event.run_seq === 2)?.pin_version).toBe('model://planner@v2');
         expect(child.map((event) => event.run_seq)).toEqual([1, 2, 5, 7, 8]);
@@ -225,7 +223,8 @@ describe('PostgreSQL event store', () => {
             projector_version: 'projector@v1',
             harness_state_version: 'harness@v1',
         });
-        expect(await engine.mergeIndependentEvents(result.child_run_id)).toEqual([3, 4, 5]);
+        // The inherited bracket is present from creation, so the guard has something to refuse.
+        expect(result.inherited_event_count).toBe(5);
         await expect(coordinator.appendEvents(result.child_run_id, [{event_type: 'txn/cancel', scope_id: openScope, payload: {idempotency_key: `scope-${key}`, phase: 'requested'}}])).rejects.toThrow(
             'inherited transaction bracket',
         );

@@ -65,7 +65,7 @@ export class WorkflowSubmitter {
                 tool_view_digest: resolved.identity.tool_view_digest,
                 submission_id: submission.submissionId,
                 submission_digest: submissionDigest(submission),
-                source: 'submitted',
+                source: submission.source ?? 'submitted',
                 vertex_count: workflow.vertices.length,
                 interposed_routers: interposed,
             },

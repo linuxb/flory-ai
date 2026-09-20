@@ -15,17 +15,15 @@ export interface ForkResult {
     child_run_id: string;
     /** Run sequence of the fork's `run/end-seed` event, always `eval_up_to_seq + 1`. */
     end_seed_seq: number;
-    /** Inherited events copied into the seed before `run/end-seed`. */
-    seed_event_count: number;
-    /** Causally independent events left for lazy merging via {@link EventStore.mergeIndependentEvents}. */
-    deferred_event_count: number;
+    /** Inherited events copied before `run/end-seed`: the seed and the independent events both. */
+    inherited_event_count: number;
 }
 /** The causal partition of a source window computed for one fork. */
 export interface ForkSlice {
-    /** Inherited events at or before the divergence vertex, copied as the fork's seed. */
+    /** Inherited events at or before the divergence vertex. */
     seed: StoredEvent[];
-    /** Causally independent events after the divergence vertex, merged lazily on demand. */
-    deferred: StoredEvent[];
+    /** Inherited events after the divergence vertex that are causally independent of it. */
+    independent: StoredEvent[];
     /** Causal descendants of the substituted divergence vertex; never inherited, the fork regenerates them. */
     invalidated: StoredEvent[];
     /** Run sequence of the divergence vertex's `vertex/created` event. */
@@ -58,8 +56,9 @@ export function causalDescendants(events: readonly StoredEvent[], vertexId: stri
  * Partitions a source stream for a lazy causal fork (Doc 01 §5.2, Doc 08 §4). With substitutions present, the
  * divergence vertex's causal descendants and its own execution events are invalidated — their cause
  * changed, so the fork regenerates them; with no substitutions nothing is invalidated and everything
- * merges. All remaining events up to `eval_up_to_seq` are inherited: at or before the divergence
- * vertex they form the seed, after it they are deferred for lazy merging.
+ * merges. All remaining events up to `eval_up_to_seq` are inherited, split only to describe where
+ * they sit: at or before the divergence vertex they are the seed, after it they are the causally
+ * independent remainder. Both are copied when the counterfactual is created.
  */
 export function computeForkSlice(source: readonly StoredEvent[], atVertexId: string, substitutions: readonly ForkSubstitution[], evalUpToSeq: number): ForkSlice {
     const window = source.filter((event) => event.run_seq <= evalUpToSeq);
@@ -79,17 +78,17 @@ export function computeForkSlice(source: readonly StoredEvent[], atVertexId: str
         return event.parent_refs.some((parent) => parent === atVertexId || invalidatedVertices.has(parent));
     };
     const seed: StoredEvent[] = [];
-    const deferred: StoredEvent[] = [];
+    const independent: StoredEvent[] = [];
     const invalidated: StoredEvent[] = [];
     for (const event of window) {
         if (isInvalidated(event)) invalidated.push(event);
         else if (event.run_seq <= divergence.run_seq) seed.push(event);
-        else deferred.push(event);
+        else independent.push(event);
     }
     for (const sequence of substituted.keys()) {
         if (invalidated.some((event) => event.run_seq === sequence)) throw new Error(`substitution ${sequence} names an invalidated event`);
     }
-    return {seed, deferred, invalidated, divergence_seq: divergence.run_seq};
+    return {seed, independent, invalidated, divergence_seq: divergence.run_seq};
 }
 
 function rowToEvent(row: Record<string, unknown>): StoredEvent {
@@ -136,13 +135,6 @@ function toInheritedCopy(event: StoredEvent, pinOverride?: string): Record<strin
         ignorable: event.ignorable,
         payload: event.payload,
     };
-}
-
-interface ForkProvenance {
-    source_run_id: string;
-    at_vertex_id: string;
-    eval_up_to_seq: number;
-    substitutions: ForkSubstitution[];
 }
 
 /** PostgreSQL-backed event-log store that enforces service event ownership. */
@@ -233,8 +225,16 @@ export class EventStore {
      * Creates a lazy causal counterfactual fork at any vertex (Doc 01 §5.2, Doc 08 §4). The divergence point is a
      * vertex — planner or tool-caller, inside or outside a bracket, above or below the pivot floor.
      * Inherited copies preserve their source `run_seq`; the fork numbers its own events above
-     * `eval_up_to_seq`, so `run/end-seed` lands at `eval_up_to_seq + 1`. Causally independent events
-     * after the divergence vertex are merged lazily via {@link mergeIndependentEvents}.
+     * `eval_up_to_seq`, so `run/end-seed` lands at `eval_up_to_seq + 1`.
+     *
+     * Everything the counterfactual will ever inherit is copied here, in this transaction. The
+     * split between the seed and the causally independent remainder describes where those events
+     * sat in the source, not when they arrive: both are known the moment the slice is computed, so
+     * deferring either would only mean writing later what is already decided. It would also leave
+     * inherited rows landing *below* a reader's watermark long after the counterfactual's own
+     * events — every inherited copy keeps its source `run_seq`, which is at or under
+     * `eval_up_to_seq`, while its own events start above — and any reader following the log would
+     * silently miss them.
      */
     async fork(request: ForkRequest): Promise<ForkResult> {
         this.requireEngine();
@@ -257,7 +257,7 @@ export class EventStore {
                         source_run_id: request.source_run_id,
                         at_vertex_id: request.at_vertex_id,
                         eval_up_to_seq: request.eval_up_to_seq,
-                        seed_event_count: slice.seed.length,
+                        inherited_event_count: slice.seed.length + slice.independent.length,
                         substitutions: request.substitutions,
                         fold_mode: request.fold_mode,
                         evaluator_pin: request.evaluator_pin,
@@ -267,10 +267,13 @@ export class EventStore {
                 },
             ]);
             const substituted = new Map(request.substitutions.map((item) => [item.run_seq, item.pin_version]));
+            // One list: a substitution can only name the divergence vertex's own pinned event,
+            // which `computeForkSlice` validates and which therefore always sits in the seed.
+            const inherited = [...slice.seed, ...slice.independent];
             await this.copyInheritedWith(
                 client,
                 childRunId,
-                slice.seed.map((event) => toInheritedCopy(event, substituted.get(event.run_seq))),
+                inherited.map((event) => toInheritedCopy(event, substituted.get(event.run_seq))),
             );
             const seeded = await this.appendWith(client, childRunId, [
                 {
@@ -280,51 +283,12 @@ export class EventStore {
                         at_vertex_id: request.at_vertex_id,
                         eval_up_to_seq: request.eval_up_to_seq,
                         substitutions: request.substitutions,
-                        seed_event_count: slice.seed.length,
+                        inherited_event_count: inherited.length,
                     },
                 },
             ]);
             await client.query('COMMIT');
-            return {child_run_id: childRunId, end_seed_seq: seeded[0]!, seed_event_count: slice.seed.length, deferred_event_count: slice.deferred.length};
-        } catch (error) {
-            await client.query('ROLLBACK');
-            throw error;
-        } finally {
-            client.release();
-        }
-    }
-
-    /**
-     * Lazily merges causally independent source events into a fork, no further than `throughSeq`
-     * (defaulting to the fork's `eval_up_to_seq`). The causal slice is re-derived from the fork
-     * provenance recorded on `run/end-seed`, already-present sequences are skipped, and the merged
-     * rows are read-only inherited copies preserving their source `run_seq`. Returns the merged
-     * run sequences.
-     */
-    async mergeIndependentEvents(childRunId: string, throughSeq?: number): Promise<number[]> {
-        this.requireEngine();
-        const client = await this.pool.connect();
-        try {
-            await client.query('BEGIN');
-            await client.query('SELECT lock_fork_run($1)', [childRunId]);
-            const child = await this.readStreamWith(client, childRunId);
-            const seedEvent = child.find((event) => event.event_type === 'run/end-seed');
-            if (!seedEvent) throw new Error(`fork ${childRunId} has no run/end-seed provenance`);
-            const provenance = seedEvent.payload as unknown as ForkProvenance;
-            const limit = Math.min(throughSeq ?? provenance.eval_up_to_seq, provenance.eval_up_to_seq);
-            const source = await this.readStreamWith(client, provenance.source_run_id);
-            const slice = computeForkSlice(source, provenance.at_vertex_id, provenance.substitutions, provenance.eval_up_to_seq);
-            const present = new Set(child.map((event) => event.run_seq));
-            const toMerge = slice.deferred.filter((event) => event.run_seq <= limit && !present.has(event.run_seq));
-            if (toMerge.length) {
-                await this.copyInheritedWith(
-                    client,
-                    childRunId,
-                    toMerge.map((event) => toInheritedCopy(event)),
-                );
-            }
-            await client.query('COMMIT');
-            return toMerge.map((event) => event.run_seq);
+            return {child_run_id: childRunId, end_seed_seq: seeded[0]!, inherited_event_count: inherited.length};
         } catch (error) {
             await client.query('ROLLBACK');
             throw error;

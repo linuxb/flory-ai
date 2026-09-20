@@ -60,6 +60,10 @@ export class RouterExecutor {
             vertices: outcome.subDag.vertices.map(toSubmittedVertex),
             scopes: outcome.subDag.scopes.map((scope) => ({id: scope.id, members: [...scope.members]})),
             attachTo: [routerVertexId],
+            // A rule decided this branch exists, and no model was asked. Recorded rather than left
+            // to be inferred: on a console canvas a rule-made branch must not read as a model's
+            // choice, and that is exactly what a deterministic router is for.
+            source: 'router',
         };
         const result = await this.submitter.submit(runId, submission);
         if (result.status === 'rejected') {

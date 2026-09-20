@@ -151,6 +151,13 @@ describe('router runtime', () => {
         const evaluation = await routers.evaluate(run, routerId);
         expect(evaluation.outcome).toMatchObject({kind: 'matched', branch: 0});
 
+        // The proposal records that a rule decided this, not a model.
+        const proposed = await engineClient.query<{payload: {source: string}}>(
+            `SELECT payload FROM run_event_log WHERE run_id = $1 AND event_type = 'subgraph/proposed' ORDER BY run_seq DESC LIMIT 1`,
+            [run],
+        );
+        expect(proposed.rows[0]!.payload.source).toBe('router');
+
         // The emitted branch hangs off the router, so causal order records what decided it.
         const emitted = evaluation.emitted!.get('track')!;
         const created = await engineClient.query<{parent_refs: string[]}>(`SELECT parent_refs FROM run_event_log WHERE run_id = $1 AND vertex_id = $2 AND event_type = 'vertex/created'`, [

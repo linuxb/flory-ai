@@ -1,0 +1,18 @@
+-- A counterfactual inherits everything it will ever inherit when it is created.
+--
+-- Inheritance used to be split: the seed at creation, the causally independent
+-- remainder merged later by `mergeIndependentEvents`. Nothing in production
+-- ever drove that second step, and the set it copied was already computed at
+-- creation and discarded, so deferring it bought writes-later and nothing else.
+--
+-- It also made a counterfactual unreadable by any reader that follows the log.
+-- An inherited copy keeps its source `run_seq`, which is at or below
+-- `eval_up_to_seq`, while the counterfactual's own events start above it. A
+-- late merge therefore lands *below* a reader's watermark, and a reader asking
+-- for what is newer than it has already seen misses those rows permanently.
+--
+-- `lock_fork_run` existed only to serialize that merge against itself. With one
+-- copy in the creating transaction there is nothing left to serialize: the
+-- child run is not yet visible to anyone else. `lock_fork_source` still guards
+-- the source side and is untouched.
+DROP FUNCTION IF EXISTS lock_fork_run(UUID);

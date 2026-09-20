@@ -267,9 +267,8 @@ describe('S20 — rule-template counterfactual', () => {
             harness_state_version: VERSIONS.harness_state_version,
         });
 
-        // The lookup succeeded after the router was created but is not caused by it, so it is an
-        // independent event the fork merges lazily rather than inheriting in its seed.
-        await engine.mergeIndependentEvents(fork.child_run_id);
+        // The lookup succeeded after the router was created but is not caused by it, so it is
+        // inherited as a causally independent event rather than regenerated.
         const seed = await engine.readStream(fork.child_run_id);
         const prefix = sourceEvents.filter((event) => event.run_seq <= routerCreated.run_seq);
         expect(rulePinSubstitution(prefix, seed)).toMatchObject({passed: true});

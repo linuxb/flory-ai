@@ -49,14 +49,14 @@ describe('computeForkSlice', () => {
         const slice = computeForkSlice(stream, PLANNER, [], 8);
         expect(slice.invalidated).toEqual([]);
         expect(slice.seed.map((item) => item.run_seq)).toEqual([1, 2]);
-        expect(slice.deferred.map((item) => item.run_seq)).toEqual([3, 4, 5, 6, 7, 8]);
+        expect(slice.independent.map((item) => item.run_seq)).toEqual([3, 4, 5, 6, 7, 8]);
     });
 
     it('invalidates causal descendants and the divergence execution chain under a substitution', () => {
         const slice = computeForkSlice(stream, PLANNER, [{run_seq: 2, pin_version: 'model://planner@v2'}], 8);
         expect(slice.invalidated.map((item) => item.run_seq)).toEqual([3, 4, 6, 7]);
         expect(slice.seed.map((item) => item.run_seq)).toEqual([1, 2]);
-        expect(slice.deferred.map((item) => item.run_seq)).toEqual([5, 8]);
+        expect(slice.independent.map((item) => item.run_seq)).toEqual([5, 8]);
     });
 
     it('invalidates the divergence planner model charge under a model substitution', () => {
@@ -69,12 +69,12 @@ describe('computeForkSlice', () => {
         const slice = computeForkSlice(stream, TOOL, [{run_seq: 4, pin_version: 'tool://check@v2'}], 8);
         expect(slice.seed.map((item) => item.run_seq)).toEqual([1, 2, 3, 4]);
         expect(slice.invalidated.map((item) => item.run_seq)).toEqual([6, 7]);
-        expect(slice.deferred.map((item) => item.run_seq)).toEqual([5, 8]);
+        expect(slice.independent.map((item) => item.run_seq)).toEqual([5, 8]);
     });
 
     it('bounds the slice at eval_up_to_seq', () => {
         const slice = computeForkSlice(stream, PLANNER, [], 5);
-        expect(slice.deferred.map((item) => item.run_seq)).toEqual([3, 4, 5]);
+        expect(slice.independent.map((item) => item.run_seq)).toEqual([3, 4, 5]);
     });
 
     it('rejects a divergence vertex outside the evaluation window', () => {

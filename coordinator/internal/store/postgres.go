@@ -120,9 +120,64 @@ func (store *PostgresStore) ResolvePivotAbsent(ctx context.Context, runID, scope
 	return err
 }
 
-// RequestScopeCancel atomically fences a pre-pivot scope and materializes inverse work.
-func (store *PostgresStore) RequestScopeCancel(ctx context.Context, runID, scopeID, key, reason string) error {
-	_, err := store.pool.Exec(ctx, `SELECT request_scope_cancel($1, $2, $3, $4)`, runID, scopeID, key, reason)
+// CancelDecision is which of the sweeper's three paths the database took under the scope lock.
+type CancelDecision string
+
+const (
+	// CancelRequested means the scope was clean: it is now fenced and its pending ordinary work is gone.
+	CancelRequested CancelDecision = "requested"
+	// CancelDuplicate means the scope was already fenced under this same idempotency key.
+	CancelDuplicate CancelDecision = "duplicate"
+	// CancelDeferred means another worker holds a live execution lease, so progress may still be happening.
+	CancelDeferred CancelDecision = "deferred"
+	// CancelSuspended means an attempt is unresolved: the scope escalated to L4 with its evidence
+	// and its reservations intact, and no txn/cancel was appended.
+	CancelSuspended CancelDecision = "suspended"
+)
+
+// RequestScopeCancel asks the database to decide, under the scope lock, whether this scope may
+// cancel at all. The decision is never taken by the caller: an expired deadline only makes a scope
+// a candidate, and the observation that settles it has to be made where nothing can change under it.
+func (store *PostgresStore) RequestScopeCancel(ctx context.Context, worker, runID, scopeID, key, reason string) (CancelDecision, error) {
+	var decision string
+	err := store.pool.QueryRow(ctx, `SELECT request_scope_cancel($1, $2, $3, $4, $5)`, worker, runID, scopeID, key, reason).Scan(&decision)
+	return CancelDecision(decision), err
+}
+
+// AttemptStart names one side-effecting request and what authorizes it.
+//
+// LeaseVertexID is deliberately separate from VertexID: a confirm or a status query is made against
+// a bracket's own vertex while the authority to make it is the pivot worker's live lease.
+type AttemptStart struct {
+	RunID string
+	// ScopeID is empty for an unscoped call, which takes no scope lock.
+	ScopeID  string
+	VertexID string
+	// Operation is one of call, pivot, status, confirm, inverse.
+	Operation      string
+	AttemptNo      int
+	Tool           string
+	IdempotencyKey string
+	LeaseVertexID  string
+	// LeaseSource is work_queue or cancel_member.
+	LeaseSource string
+}
+
+// RecordAttemptStart durably records an attempt before its request leaves the executor, validating
+// scope state and lease ownership in the same transaction. The row stays unresolved until a
+// definitive outcome is written back; nothing else resolves it.
+func (store *PostgresStore) RecordAttemptStart(ctx context.Context, worker string, start AttemptStart) (int64, error) {
+	var attemptID int64
+	err := store.pool.QueryRow(ctx, `SELECT record_attempt_start($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		worker, start.RunID, optionalUUID(start.ScopeID), start.VertexID, start.Operation, start.AttemptNo,
+		start.Tool, start.IdempotencyKey, start.LeaseVertexID, start.LeaseSource).Scan(&attemptID)
+	return attemptID, err
+}
+
+// ResolveAttempt writes the definitive outcome of a recorded attempt. An unknown answer is never
+// passed here: it is the absence of an outcome, and the row must stay unresolved to say so.
+func (store *PostgresStore) ResolveAttempt(ctx context.Context, worker string, attemptID int64, outcome, detail string) error {
+	_, err := store.pool.Exec(ctx, `SELECT resolve_attempt($1, $2, $3, $4)`, worker, attemptID, outcome, detail)
 	return err
 }
 
@@ -264,5 +319,14 @@ func (store *PostgresStore) StuckCancellations(ctx context.Context) ([]ScopeCanc
 }
 
 func stringPointer(value string) *string {
+	return &value
+}
+
+// optionalUUID passes an absent scope to PostgreSQL as NULL rather than as an empty string, which
+// is not a UUID.
+func optionalUUID(value string) *string {
+	if value == "" {
+		return nil
+	}
 	return &value
 }

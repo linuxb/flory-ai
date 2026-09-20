@@ -4,6 +4,7 @@ package coordinator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -92,21 +93,25 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 	if err := service.store.Append(ctx, item.RunID, vertexEvent("vertex/started", item, map[string]any{"attempt": 1})); err != nil {
 		return err
 	}
-	response, attempts, err := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Tool, item.Payload.Txn.IdempotencyKey, item.Payload.Input, item.Payload.RetryPolicy, pinOf(item))
+	result, err := service.executeWithRetry(ctx, call{
+		runID: item.RunID, scopeID: item.ScopeID, vertexID: item.VertexID, operation: "call",
+		leaseVertexID: item.VertexID, leaseSource: "work_queue",
+		tool: item.Payload.Tool, idempotencyKey: item.Payload.Txn.IdempotencyKey,
+		input: item.Payload.Input, policy: item.Payload.RetryPolicy, pin: pinOf(item),
+	})
 	if err != nil {
 		return err
 	}
+	response, attempts := result.response, result.attempts
 	if response.Outcome != model.OutcomeSucceeded {
 		failure := vertexEvent("vertex/failed", item, map[string]any{"attempts": attempts, "error": response.Error, "outcome": response.Outcome})
 		if err := service.store.Append(ctx, item.RunID, failure); err != nil {
 			return err
 		}
 		if item.ScopeID != "" {
-			key := "scope:" + item.ScopeID + ":cancel"
-			if err := service.store.RequestScopeCancel(ctx, item.RunID, item.ScopeID, key, "pre-pivot vertex failure"); err != nil {
-				return err
-			}
-			if err := service.cancelScope(ctx, item.RunID, item.ScopeID, key); err != nil {
+			// An unknown outcome leaves the attempt unresolved, so this is also the path on which
+			// the scope suspends instead of cancelling. The decision is the database's.
+			if err := service.fenceScope(ctx, item.RunID, item.ScopeID, "pre-pivot vertex failure"); err != nil {
 				return err
 			}
 		}
@@ -142,33 +147,47 @@ func (service *Service) processPivot(ctx context.Context, item *model.WorkItem) 
 	if !admitted {
 		return service.store.ReleaseWork(ctx, service.worker, item.VertexID, service.poll)
 	}
-	response, attempts, err := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Tool, item.Payload.Txn.IdempotencyKey, item.Payload.Input, item.Payload.RetryPolicy, pinOf(item))
+	result, err := service.executeWithRetry(ctx, call{
+		runID: item.RunID, scopeID: item.ScopeID, vertexID: item.VertexID, operation: "pivot",
+		leaseVertexID: item.VertexID, leaseSource: "work_queue",
+		tool: item.Payload.Tool, idempotencyKey: item.Payload.Txn.IdempotencyKey,
+		input: item.Payload.Input, policy: item.Payload.RetryPolicy, pin: pinOf(item),
+	})
 	if err != nil {
 		return err
 	}
-	if response.Outcome == model.OutcomeUnknown && item.Payload.Txn.StatusTool != "" {
-		statusResponse, _, statusErr := service.executeWithRetry(ctx, item.RunID, item.VertexID, item.Payload.Txn.StatusTool, item.Payload.Txn.IdempotencyKey,
-			item.Payload.Input, item.Payload.RetryPolicy, companionPin(item.Payload.ToolViewDigest))
-		err = statusErr
-		if err != nil {
-			return err
+	if result.response.Outcome == model.OutcomeUnknown && item.Payload.Txn.StatusTool != "" {
+		status, statusErr := service.executeWithRetry(ctx, call{
+			runID: item.RunID, scopeID: item.ScopeID, vertexID: item.VertexID, operation: "status",
+			leaseVertexID: item.VertexID, leaseSource: "work_queue",
+			tool: item.Payload.Txn.StatusTool, idempotencyKey: item.Payload.Txn.IdempotencyKey,
+			input: item.Payload.Input, policy: item.Payload.RetryPolicy, pin: companionPin(item.Payload.ToolViewDigest),
+		})
+		if statusErr != nil {
+			return statusErr
 		}
-		if statusResponse.Outcome == model.OutcomeSucceeded {
-			occurred, valid := statusResponse.Result["occurred"].(bool)
+		if status.response.Outcome == model.OutcomeSucceeded {
+			occurred, valid := status.response.Result["occurred"].(bool)
 			if !valid {
-				response = model.OperationResponse{Outcome: model.OutcomeUnknown, Error: "pivot status response omitted boolean occurred"}
+				result.response = model.OperationResponse{Outcome: model.OutcomeUnknown, Error: "pivot status response omitted boolean occurred"}
 			} else if !occurred {
-				return service.failAbsentPivot(ctx, item, attempts, "pivot status confirmed absence")
+				return service.failAbsentPivot(ctx, item, result, "pivot status confirmed absence")
 			} else {
-				response = model.OperationResponse{Outcome: model.OutcomeSucceeded, Result: map[string]any{"status_confirmed": true}}
+				// The status query is the one thing that may resolve an unknown pivot, so it is
+				// also what writes the outcome onto the pivot's own attempt evidence.
+				if err := service.store.ResolveAttempt(ctx, service.worker, result.attemptID, "succeeded", "pivot status confirmed occurrence"); err != nil {
+					return err
+				}
+				result.response = model.OperationResponse{Outcome: model.OutcomeSucceeded, Result: map[string]any{"status_confirmed": true}}
 			}
 		} else {
-			response = model.OperationResponse{Outcome: model.OutcomeUnknown, Error: "pivot status query did not establish an outcome: " + statusResponse.Error}
+			result.response = model.OperationResponse{Outcome: model.OutcomeUnknown, Error: "pivot status query did not establish an outcome: " + status.response.Error}
 		}
 	}
+	response, attempts := result.response, result.attempts
 	if response.Outcome != model.OutcomeSucceeded {
 		if response.Outcome != model.OutcomeUnknown {
-			return service.failAbsentPivot(ctx, item, attempts, response.Error)
+			return service.failAbsentPivot(ctx, item, result, response.Error)
 		}
 		events := []model.EventDraft{
 			vertexEvent("vertex/failed", item, map[string]any{"attempts": attempts, "error": response.Error, "outcome": response.Outcome}),
@@ -199,21 +218,49 @@ func (service *Service) processPivot(ctx context.Context, item *model.WorkItem) 
 	return service.store.CompleteWork(ctx, service.worker, item.VertexID)
 }
 
-func (service *Service) failAbsentPivot(ctx context.Context, item *model.WorkItem, attempts int, detail string) error {
+func (service *Service) failAbsentPivot(ctx context.Context, item *model.WorkItem, result execution, detail string) error {
+	// Proven absence is a definitive outcome, so it resolves the attempt. Without this the scope
+	// would carry unresolved evidence of an effect the status query has just disproved, and would
+	// suspend where it is safe to cancel. An attempt already resolved keeps its first answer.
+	if result.attemptID != 0 {
+		if err := service.store.ResolveAttempt(ctx, service.worker, result.attemptID, "confirmed-absent", detail); err != nil {
+			return err
+		}
+	}
 	if err := service.store.ResolvePivotAbsent(ctx, item.RunID, item.ScopeID, item.VertexID); err != nil {
 		return err
 	}
-	if err := service.store.Append(ctx, item.RunID, vertexEvent("vertex/failed", item, map[string]any{"attempts": attempts, "error": detail, "outcome": "confirmed-absent"})); err != nil {
+	if err := service.store.Append(ctx, item.RunID, vertexEvent("vertex/failed", item, map[string]any{"attempts": result.attempts, "error": detail, "outcome": "confirmed-absent"})); err != nil {
 		return err
 	}
-	key := "scope:" + item.ScopeID + ":cancel"
-	if err := service.store.RequestScopeCancel(ctx, item.RunID, item.ScopeID, key, "pivot confirmed absent"); err != nil {
-		return err
-	}
-	if err := service.cancelScope(ctx, item.RunID, item.ScopeID, key); err != nil {
+	if err := service.fenceScope(ctx, item.RunID, item.ScopeID, "pivot confirmed absent"); err != nil {
 		return err
 	}
 	return service.store.CompleteWork(ctx, service.worker, item.VertexID)
+}
+
+// fenceScope asks the database, under the scope lock, whether this scope may cancel at all, and
+// then does exactly what it was told.
+//
+// The decision cannot be taken here. An expired deadline, an empty queue, and a dead lease are all
+// observations that may be stale by the time they are acted on, and one of the three answers --
+// suspend on an unresolved attempt -- exists precisely because releasing reservations behind an
+// effect that may still land is the failure this whole path is built to refuse.
+func (service *Service) fenceScope(ctx context.Context, runID, scopeID, reason string) error {
+	key := cancelKey(scopeID)
+	decision, err := service.store.RequestScopeCancel(ctx, service.worker, runID, scopeID, key, reason)
+	if err != nil {
+		return err
+	}
+	switch decision {
+	case store.CancelRequested, store.CancelDuplicate:
+		return service.cancelScope(ctx, runID, scopeID, key)
+	case store.CancelSuspended:
+		service.logger.Warn("scope suspended holding an unresolved attempt", "run_id", runID, "scope_id", scopeID, "reason", reason)
+	case store.CancelDeferred:
+		service.logger.Info("scope cancellation deferred by a live lease", "run_id", runID, "scope_id", scopeID, "reason", reason)
+	}
+	return nil
 }
 
 func (service *Service) confirmScope(ctx context.Context, item *model.WorkItem) (bool, error) {
@@ -222,11 +269,18 @@ func (service *Service) confirmScope(ctx context.Context, item *model.WorkItem) 
 		return false, err
 	}
 	for _, bracket := range brackets {
-		response, _, err := service.executeWithRetry(ctx, item.RunID, bracket.VertexID, bracket.ConfirmTool, bracket.IdempotencyKey, bracket.Input, bracket.RetryPolicy,
-			companionPin(bracket.ToolViewDigest))
+		// The confirm runs on the bracket's own vertex, but what authorizes it is the pivot
+		// worker's live lease: the bracket's queue row is long gone.
+		result, err := service.executeWithRetry(ctx, call{
+			runID: item.RunID, scopeID: item.ScopeID, vertexID: bracket.VertexID, operation: "confirm",
+			leaseVertexID: item.VertexID, leaseSource: "work_queue",
+			tool: bracket.ConfirmTool, idempotencyKey: bracket.IdempotencyKey,
+			input: bracket.Input, policy: bracket.RetryPolicy, pin: companionPin(bracket.ToolViewDigest),
+		})
 		if err != nil {
 			return false, err
 		}
+		response := result.response
 		if response.Outcome != model.OutcomeSucceeded {
 			return false, service.store.Append(ctx, item.RunID, model.EventDraft{EventType: "txn/scope", ScopeID: &item.ScopeID, Payload: map[string]any{"state": "suspended"}})
 		}
@@ -247,12 +301,16 @@ func (service *Service) cancelScope(ctx context.Context, runID, scopeID, key str
 		if member == nil {
 			return service.store.CompleteScopeCancel(ctx, runID, scopeID, key)
 		}
-		response, _, err := service.executeWithRetry(ctx, runID, member.VertexID, member.InverseTool, member.IdempotencyKey, member.Input, member.RetryPolicy,
-			companionPin(member.ToolViewDigest))
+		result, err := service.executeWithRetry(ctx, call{
+			runID: runID, scopeID: scopeID, vertexID: member.VertexID, operation: "inverse",
+			leaseVertexID: member.VertexID, leaseSource: "cancel_member",
+			tool: member.InverseTool, idempotencyKey: member.IdempotencyKey,
+			input: member.Input, policy: member.RetryPolicy, pin: companionPin(member.ToolViewDigest),
+		})
 		if err != nil {
 			return err
 		}
-		if response.Outcome != model.OutcomeSucceeded {
+		if result.response.Outcome != model.OutcomeSucceeded {
 			return service.store.Append(ctx, runID, model.EventDraft{EventType: "txn/scope", ScopeID: &scopeID, Payload: map[string]any{"state": "suspended"}})
 		}
 		if err := service.store.CompleteCancelMember(ctx, service.worker, runID, scopeID, member.VertexID); err != nil {
@@ -261,67 +319,133 @@ func (service *Service) cancelScope(ctx context.Context, runID, scopeID, key str
 	}
 }
 
-func (service *Service) executeWithRetry(ctx context.Context, runID, vertexID, tool, key string, input map[string]any, policy generated.RetryPolicy, pin model.ToolPin) (model.OperationResponse, int, error) {
-	identity, err := service.store.WorkflowIdentity(ctx, runID)
+// call is one adapter request: what to send, and what authorizes sending it.
+//
+// leaseVertexID is separate from vertexID because the two diverge on every companion operation: a
+// confirm is made against its bracket's vertex while the authority to make it is the pivot
+// worker's live queue lease, and an inverse operation is authorized by a cancellation-member lease
+// instead. Recording the attempt is what turns that authority into something a later sweep can
+// check, so the two have to be carried apart.
+type call struct {
+	runID          string
+	scopeID        string
+	vertexID       string
+	operation      string
+	leaseVertexID  string
+	leaseSource    string
+	tool           string
+	idempotencyKey string
+	input          map[string]any
+	policy         generated.RetryPolicy
+	pin            model.ToolPin
+}
+
+// execution is one completed adapter exchange together with the evidence row it left behind.
+type execution struct {
+	response model.OperationResponse
+	attempts int
+	// attemptID identifies the final attempt's txn_attempt row, so a later definitive answer --
+	// a pivot status query, above all -- can resolve evidence the call itself could not.
+	attemptID int64
+}
+
+func (service *Service) executeWithRetry(ctx context.Context, request call) (execution, error) {
+	identity, err := service.store.WorkflowIdentity(ctx, request.runID)
 	if err != nil {
-		return model.OperationResponse{}, 0, err
+		return execution{}, err
 	}
-	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
-		if delay := model.Backoff(policy, attempt); delay > 0 {
+	result := execution{}
+	for attempt := 1; attempt <= request.policy.MaxAttempts; attempt++ {
+		if delay := model.Backoff(request.policy, attempt); delay > 0 {
 			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return model.OperationResponse{}, attempt - 1, ctx.Err()
+				result.attempts = attempt - 1
+				return result, ctx.Err()
 			case <-timer.C:
 			}
 		}
-		response, err := service.adapter.Execute(ctx, model.OperationRequest{
-			RunID: runID, VertexID: vertexID, AttemptNo: attempt, Tool: tool, ToolVersion: pin.Version, ToolViewDigest: pin.ViewDigest, IdempotencyKey: key, Input: input,
-			AuthorizationIdentity: identity,
+		result.attempts = attempt
+		// Durable before the request leaves, never after: a record written afterwards cannot
+		// describe a request that was sent and then lost its worker, which is the one case the
+		// sweeper has no other way to recognize.
+		attemptID, err := service.store.RecordAttemptStart(ctx, service.worker, store.AttemptStart{
+			RunID: request.runID, ScopeID: request.scopeID, VertexID: request.vertexID, Operation: request.operation,
+			AttemptNo: attempt, Tool: request.tool, IdempotencyKey: request.idempotencyKey,
+			LeaseVertexID: request.leaseVertexID, LeaseSource: request.leaseSource,
 		})
 		if err != nil {
-			return model.OperationResponse{}, attempt, err
+			return result, err
 		}
-		if response.Outcome != model.OutcomeRetryableFailure || attempt == policy.MaxAttempts {
-			return response, attempt, nil
+		result.attemptID = attemptID
+		response, err := service.adapter.Execute(ctx, model.OperationRequest{
+			RunID: request.runID, VertexID: request.vertexID, ScopeID: request.scopeID, AttemptNo: attempt, Tool: request.tool,
+			ToolVersion: request.pin.Version, ToolViewDigest: request.pin.ViewDigest, IdempotencyKey: request.idempotencyKey,
+			Input: request.input, AuthorizationIdentity: identity,
+		})
+		if err != nil {
+			// A transport error says nothing about whether the tool ran, so the attempt stays
+			// unresolved and the scope will suspend rather than release its reservations.
+			return result, err
 		}
-		vertex := vertexID
-		if err := service.store.Append(ctx, runID, model.EventDraft{EventType: "vertex/retried", VertexID: &vertex, Payload: map[string]any{"attempt": attempt + 1, "error": response.Error}}); err != nil {
-			return model.OperationResponse{}, attempt, err
+		result.response = response
+		if response.Outcome != model.OutcomeUnknown {
+			if err := service.store.ResolveAttempt(ctx, service.worker, attemptID, string(response.Outcome), response.Error); err != nil {
+				return result, err
+			}
+		}
+		if response.Outcome != model.OutcomeRetryableFailure || attempt == request.policy.MaxAttempts {
+			return result, nil
+		}
+		vertex := request.vertexID
+		if err := service.store.Append(ctx, request.runID, model.EventDraft{EventType: "vertex/retried", VertexID: &vertex, Payload: map[string]any{"attempt": attempt + 1, "error": response.Error}}); err != nil {
+			return result, err
 		}
 	}
-	return model.OperationResponse{Outcome: model.OutcomePermanentFailure, Error: "retry policy exhausted"}, policy.MaxAttempts, nil
+	result.response = model.OperationResponse{Outcome: model.OutcomePermanentFailure, Error: "retry policy exhausted"}
+	result.attempts = request.policy.MaxAttempts
+	return result, nil
 }
 
-// Sweep starts cancellation for expired sealed brackets and resumes fenced
-// cancellations whose member leases are no longer live.
+// Sweep offers every expired sealed bracket to the scope fence and resumes fenced cancellations
+// whose member leases are no longer live.
+//
+// What the sweep produces is candidates, never verdicts. Each candidate is re-examined under the
+// scope lock by fenceScope, which defers on a live lease, suspends on an unresolved attempt, and
+// cancels only a scope that holds neither.
+//
+// One scope's failure no longer abandons the rest of the sweep: these are independent recoveries,
+// and a stuck cancellation that keeps erroring would otherwise starve every scope behind it.
 func (service *Service) Sweep(ctx context.Context) error {
 	expired, err := service.store.ExpiredScopes(ctx)
 	if err != nil {
 		return err
 	}
+	failures := []error{}
 	for runID, scopes := range expired {
 		for _, scopeID := range scopes {
-			key := "scope:" + scopeID + ":cancel"
-			if err := service.store.RequestScopeCancel(ctx, runID, scopeID, key, "sealed try timeout"); err != nil {
-				return err
-			}
-			if err := service.cancelScope(ctx, runID, scopeID, key); err != nil {
-				return err
+			if err := service.fenceScope(ctx, runID, scopeID, "sealed try timeout"); err != nil {
+				failures = append(failures, fmt.Errorf("fence scope %s: %w", scopeID, err))
 			}
 		}
 	}
 	stuck, err := service.store.StuckCancellations(ctx)
 	if err != nil {
-		return err
+		return errors.Join(append(failures, err)...)
 	}
 	for _, cancellation := range stuck {
 		if err := service.cancelScope(ctx, cancellation.RunID, cancellation.ScopeID, cancellation.IdempotencyKey); err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("resume cancellation of scope %s: %w", cancellation.ScopeID, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
+}
+
+// cancelKey is the one idempotency key a scope's cancellation ever uses, so a resumed sweep and
+// the worker that first fenced the scope name the same cancellation.
+func cancelKey(scopeID string) string {
+	return "scope:" + scopeID + ":cancel"
 }
 
 // pinOf is the exact contract a vertex was frozen against.

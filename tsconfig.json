@@ -11,5 +11,6 @@
     "noUncheckedIndexedAccess": true,
     "outDir": "dist"
   },
-  "include": ["engine/**/*.ts", "test/**/*.ts", "db/**/*.ts", "scripts/**/*.ts"]
+  "include": ["engine/**/*.ts",
+        "console/server/**/*.ts", "test/**/*.ts", "db/**/*.ts", "scripts/**/*.ts"]
 }

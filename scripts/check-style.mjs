@@ -2,7 +2,7 @@ import {readdir, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
 const MAX_LINE_LENGTH = 200;
-const SOURCE_DIRECTORIES = ['db', 'engine', 'scripts', 'sdk', 'test'];
+const SOURCE_DIRECTORIES = ['console', 'db', 'engine', 'scripts', 'sdk', 'test'];
 const STYLE_FILES = ['idl/event-log.schema.json'];
 const TYPE_SCRIPT_EXTENSIONS = new Set(['.cts', '.mts', '.ts', '.mjs']);
 // Generated protobuf stubs are exempt: protoc-gen-es owns their layout.

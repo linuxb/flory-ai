@@ -23,4 +23,13 @@ describe('engine framework boundary', () => {
             expect(content).not.toMatch(/\b(inventory|sku|carrier|payment|ecommerce)\b/i);
         }
     });
+
+    it('is never imported by the console, only the other way round', async () => {
+        // The console consumes the engine. An import in this direction would make the core depend
+        // on an operator surface, and the first thing to break would be every consumer of
+        // `EventStore` paying for a projection it does not use.
+        const files = await sourceFiles(resolve(process.cwd(), 'engine/src'));
+        const contents = await Promise.all(files.map((file) => readFile(file, 'utf8')));
+        for (const content of contents) expect(content).not.toMatch(/from ['"][^'"]*console\//);
+    });
 });

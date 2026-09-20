@@ -7,6 +7,7 @@ export interface SurfaceVertex {
     parent_refs: string[];
     role?: string;
     tool?: string;
+    /** The frozen input a tool vertex was created with; absent on every other role. */
     parameters?: unknown;
     result?: unknown;
     status?: string;
@@ -75,7 +76,7 @@ export function surface(events: StoredEvent[], atRunSeq = Number.MAX_SAFE_INTEGE
                 parent_refs: event.parent_refs,
                 role: typeof event.payload.role === 'string' ? event.payload.role : undefined,
                 tool: typeof event.payload.tool === 'string' ? event.payload.tool : undefined,
-                parameters: event.payload.parameters,
+                parameters: event.payload.input,
                 created_seq: event.run_seq,
             });
         }
@@ -119,6 +120,19 @@ export function slice(view: Surface, plannerVertexId: string): SurfaceVertex[] {
 }
 
 /**
+ * Reports whether `linearize` renders this vertex into a downstream planner's prompt.
+ *
+ * Exported because the observability projection reports the same predicate rather than restating
+ * it ([11 §3.1](../../doc/design/11-console-and-observability.md)). A fall-through router is on an
+ * operator's canvas and absent from the prompt, and the two projections must disagree for that one
+ * reason and no other — which a second copy of this rule could not guarantee, because nothing
+ * would detect the copies drifting apart.
+ */
+export function rendersInPlannerPrompt(vertex: {role?: string; matched_condition?: string | null}): boolean {
+    return vertex.role !== 'router' || typeof vertex.matched_condition === 'string';
+}
+
+/**
  * Sorts active vertices by identifier and converts them to context items.
  *
  * A router appears only when it matched, and then only as the condition that explains the branch
@@ -129,7 +143,7 @@ export function slice(view: Surface, plannerVertexId: string): SurfaceVertex[] {
  */
 export function linearize(vertices: SurfaceVertex[]): ContextItem[] {
     return [...vertices]
-        .filter((vertex) => vertex.role !== 'router' || typeof vertex.matched_condition === 'string')
+        .filter(rendersInPlannerPrompt)
         .sort((a, b) => a.vertex_id.localeCompare(b.vertex_id))
         .map(({vertex_id, role, tool, result, status, matched_condition}) => ({
             vertex_id,

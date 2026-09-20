@@ -8,7 +8,9 @@ import {WorkflowSubmitter} from '../../src/submission.js';
 import {RuleTemplateStore, slotIdOf, type RuleTemplateDraft} from '../../src/rule-template.js';
 import {RouterExecutor} from '../../src/router-executor.js';
 import {noDeterministicReplan, routerAdmission, routerInvisibility, rulePinSubstitution} from '../../src/harness/oracles.js';
-import {surface} from '../../src/projection.js';
+import {linearize, slice, surface} from '../../src/projection.js';
+import {consoleDag} from '../../../console/server/src/projection.js';
+import {consoleRouterVisibility} from '../../../console/server/src/oracles.js';
 import type {StoredEvent} from '../../src/events.js';
 import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../../src/gateway-client.js';
 import type {WorkflowSubmission} from '../../src/workflow.js';
@@ -367,5 +369,53 @@ describe('S18 — router joining two distinct open scopes', () => {
         const readRun = await startRun();
         await openScopes(readRun, 2);
         expect((await submitter.submit(readRun, workflow(readOnly))).status).toBe('accepted');
+    });
+});
+
+describe('S24 — the same log, read two ways', () => {
+    it('shows a fall-through router on the canvas and hides it from the prompt', async () => {
+        const type = `returns-s24-${randomUUID().slice(0, 8)}`;
+        await templates.publish(
+            {
+                templateRef: `rule://track-${randomUUID()}@v1`,
+                author: 'operator@example',
+                slotId: slotIdOf(type, ['record.read'], 'decide'),
+                branches: [trackingBranch('record.read.output.status == "shipped"')],
+            },
+            fullView,
+        );
+
+        // A rule is bound and its condition does not hold for these facts, so the router falls
+        // through. Both readers see the same log from here on.
+        const {run, routerId, lookupId, plannerId} = await routedRun(type);
+        await completeLookup(run, lookupId, 'pending');
+        expect((await routers.evaluate(run, routerId)).outcome).toEqual({kind: 'no_match'});
+
+        const events = await engine.readStream(run);
+        expect(consoleRouterVisibility(events, {routerVertexId: routerId, plannerVertexId: plannerId})).toMatchObject({passed: true});
+
+        // Said again without the oracle, because the point of the row is the conjunction and a
+        // reader of this file should see both halves rather than trust one function.
+        const model = consoleDag(events);
+        expect(model.vertices.find((vertex) => vertex.vertex_id === routerId)).toMatchObject({router_outcome: {kind: 'fell_through'}, is_shadowed: false});
+        expect(linearize(slice(surface(events), plannerId)).some((item) => item.vertex_id === routerId)).toBe(false);
+    });
+
+    it('shows a matched router with the condition that fired, in both the canvas and the prompt', async () => {
+        const type = `returns-s24m-${randomUUID().slice(0, 8)}`;
+        const condition = 'record.read.output.status == "shipped"';
+        await templates.publish(
+            {templateRef: `rule://track-${randomUUID()}@v1`, author: 'operator@example', slotId: slotIdOf(type, ['record.read'], 'decide'), branches: [trackingBranch(condition)]},
+            fullView,
+        );
+        const {run, routerId, lookupId, plannerId} = await routedRun(type);
+        await completeLookup(run, lookupId, 'shipped');
+        expect((await routers.evaluate(run, routerId)).outcome).toMatchObject({kind: 'matched'});
+
+        // A matched router explains a branch that exists, so it belongs in both readings. The two
+        // projections agree here, and that agreement is what makes the disagreement above specific.
+        const events = await engine.readStream(run);
+        expect(consoleDag(events).vertices.find((vertex) => vertex.vertex_id === routerId)).toMatchObject({router_outcome: {kind: 'matched', matched_condition: condition}});
+        expect(linearize(slice(surface(events), plannerId)).find((item) => item.vertex_id === routerId)?.condition).toBe(condition);
     });
 });

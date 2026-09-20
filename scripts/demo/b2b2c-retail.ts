@@ -349,7 +349,7 @@ function goalFor(authored: string): string {
             'Complete the purchase and go live, in this order:',
             'place the wholesale purchase order with supplier.order using purchase_order_id from the task (this is what lands stock in our warehouse),',
             'reserve that stock, authorize payment, capture the payment, confirm the reservation, then draft and publish the channel listing at the market sell price.',
-            'Each step depends on the one before it, so they all belong to a single scope.',
+            'Each step depends on the one before it, so put every one of them in exactly one scope with the id "s1". Do not declare a second scope.',
         ].join(' ');
     }
     return 'Take the next step toward the goal. If nothing is needed, return a single planner vertex with the id "noop".';

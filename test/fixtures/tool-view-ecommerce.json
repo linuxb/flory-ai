@@ -129,7 +129,9 @@
             "tool_id": "inventory.reserve",
             "tool_version": "1.0.0",
             "txn": {
+                "cancel_arguments": {"order_id": "$.order_id"},
                 "cancel_tool": "inventory.release",
+                "confirm_arguments": {"order_id": "$.order_id"},
                 "confirm_tool": "inventory.confirm",
                 "effect_class": "reversible",
                 "idempotency_key_path": "$.order_id",
@@ -234,7 +236,9 @@
             "tool_id": "payment.authorize",
             "tool_version": "1.0.0",
             "txn": {
+                "cancel_arguments": {"order_id": "$.order_id"},
                 "cancel_tool": "payment.void",
+                "confirm_arguments": {"order_id": "$.order_id"},
                 "confirm_tool": "payment.capture",
                 "effect_class": "reversible",
                 "idempotency_key_path": "$.order_id",

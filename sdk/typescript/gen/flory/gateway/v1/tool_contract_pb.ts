@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file flory/gateway/v1/tool_contract.proto.
  */
 export const file_flory_gateway_v1_tool_contract: GenFile = /*@__PURE__*/
-  fileDesc("CiRmbG9yeS9nYXRld2F5L3YxL3Rvb2xfY29udHJhY3QucHJvdG8SEGZsb3J5LmdhdGV3YXkudjEidgoQUmV0cnlDb25zdHJhaW50cxIUCgxtYXhfYXR0ZW1wdHMYASABKA0SGgoSaW5pdGlhbF9iYWNrb2ZmX21zGAIgASgNEhgKEG11bHRpcGxpZXJfbWlsbGkYAyABKA0SFgoObWF4X2JhY2tvZmZfbXMYBCABKA0iugIKD1RyYW5zYWN0aW9uU3BlYxIzCgxlZmZlY3RfY2xhc3MYASABKA4yHS5mbG9yeS5nYXRld2F5LnYxLkVmZmVjdENsYXNzEigKBG1vZGUYAiABKA4yGi5mbG9yeS5nYXRld2F5LnYxLlRvb2xNb2RlEhwKFGlkZW1wb3RlbmN5X2tleV9wYXRoGAMgASgJEiEKFGlkZW1wb3RlbnRfcmV0cnlhYmxlGAQgASgISACIAQESFQoNdHJ5X3RpbWVvdXRfcxgFIAEoDRIUCgxjb25maXJtX3Rvb2wYBiABKAkSEwoLY2FuY2VsX3Rvb2wYByABKAkSFwoPY29tcGVuc2F0ZV90b29sGAggASgJEhMKC3N0YXR1c190b29sGAkgASgJQhcKFV9pZGVtcG90ZW50X3JldHJ5YWJsZSIyCgtBZGFwdGVyU3BlYxIQCghwcm90b2NvbBgBIAEoCRIRCglvcGVyYXRpb24YAiABKAki2gMKDFRvb2xDb250cmFjdBIPCgd0b29sX2lkGAEgASgJEhQKDHRvb2xfdmVyc2lvbhgCIAEoCRITCgtkZXNjcmlwdGlvbhgDIAEoCRIUCgxpbnB1dF9zY2hlbWEYBCABKAkSFQoNb3V0cHV0X3NjaGVtYRgFIAEoCRIQCghyb3V0ZV9pZBgGIAEoCRIuCgdhZGFwdGVyGAcgASgLMh0uZmxvcnkuZ2F0ZXdheS52MS5BZGFwdGVyU3BlYxIuCgN0eG4YCCABKAsyIS5mbG9yeS5nYXRld2F5LnYxLlRyYW5zYWN0aW9uU3BlYxI/ChJjb21wZW5zYXRpb25fc3R5bGUYCSABKA4yIy5mbG9yeS5nYXRld2F5LnYxLkNvbXBlbnNhdGlvblN0eWxlEhEKCWZvb3RwcmludBgKIAMoCRIOCgZ3cml0ZXMYCyADKAkSEgoKdGltZW91dF9tcxgMIAEoDRI9ChFyZXRyeV9jb25zdHJhaW50cxgNIAEoCzIiLmZsb3J5LmdhdGV3YXkudjEuUmV0cnlDb25zdHJhaW50cxINCgVvd25lchgOIAEoCRIVCg1hbGxvd2VkX3JvbGVzGA8gAygJEhIKCmxvZ19maWVsZHMYECADKAkqmwEKC0VmZmVjdENsYXNzEhwKGEVGRkVDVF9DTEFTU19VTlNQRUNJRklFRBAAEhUKEUVGRkVDVF9DTEFTU19OT05FEAESGwoXRUZGRUNUX0NMQVNTX0JVRkZFUkFCTEUQAhIbChdFRkZFQ1RfQ0xBU1NfUkVWRVJTSUJMRRADEh0KGUVGRkVDVF9DTEFTU19JUlJFVkVSU0lCTEUQBCphCghUb29sTW9kZRIZChVUT09MX01PREVfVU5TUEVDSUZJRUQQABITCg9UT09MX01PREVfUExBSU4QARIRCg1UT09MX01PREVfVENDEAISEgoOVE9PTF9NT0RFX1NBR0EQAyqfAQoRQ29tcGVuc2F0aW9uU3R5bGUSIgoeQ09NUEVOU0FUSU9OX1NUWUxFX1VOU1BFQ0lGSUVEEAASJwojQ09NUEVOU0FUSU9OX1NUWUxFX05PVF9DT01QRU5TQVRJTkcQARIcChhDT01QRU5TQVRJT05fU1RZTEVfREVMVEEQAhIfChtDT01QRU5TQVRJT05fU1RZTEVfU05BUFNIT1QQA0JMWkpnaXRodWIuY29tL2xpbnV4Yi9mbG9yeS1haS9nYXRld2F5ZC9pbnRlcm5hbC9wYi9mbG9yeS9nYXRld2F5L3YxO2dhdGV3YXl2MWIGcHJvdG8z");
+  fileDesc("CiRmbG9yeS9nYXRld2F5L3YxL3Rvb2xfY29udHJhY3QucHJvdG8SEGZsb3J5LmdhdGV3YXkudjEidgoQUmV0cnlDb25zdHJhaW50cxIUCgxtYXhfYXR0ZW1wdHMYASABKA0SGgoSaW5pdGlhbF9iYWNrb2ZmX21zGAIgASgNEhgKEG11bHRpcGxpZXJfbWlsbGkYAyABKA0SFgoObWF4X2JhY2tvZmZfbXMYBCABKA0i/wMKD1RyYW5zYWN0aW9uU3BlYxIzCgxlZmZlY3RfY2xhc3MYASABKA4yHS5mbG9yeS5nYXRld2F5LnYxLkVmZmVjdENsYXNzEigKBG1vZGUYAiABKA4yGi5mbG9yeS5nYXRld2F5LnYxLlRvb2xNb2RlEhwKFGlkZW1wb3RlbmN5X2tleV9wYXRoGAMgASgJEiEKFGlkZW1wb3RlbnRfcmV0cnlhYmxlGAQgASgISACIAQESFQoNdHJ5X3RpbWVvdXRfcxgFIAEoDRIUCgxjb25maXJtX3Rvb2wYBiABKAkSEwoLY2FuY2VsX3Rvb2wYByABKAkSFwoPY29tcGVuc2F0ZV90b29sGAggASgJEhMKC3N0YXR1c190b29sGAkgASgJEj8KEWNvbmZpcm1fYXJndW1lbnRzGAogASgLMiQuZmxvcnkuZ2F0ZXdheS52MS5Db21wYW5pb25Bcmd1bWVudHMSPgoQY2FuY2VsX2FyZ3VtZW50cxgLIAEoCzIkLmZsb3J5LmdhdGV3YXkudjEuQ29tcGFuaW9uQXJndW1lbnRzEkIKFGNvbXBlbnNhdGVfYXJndW1lbnRzGAwgASgLMiQuZmxvcnkuZ2F0ZXdheS52MS5Db21wYW5pb25Bcmd1bWVudHNCFwoVX2lkZW1wb3RlbnRfcmV0cnlhYmxlIqUBChJDb21wYW5pb25Bcmd1bWVudHMSVgoSZnJvbV90cnlfYXJndW1lbnRzGAEgAygLMjouZmxvcnkuZ2F0ZXdheS52MS5Db21wYW5pb25Bcmd1bWVudHMuRnJvbVRyeUFyZ3VtZW50c0VudHJ5GjcKFUZyb21UcnlBcmd1bWVudHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBIjIKC0FkYXB0ZXJTcGVjEhAKCHByb3RvY29sGAEgASgJEhEKCW9wZXJhdGlvbhgCIAEoCSLaAwoMVG9vbENvbnRyYWN0Eg8KB3Rvb2xfaWQYASABKAkSFAoMdG9vbF92ZXJzaW9uGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJEhQKDGlucHV0X3NjaGVtYRgEIAEoCRIVCg1vdXRwdXRfc2NoZW1hGAUgASgJEhAKCHJvdXRlX2lkGAYgASgJEi4KB2FkYXB0ZXIYByABKAsyHS5mbG9yeS5nYXRld2F5LnYxLkFkYXB0ZXJTcGVjEi4KA3R4bhgIIAEoCzIhLmZsb3J5LmdhdGV3YXkudjEuVHJhbnNhY3Rpb25TcGVjEj8KEmNvbXBlbnNhdGlvbl9zdHlsZRgJIAEoDjIjLmZsb3J5LmdhdGV3YXkudjEuQ29tcGVuc2F0aW9uU3R5bGUSEQoJZm9vdHByaW50GAogAygJEg4KBndyaXRlcxgLIAMoCRISCgp0aW1lb3V0X21zGAwgASgNEj0KEXJldHJ5X2NvbnN0cmFpbnRzGA0gASgLMiIuZmxvcnkuZ2F0ZXdheS52MS5SZXRyeUNvbnN0cmFpbnRzEg0KBW93bmVyGA4gASgJEhUKDWFsbG93ZWRfcm9sZXMYDyADKAkSEgoKbG9nX2ZpZWxkcxgQIAMoCSqbAQoLRWZmZWN0Q2xhc3MSHAoYRUZGRUNUX0NMQVNTX1VOU1BFQ0lGSUVEEAASFQoRRUZGRUNUX0NMQVNTX05PTkUQARIbChdFRkZFQ1RfQ0xBU1NfQlVGRkVSQUJMRRACEhsKF0VGRkVDVF9DTEFTU19SRVZFUlNJQkxFEAMSHQoZRUZGRUNUX0NMQVNTX0lSUkVWRVJTSUJMRRAEKmEKCFRvb2xNb2RlEhkKFVRPT0xfTU9ERV9VTlNQRUNJRklFRBAAEhMKD1RPT0xfTU9ERV9QTEFJThABEhEKDVRPT0xfTU9ERV9UQ0MQAhISCg5UT09MX01PREVfU0FHQRADKp8BChFDb21wZW5zYXRpb25TdHlsZRIiCh5DT01QRU5TQVRJT05fU1RZTEVfVU5TUEVDSUZJRUQQABInCiNDT01QRU5TQVRJT05fU1RZTEVfTk9UX0NPTVBFTlNBVElORxABEhwKGENPTVBFTlNBVElPTl9TVFlMRV9ERUxUQRACEh8KG0NPTVBFTlNBVElPTl9TVFlMRV9TTkFQU0hPVBADQkxaSmdpdGh1Yi5jb20vbGludXhiL2Zsb3J5LWFpL2dhdGV3YXlkL2ludGVybmFsL3BiL2Zsb3J5L2dhdGV3YXkvdjE7Z2F0ZXdheXYxYgZwcm90bzM");
 
 /**
  * The retry envelope an executor may not exceed for this tool.
@@ -115,6 +115,26 @@ export type TransactionSpec = Message<"flory.gateway.v1.TransactionSpec"> & {
    * @generated from field: string status_tool = 9;
    */
   statusTool: string;
+
+  /**
+   * How each companion operation's arguments are built. A tool declaring a
+   * companion must declare how to call it: a confirm takes the identity of
+   * what was reserved, not the parameters the reservation was made with, and
+   * only the tool knows which of its arguments carry that identity.
+   *
+   * @generated from field: flory.gateway.v1.CompanionArguments confirm_arguments = 10;
+   */
+  confirmArguments?: CompanionArguments | undefined;
+
+  /**
+   * @generated from field: flory.gateway.v1.CompanionArguments cancel_arguments = 11;
+   */
+  cancelArguments?: CompanionArguments | undefined;
+
+  /**
+   * @generated from field: flory.gateway.v1.CompanionArguments compensate_arguments = 12;
+   */
+  compensateArguments?: CompanionArguments | undefined;
 };
 
 /**
@@ -123,6 +143,35 @@ export type TransactionSpec = Message<"flory.gateway.v1.TransactionSpec"> & {
  */
 export const TransactionSpecSchema: GenMessage<TransactionSpec> = /*@__PURE__*/
   messageDesc(file_flory_gateway_v1_tool_contract, 1);
+
+/**
+ * How one companion operation's arguments are built from the try's own.
+ *
+ * Declared by the tool that owns the bracket, never inferred by an executor:
+ * passing the try's arguments through unchanged assumes the companion accepts
+ * them, and a companion whose schema is narrower — the usual case, since a
+ * confirm needs an identity rather than a description — is refused by the
+ * gateway at dispatch, after the pivot has already passed.
+ *
+ * @generated from message flory.gateway.v1.CompanionArguments
+ */
+export type CompanionArguments = Message<"flory.gateway.v1.CompanionArguments"> & {
+  /**
+   * Companion parameter name -> JSONPath into this tool's own arguments.
+   * A companion taking no arguments declares an empty map, which is a
+   * statement rather than an omission.
+   *
+   * @generated from field: map<string, string> from_try_arguments = 1;
+   */
+  fromTryArguments: { [key: string]: string };
+};
+
+/**
+ * Describes the message flory.gateway.v1.CompanionArguments.
+ * Use `create(CompanionArgumentsSchema)` to create a new message.
+ */
+export const CompanionArgumentsSchema: GenMessage<CompanionArguments> = /*@__PURE__*/
+  messageDesc(file_flory_gateway_v1_tool_contract, 2);
 
 /**
  * The protocol contract for reaching a tool, separate from any endpoint address.
@@ -150,7 +199,7 @@ export type AdapterSpec = Message<"flory.gateway.v1.AdapterSpec"> & {
  * Use `create(AdapterSpecSchema)` to create a new message.
  */
 export const AdapterSpecSchema: GenMessage<AdapterSpec> = /*@__PURE__*/
-  messageDesc(file_flory_gateway_v1_tool_contract, 2);
+  messageDesc(file_flory_gateway_v1_tool_contract, 3);
 
 /**
  * One immutable (tool_id, tool_version) contract.
@@ -259,7 +308,7 @@ export type ToolContract = Message<"flory.gateway.v1.ToolContract"> & {
  * Use `create(ToolContractSchema)` to create a new message.
  */
 export const ToolContractSchema: GenMessage<ToolContract> = /*@__PURE__*/
-  messageDesc(file_flory_gateway_v1_tool_contract, 3);
+  messageDesc(file_flory_gateway_v1_tool_contract, 4);
 
 /**
  * Side-effect classification from design document 02.

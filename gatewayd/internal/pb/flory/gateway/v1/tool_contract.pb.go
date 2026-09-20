@@ -283,6 +283,13 @@ type TransactionSpec struct {
 	CancelTool          string `protobuf:"bytes,7,opt,name=cancel_tool,json=cancelTool,proto3" json:"cancel_tool,omitempty"`
 	CompensateTool      string `protobuf:"bytes,8,opt,name=compensate_tool,json=compensateTool,proto3" json:"compensate_tool,omitempty"`
 	StatusTool          string `protobuf:"bytes,9,opt,name=status_tool,json=statusTool,proto3" json:"status_tool,omitempty"`
+	// How each companion operation's arguments are built. A tool declaring a
+	// companion must declare how to call it: a confirm takes the identity of
+	// what was reserved, not the parameters the reservation was made with, and
+	// only the tool knows which of its arguments carry that identity.
+	ConfirmArguments    *CompanionArguments `protobuf:"bytes,10,opt,name=confirm_arguments,json=confirmArguments,proto3" json:"confirm_arguments,omitempty"`
+	CancelArguments     *CompanionArguments `protobuf:"bytes,11,opt,name=cancel_arguments,json=cancelArguments,proto3" json:"cancel_arguments,omitempty"`
+	CompensateArguments *CompanionArguments `protobuf:"bytes,12,opt,name=compensate_arguments,json=compensateArguments,proto3" json:"compensate_arguments,omitempty"`
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
 }
@@ -380,6 +387,81 @@ func (x *TransactionSpec) GetStatusTool() string {
 	return ""
 }
 
+func (x *TransactionSpec) GetConfirmArguments() *CompanionArguments {
+	if x != nil {
+		return x.ConfirmArguments
+	}
+	return nil
+}
+
+func (x *TransactionSpec) GetCancelArguments() *CompanionArguments {
+	if x != nil {
+		return x.CancelArguments
+	}
+	return nil
+}
+
+func (x *TransactionSpec) GetCompensateArguments() *CompanionArguments {
+	if x != nil {
+		return x.CompensateArguments
+	}
+	return nil
+}
+
+// How one companion operation's arguments are built from the try's own.
+//
+// Declared by the tool that owns the bracket, never inferred by an executor:
+// passing the try's arguments through unchanged assumes the companion accepts
+// them, and a companion whose schema is narrower — the usual case, since a
+// confirm needs an identity rather than a description — is refused by the
+// gateway at dispatch, after the pivot has already passed.
+type CompanionArguments struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Companion parameter name -> JSONPath into this tool's own arguments.
+	// A companion taking no arguments declares an empty map, which is a
+	// statement rather than an omission.
+	FromTryArguments map[string]string `protobuf:"bytes,1,rep,name=from_try_arguments,json=fromTryArguments,proto3" json:"from_try_arguments,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *CompanionArguments) Reset() {
+	*x = CompanionArguments{}
+	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompanionArguments) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompanionArguments) ProtoMessage() {}
+
+func (x *CompanionArguments) ProtoReflect() protoreflect.Message {
+	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompanionArguments.ProtoReflect.Descriptor instead.
+func (*CompanionArguments) Descriptor() ([]byte, []int) {
+	return file_flory_gateway_v1_tool_contract_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *CompanionArguments) GetFromTryArguments() map[string]string {
+	if x != nil {
+		return x.FromTryArguments
+	}
+	return nil
+}
+
 // The protocol contract for reaching a tool, separate from any endpoint address.
 type AdapterSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -393,7 +475,7 @@ type AdapterSpec struct {
 
 func (x *AdapterSpec) Reset() {
 	*x = AdapterSpec{}
-	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[2]
+	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -405,7 +487,7 @@ func (x *AdapterSpec) String() string {
 func (*AdapterSpec) ProtoMessage() {}
 
 func (x *AdapterSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[2]
+	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -418,7 +500,7 @@ func (x *AdapterSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdapterSpec.ProtoReflect.Descriptor instead.
 func (*AdapterSpec) Descriptor() ([]byte, []int) {
-	return file_flory_gateway_v1_tool_contract_proto_rawDescGZIP(), []int{2}
+	return file_flory_gateway_v1_tool_contract_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AdapterSpec) GetProtocol() string {
@@ -470,7 +552,7 @@ type ToolContract struct {
 
 func (x *ToolContract) Reset() {
 	*x = ToolContract{}
-	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[3]
+	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -482,7 +564,7 @@ func (x *ToolContract) String() string {
 func (*ToolContract) ProtoMessage() {}
 
 func (x *ToolContract) ProtoReflect() protoreflect.Message {
-	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[3]
+	mi := &file_flory_gateway_v1_tool_contract_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -495,7 +577,7 @@ func (x *ToolContract) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolContract.ProtoReflect.Descriptor instead.
 func (*ToolContract) Descriptor() ([]byte, []int) {
-	return file_flory_gateway_v1_tool_contract_proto_rawDescGZIP(), []int{3}
+	return file_flory_gateway_v1_tool_contract_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ToolContract) GetToolId() string {
@@ -619,7 +701,7 @@ const file_flory_gateway_v1_tool_contract_proto_rawDesc = "" +
 	"\fmax_attempts\x18\x01 \x01(\rR\vmaxAttempts\x12,\n" +
 	"\x12initial_backoff_ms\x18\x02 \x01(\rR\x10initialBackoffMs\x12)\n" +
 	"\x10multiplier_milli\x18\x03 \x01(\rR\x0fmultiplierMilli\x12$\n" +
-	"\x0emax_backoff_ms\x18\x04 \x01(\rR\fmaxBackoffMs\"\xb8\x03\n" +
+	"\x0emax_backoff_ms\x18\x04 \x01(\rR\fmaxBackoffMs\"\xb5\x05\n" +
 	"\x0fTransactionSpec\x12@\n" +
 	"\feffect_class\x18\x01 \x01(\x0e2\x1d.flory.gateway.v1.EffectClassR\veffectClass\x12.\n" +
 	"\x04mode\x18\x02 \x01(\x0e2\x1a.flory.gateway.v1.ToolModeR\x04mode\x120\n" +
@@ -631,8 +713,17 @@ const file_flory_gateway_v1_tool_contract_proto_rawDesc = "" +
 	"cancelTool\x12'\n" +
 	"\x0fcompensate_tool\x18\b \x01(\tR\x0ecompensateTool\x12\x1f\n" +
 	"\vstatus_tool\x18\t \x01(\tR\n" +
-	"statusToolB\x17\n" +
-	"\x15_idempotent_retryable\"G\n" +
+	"statusTool\x12Q\n" +
+	"\x11confirm_arguments\x18\n" +
+	" \x01(\v2$.flory.gateway.v1.CompanionArgumentsR\x10confirmArguments\x12O\n" +
+	"\x10cancel_arguments\x18\v \x01(\v2$.flory.gateway.v1.CompanionArgumentsR\x0fcancelArguments\x12W\n" +
+	"\x14compensate_arguments\x18\f \x01(\v2$.flory.gateway.v1.CompanionArgumentsR\x13compensateArgumentsB\x17\n" +
+	"\x15_idempotent_retryable\"\xc3\x01\n" +
+	"\x12CompanionArguments\x12h\n" +
+	"\x12from_try_arguments\x18\x01 \x03(\v2:.flory.gateway.v1.CompanionArguments.FromTryArgumentsEntryR\x10fromTryArguments\x1aC\n" +
+	"\x15FromTryArgumentsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"G\n" +
 	"\vAdapterSpec\x12\x1a\n" +
 	"\bprotocol\x18\x01 \x01(\tR\bprotocol\x12\x1c\n" +
 	"\toperation\x18\x02 \x01(\tR\toperation\"\x91\x05\n" +
@@ -686,28 +777,34 @@ func file_flory_gateway_v1_tool_contract_proto_rawDescGZIP() []byte {
 }
 
 var file_flory_gateway_v1_tool_contract_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_flory_gateway_v1_tool_contract_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_flory_gateway_v1_tool_contract_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_flory_gateway_v1_tool_contract_proto_goTypes = []any{
-	(EffectClass)(0),         // 0: flory.gateway.v1.EffectClass
-	(ToolMode)(0),            // 1: flory.gateway.v1.ToolMode
-	(CompensationStyle)(0),   // 2: flory.gateway.v1.CompensationStyle
-	(*RetryConstraints)(nil), // 3: flory.gateway.v1.RetryConstraints
-	(*TransactionSpec)(nil),  // 4: flory.gateway.v1.TransactionSpec
-	(*AdapterSpec)(nil),      // 5: flory.gateway.v1.AdapterSpec
-	(*ToolContract)(nil),     // 6: flory.gateway.v1.ToolContract
+	(EffectClass)(0),           // 0: flory.gateway.v1.EffectClass
+	(ToolMode)(0),              // 1: flory.gateway.v1.ToolMode
+	(CompensationStyle)(0),     // 2: flory.gateway.v1.CompensationStyle
+	(*RetryConstraints)(nil),   // 3: flory.gateway.v1.RetryConstraints
+	(*TransactionSpec)(nil),    // 4: flory.gateway.v1.TransactionSpec
+	(*CompanionArguments)(nil), // 5: flory.gateway.v1.CompanionArguments
+	(*AdapterSpec)(nil),        // 6: flory.gateway.v1.AdapterSpec
+	(*ToolContract)(nil),       // 7: flory.gateway.v1.ToolContract
+	nil,                        // 8: flory.gateway.v1.CompanionArguments.FromTryArgumentsEntry
 }
 var file_flory_gateway_v1_tool_contract_proto_depIdxs = []int32{
-	0, // 0: flory.gateway.v1.TransactionSpec.effect_class:type_name -> flory.gateway.v1.EffectClass
-	1, // 1: flory.gateway.v1.TransactionSpec.mode:type_name -> flory.gateway.v1.ToolMode
-	5, // 2: flory.gateway.v1.ToolContract.adapter:type_name -> flory.gateway.v1.AdapterSpec
-	4, // 3: flory.gateway.v1.ToolContract.txn:type_name -> flory.gateway.v1.TransactionSpec
-	2, // 4: flory.gateway.v1.ToolContract.compensation_style:type_name -> flory.gateway.v1.CompensationStyle
-	3, // 5: flory.gateway.v1.ToolContract.retry_constraints:type_name -> flory.gateway.v1.RetryConstraints
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	0,  // 0: flory.gateway.v1.TransactionSpec.effect_class:type_name -> flory.gateway.v1.EffectClass
+	1,  // 1: flory.gateway.v1.TransactionSpec.mode:type_name -> flory.gateway.v1.ToolMode
+	5,  // 2: flory.gateway.v1.TransactionSpec.confirm_arguments:type_name -> flory.gateway.v1.CompanionArguments
+	5,  // 3: flory.gateway.v1.TransactionSpec.cancel_arguments:type_name -> flory.gateway.v1.CompanionArguments
+	5,  // 4: flory.gateway.v1.TransactionSpec.compensate_arguments:type_name -> flory.gateway.v1.CompanionArguments
+	8,  // 5: flory.gateway.v1.CompanionArguments.from_try_arguments:type_name -> flory.gateway.v1.CompanionArguments.FromTryArgumentsEntry
+	6,  // 6: flory.gateway.v1.ToolContract.adapter:type_name -> flory.gateway.v1.AdapterSpec
+	4,  // 7: flory.gateway.v1.ToolContract.txn:type_name -> flory.gateway.v1.TransactionSpec
+	2,  // 8: flory.gateway.v1.ToolContract.compensation_style:type_name -> flory.gateway.v1.CompensationStyle
+	3,  // 9: flory.gateway.v1.ToolContract.retry_constraints:type_name -> flory.gateway.v1.RetryConstraints
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_flory_gateway_v1_tool_contract_proto_init() }
@@ -722,7 +819,7 @@ func file_flory_gateway_v1_tool_contract_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_flory_gateway_v1_tool_contract_proto_rawDesc), len(file_flory_gateway_v1_tool_contract_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

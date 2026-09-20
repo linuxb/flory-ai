@@ -12,6 +12,16 @@ export interface ToolViewTransaction {
     cancel_tool?: string;
     compensate_tool?: string;
     status_tool?: string;
+    /**
+     * How each companion operation's arguments are built from this tool's own.
+     *
+     * Present exactly when the matching companion tool is, because the gateway
+     * refuses a companion declared without one. Each value is a path into this
+     * tool's own arguments, written `$.name`.
+     */
+    confirm_arguments?: Record<string, string>;
+    cancel_arguments?: Record<string, string>;
+    compensate_arguments?: Record<string, string>;
 }
 
 /** The retry envelope an executor may not exceed for a tool. */

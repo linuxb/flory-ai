@@ -52,6 +52,12 @@ type TransactionSpec struct {
 	CancelTool     string          `json:"cancel_tool,omitempty"`
 	CompensateTool string          `json:"compensate_tool,omitempty"`
 	StatusTool     string          `json:"status_tool,omitempty"`
+	// Frozen by the engine from the mapping the tool declared. A companion is called
+	// with these and never with the try's own arguments: it acts on the identity of what
+	// was reserved, so its schema is usually narrower and would refuse them.
+	ConfirmInput    map[string]interface{} `json:"confirm_input,omitempty"`
+	CancelInput     map[string]interface{} `json:"cancel_input,omitempty"`
+	CompensateInput map[string]interface{} `json:"compensate_input,omitempty"`
 }
 
 type RouterVertexPayload struct {

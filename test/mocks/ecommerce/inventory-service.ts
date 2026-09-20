@@ -31,6 +31,10 @@ export function startInventoryService(world: MockCommerceWorld, options: MockSer
                 tryTimeoutSeconds: 300,
                 confirmTool: 'inventory.confirm',
                 cancelTool: 'inventory.release',
+                // Both companions take the order, not the reservation's parameters: they act on
+                // what this try reserved, and they are the only party entitled to say so.
+                confirmArguments: {order_id: '$.order_id'},
+                cancelArguments: {order_id: '$.order_id'},
                 footprint: ['inventory:{sku}'],
                 writes: ['inventory:{sku}'],
             }),

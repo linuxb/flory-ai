@@ -16,6 +16,9 @@ export function startPaymentService(world: MockCommerceWorld, options: MockServi
                 tryTimeoutSeconds: 300,
                 confirmTool: 'payment.capture',
                 cancelTool: 'payment.void',
+                // Capture and void take the order alone; the amount belongs to the authorization.
+                confirmArguments: {order_id: '$.order_id'},
+                cancelArguments: {order_id: '$.order_id'},
                 footprint: ['payment:{order_id}'],
                 writes: ['payment:{order_id}'],
             }),

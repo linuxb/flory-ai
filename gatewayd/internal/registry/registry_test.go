@@ -43,7 +43,15 @@ func sagaContract() *gatewayv1.ToolContract {
 	built.Txn.EffectClass = gatewayv1.EffectClass_EFFECT_CLASS_REVERSIBLE
 	built.Txn.Mode = gatewayv1.ToolMode_TOOL_MODE_SAGA
 	built.Txn.CompensateTool = "order.cancel"
+	built.Txn.CompensateArguments = companionArgs()
 	return built
+}
+
+// companionArgs is the minimal mapping a declared companion must carry. The
+// input schema here declares no properties, so any path is admissible; these
+// fixtures exercise other rules and only need to clear this one.
+func companionArgs() *gatewayv1.CompanionArguments {
+	return &gatewayv1.CompanionArguments{FromTryArguments: map[string]string{"order_id": "$.order_id"}}
 }
 
 // tccContract returns a try whose confirm and cancel live elsewhere.
@@ -53,6 +61,8 @@ func tccContract() *gatewayv1.ToolContract {
 	built.Txn.Mode = gatewayv1.ToolMode_TOOL_MODE_TCC
 	built.Txn.ConfirmTool = "inventory.confirm"
 	built.Txn.CancelTool = "inventory.release"
+	built.Txn.ConfirmArguments = companionArgs()
+	built.Txn.CancelArguments = companionArgs()
 	built.Txn.TryTimeoutS = 900
 	return built
 }
@@ -337,4 +347,62 @@ func TestPublishedViewCarriesCompiledSchemas(t *testing.T) {
 	if _, found := view.Schema(Key{ToolID: "inventory.check", ToolVersion: "2.0.0"}); found {
 		t.Fatal("an unpublished version resolved to a schema")
 	}
+}
+
+// TestCompanionArgumentsMustBeDeclared covers the rule that a tool naming a
+// companion must also say how to call it.
+//
+// Nothing downstream can supply the answer. An executor left to guess sends the
+// try's own arguments, and a companion whose schema is narrower -- the usual
+// case, since a confirm takes an identity rather than a description -- refuses
+// them at dispatch. On the confirm path that refusal arrives after the pivot,
+// where the scope can no longer be rolled back, so the contract has to carry it.
+func TestCompanionArgumentsMustBeDeclared(t *testing.T) {
+	for name, mutate := range map[string]func(*gatewayv1.ToolContract){
+		"a confirm with no mapping": func(c *gatewayv1.ToolContract) { c.Txn.ConfirmArguments = nil },
+		"a cancel with no mapping":  func(c *gatewayv1.ToolContract) { c.Txn.CancelArguments = nil },
+		"a mapping with no companion": func(c *gatewayv1.ToolContract) {
+			c.Txn.CompensateArguments = companionArgs()
+		},
+		"a source that is not a path into this tool's arguments": func(c *gatewayv1.ToolContract) {
+			c.Txn.ConfirmArguments = &gatewayv1.CompanionArguments{FromTryArguments: map[string]string{"order_id": "order_id"}}
+		},
+		"a source this tool does not declare": func(c *gatewayv1.ToolContract) {
+			c.InputSchema = `{"type":"object","properties":{"sku":{"type":"string"}}}`
+			c.Txn.ConfirmArguments = &gatewayv1.CompanionArguments{FromTryArguments: map[string]string{"order_id": "$.order_id"}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			built := tccContract()
+			mutate(built)
+			expectRejected(t, []*gatewayv1.ToolContract{built, compensator("inventory.confirm"), compensator("inventory.release")},
+				built.GetToolId(), gatewayv1.AdmissionCode_ADMISSION_CODE_INVALID_COMPANION_REFERENCE)
+		})
+	}
+}
+
+// TestDeclaredCompanionArgumentsAreAdmitted keeps the rule from being a blanket
+// refusal: a tool that does declare the mapping is published with it intact.
+func TestDeclaredCompanionArgumentsAreAdmitted(t *testing.T) {
+	registry := New(blob.NewMemory(), nil)
+	statuses := register(t, registry, tccContract(), compensator("inventory.confirm"), compensator("inventory.release"))
+	if state := stateOf(t, statuses, "inventory.reserve").GetState(); state != gatewayv1.ToolState_TOOL_STATE_ADMITTED {
+		t.Fatalf("inventory.reserve is %s, want ADMITTED", state)
+	}
+	view := registry.Current()
+	if view == nil {
+		t.Fatal("nothing was published")
+	}
+	for _, tool := range view.Published.Document.Tools {
+		if tool.ToolID != "inventory.reserve" {
+			continue
+		}
+		// The mapping has to survive into the view, because that is the document the engine
+		// resolves it from at freeze.
+		if tool.Txn.ConfirmArguments["order_id"] != "$.order_id" || tool.Txn.CancelArguments["order_id"] != "$.order_id" {
+			t.Fatalf("published view lost the declared mapping: %+v", tool.Txn)
+		}
+		return
+	}
+	t.Fatal("inventory.reserve is missing from the published view")
 }

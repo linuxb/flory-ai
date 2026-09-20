@@ -324,8 +324,58 @@ function vertexPayload(
             ...(contract.txn.cancel_tool ? {cancel_tool: contract.txn.cancel_tool} : {}),
             ...(contract.txn.compensate_tool ? {compensate_tool: contract.txn.compensate_tool} : {}),
             ...(contract.txn.status_tool ? {status_tool: contract.txn.status_tool} : {}),
+            ...companionInputs(vertex, contract),
         },
     };
+}
+
+/**
+ * Resolves each companion operation's arguments from the mapping its tool declared.
+ *
+ * Resolved here, at freeze, and recorded: a confirm that built its arguments at execution time
+ * would be reconstructing them from a contract that may since have been republished, and a replay
+ * would then confirm with arguments the original run never sent. Freezing them makes the companion
+ * call a recorded fact, and leaves the Coordinator nothing to construct — which matters most
+ * because a confirm runs *after* the pivot, where a refusal can no longer be rolled back.
+ *
+ * The mapping itself is the tool's to declare and never an executor's to infer. Passing the try's
+ * own arguments through is the inference that looks harmless and is not: a companion takes the
+ * identity of what was reserved, not the parameters the reservation was made with, so its schema is
+ * usually narrower and refuses them.
+ */
+function companionInputs(vertex: SubmittedToolVertex, contract: ResolvedToolView['document']['tools'][number]): Record<string, Record<string, unknown>> {
+    const inputs: Record<string, Record<string, unknown>> = {};
+    for (const [field, mapping] of [
+        ['confirm_input', contract.txn.confirm_arguments],
+        ['cancel_input', contract.txn.cancel_arguments],
+        ['compensate_input', contract.txn.compensate_arguments],
+    ] as const) {
+        if (!mapping) continue;
+        const resolved: Record<string, unknown> = {};
+        for (const [parameter, path] of Object.entries(mapping)) {
+            const value = valueAtArgumentPath(vertex.input ?? {}, path);
+            // A source the frozen arguments do not carry fails the freeze. Sending the companion a
+            // parameter short would fail at dispatch instead, and after the pivot that is
+            // unrecoverable, so the cheap refusal has to happen here.
+            if (value === undefined) throw new Error(`${vertex.id} calls ${contract.tool_id}, whose ${field} reads ${path}, absent from its frozen arguments`);
+            resolved[parameter] = value;
+        }
+        inputs[field] = resolved;
+    }
+    return inputs;
+}
+
+/** Resolves a `$.name` or `$.name.nested` path against a tool's frozen arguments. */
+function valueAtArgumentPath(input: Record<string, unknown>, path: string): unknown {
+    let current: unknown = input;
+    for (const segment of path
+        .replace(/^\$\.?/, '')
+        .split('.')
+        .filter(Boolean)) {
+        if (!current || typeof current !== 'object' || Array.isArray(current)) return undefined;
+        current = (current as Record<string, unknown>)[segment];
+    }
+    return current;
 }
 
 /**

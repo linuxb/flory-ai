@@ -27,6 +27,13 @@ type Transaction struct {
 	CancelTool          string `json:"cancel_tool,omitempty"`
 	CompensateTool      string `json:"compensate_tool,omitempty"`
 	StatusTool          string `json:"status_tool,omitempty"`
+	// How each companion operation's arguments are built from this tool's own.
+	// Absent exactly when the matching companion tool is absent: registration
+	// refuses a tool that names a companion without saying how to call it, so a
+	// tool with no companion leaves these out and keeps the digest it had.
+	ConfirmArguments    map[string]string `json:"confirm_arguments,omitempty"`
+	CancelArguments     map[string]string `json:"cancel_arguments,omitempty"`
+	CompensateArguments map[string]string `json:"compensate_arguments,omitempty"`
 }
 
 // Retry is the envelope an executor may not exceed for this tool.
@@ -180,6 +187,9 @@ func FromProto(contract *gatewayv1.ToolContract) (Tool, error) {
 			CancelTool:          txn.GetCancelTool(),
 			CompensateTool:      txn.GetCompensateTool(),
 			StatusTool:          txn.GetStatusTool(),
+			ConfirmArguments:    companionArguments(txn.GetConfirmArguments()),
+			CancelArguments:     companionArguments(txn.GetCancelArguments()),
+			CompensateArguments: companionArguments(txn.GetCompensateArguments()),
 		},
 		CompensationStyle: compensation,
 		Footprint:         sortedCopy(contract.GetFootprint()),
@@ -327,4 +337,21 @@ func sortedUnique(values []string) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+// companionArguments projects a declared argument mapping.
+//
+// An empty mapping encodes as absent, which is why registration refuses a
+// companion declared without one: a confirm that reached dispatch with no
+// arguments could not name what it was confirming, so there is nothing an
+// empty mapping could legitimately mean.
+func companionArguments(spec *gatewayv1.CompanionArguments) map[string]string {
+	if len(spec.GetFromTryArguments()) == 0 {
+		return nil
+	}
+	arguments := make(map[string]string, len(spec.GetFromTryArguments()))
+	for parameter, path := range spec.GetFromTryArguments() {
+		arguments[parameter] = path
+	}
+	return arguments
 }

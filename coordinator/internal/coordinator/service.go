@@ -130,6 +130,12 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 		optionalString(tryPayload, "confirm_tool", item.Payload.Txn.ConfirmTool)
 		optionalString(tryPayload, "cancel_tool", item.Payload.Txn.CancelTool)
 		optionalString(tryPayload, "compensate_tool", item.Payload.Txn.CompensateTool)
+		// Carried through untouched. This process never builds a companion's arguments: the tool
+		// that owns the bracket declared the mapping and the engine resolved it at freeze, so what
+		// is recorded here is what will be sent, and a replay sends the same thing.
+		optionalObject(tryPayload, "confirm_input", item.Payload.Txn.ConfirmInput)
+		optionalObject(tryPayload, "cancel_input", item.Payload.Txn.CancelInput)
+		optionalObject(tryPayload, "compensate_input", item.Payload.Txn.CompensateInput)
 		events = append(events, model.EventDraft{EventType: "txn/try", VertexID: &item.VertexID, ScopeID: &item.ScopeID, Payload: tryPayload})
 	}
 	events = append(events, vertexEvent("vertex/succeeded", item, map[string]any{"attempts": attempts, "result": response.Result}))
@@ -275,7 +281,7 @@ func (service *Service) confirmScope(ctx context.Context, item *model.WorkItem) 
 			runID: item.RunID, scopeID: item.ScopeID, vertexID: bracket.VertexID, operation: "confirm",
 			leaseVertexID: item.VertexID, leaseSource: "work_queue",
 			tool: bracket.ConfirmTool, idempotencyKey: bracket.IdempotencyKey,
-			input: bracket.Input, policy: bracket.RetryPolicy, pin: companionPin(bracket.ToolViewDigest),
+			input: bracket.ConfirmInput, policy: bracket.RetryPolicy, pin: companionPin(bracket.ToolViewDigest),
 		})
 		if err != nil {
 			return false, err
@@ -305,7 +311,7 @@ func (service *Service) cancelScope(ctx context.Context, runID, scopeID, key str
 			runID: runID, scopeID: scopeID, vertexID: member.VertexID, operation: "inverse",
 			leaseVertexID: member.VertexID, leaseSource: "cancel_member",
 			tool: member.InverseTool, idempotencyKey: member.IdempotencyKey,
-			input: member.Input, policy: member.RetryPolicy, pin: companionPin(member.ToolViewDigest),
+			input: member.InverseInput, policy: member.RetryPolicy, pin: companionPin(member.ToolViewDigest),
 		})
 		if err != nil {
 			return err
@@ -477,6 +483,14 @@ func optionalPointer(value string) *string {
 
 func optionalString(values map[string]any, key, value string) {
 	if value != "" {
+		values[key] = value
+	}
+}
+
+// optionalObject records a frozen companion argument set, and omits it when the
+// tool declared no such companion.
+func optionalObject(values map[string]any, key string, value map[string]any) {
+	if value != nil {
 		values[key] = value
 	}
 }

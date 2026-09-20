@@ -87,7 +87,10 @@ func ValidateStructure(tool toolview.Tool) *Violation {
 	if violation := validateDeclaredCompanions(tool); violation != nil {
 		return violation
 	}
-	return validateCompanionReferences(tool)
+	if violation := validateCompanionReferences(tool); violation != nil {
+		return violation
+	}
+	return validateCompanionArguments(tool)
 }
 
 func validateIdentity(tool toolview.Tool) *Violation {
@@ -228,6 +231,85 @@ func validateCompanionReferences(tool toolview.Tool) *Violation {
 		}
 	}
 	return nil
+}
+
+// validateCompanionArguments enforces that a tool which names a companion also
+// says how to call it.
+//
+// Nothing else can say it. A confirm takes the identity of what was reserved,
+// not the parameters the reservation was made with, and only the tool that owns
+// the bracket knows which of its arguments carry that identity. An executor
+// left to guess passes the try's arguments through unchanged, and a companion
+// whose schema is narrower -- the usual case -- then refuses them at dispatch,
+// after the pivot has already passed and the scope can no longer be rolled back.
+//
+// Each path is checked against this tool's own input schema, because that is
+// the only document the mapping can draw from. A schema that declares no
+// properties constrains nothing, so there is nothing to check it against.
+func validateCompanionArguments(tool toolview.Tool) *Violation {
+	properties := declaredProperties(tool.InputSchema)
+	for _, companion := range []struct {
+		field     string
+		tool      string
+		arguments map[string]string
+	}{
+		{"confirm", tool.Txn.ConfirmTool, tool.Txn.ConfirmArguments},
+		{"cancel", tool.Txn.CancelTool, tool.Txn.CancelArguments},
+		{"compensate", tool.Txn.CompensateTool, tool.Txn.CompensateArguments},
+	} {
+		if companion.tool == "" {
+			if len(companion.arguments) > 0 {
+				return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_INVALID_COMPANION_REFERENCE,
+					"%s_arguments is declared without a %s_tool to call", companion.field, companion.field)
+			}
+			continue
+		}
+		if len(companion.arguments) == 0 {
+			return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_INVALID_COMPANION_REFERENCE,
+				"%s_tool is declared without %s_arguments; a companion that names nothing cannot identify what it acts on", companion.field, companion.field)
+		}
+		for parameter, path := range companion.arguments {
+			root, ok := argumentRoot(path)
+			if !ok {
+				return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_INVALID_COMPANION_REFERENCE,
+					"%s_arguments.%s reads %q; a source must be a path into this tool's own arguments, written $.name", companion.field, parameter, path)
+			}
+			if properties == nil {
+				continue
+			}
+			if _, declared := properties[root]; !declared {
+				return reject(gatewayv1.AdmissionCode_ADMISSION_CODE_INVALID_COMPANION_REFERENCE,
+					"%s_arguments.%s reads %q, which %s does not declare as an argument", companion.field, parameter, path, tool.ToolID)
+			}
+		}
+	}
+	return nil
+}
+
+// argumentRoot returns the first segment of a `$.name` or `$.name.nested` path.
+//
+// Only the root is checked against the schema: a nested field belongs to a
+// sub-schema this validator would have to walk, and refusing what it cannot
+// check would reject legitimate contracts to make the checker look thorough.
+func argumentRoot(path string) (string, bool) {
+	rest, found := strings.CutPrefix(path, "$.")
+	if !found || rest == "" {
+		return "", false
+	}
+	root, _, _ := strings.Cut(rest, ".")
+	return root, root != ""
+}
+
+// declaredProperties returns the argument names an input schema declares, or
+// nil when it declares none and therefore constrains nothing.
+func declaredProperties(schema json.RawMessage) map[string]json.RawMessage {
+	var decoded struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(schema, &decoded); err != nil || len(decoded.Properties) == 0 {
+		return nil
+	}
+	return decoded.Properties
 }
 
 // companions lists the tools this contract's transaction integration depends on.

@@ -1,6 +1,7 @@
 import {create} from '@bufbuild/protobuf';
 import {
     AdapterSpecSchema,
+    CompanionArgumentsSchema,
     CompensationStyle,
     EffectClass as WireEffectClass,
     RetryConstraintsSchema,
@@ -51,6 +52,18 @@ export interface Contract {
     cancelTool?: string;
     compensateTool?: string;
     statusTool?: string;
+    /**
+     * How each companion operation's arguments are built from this tool's own.
+     *
+     * Required alongside the companion it describes, and declarable only here:
+     * a confirm takes the identity of what was reserved, not the parameters the
+     * reservation was made with, and only this tool knows which of its
+     * arguments carry that identity. Each value is a path into this tool's own
+     * arguments, written `$.name`.
+     */
+    confirmArguments?: Readonly<Record<string, string>>;
+    cancelArguments?: Readonly<Record<string, string>>;
+    compensateArguments?: Readonly<Record<string, string>>;
     /**
      * Marks a tool that reverses another's effect. It always registers as delta-based: releasing exactly what the
      * matching try added is the only form that commutes with another branch's committed change, and the gateway
@@ -114,6 +127,9 @@ export function buildContract(contract: Contract, routeId: string): ToolContract
             cancelTool: contract.cancelTool ?? '',
             compensateTool: contract.compensateTool ?? '',
             statusTool: contract.statusTool ?? '',
+            ...(contract.confirmArguments ? {confirmArguments: create(CompanionArgumentsSchema, {fromTryArguments: {...contract.confirmArguments}})} : {}),
+            ...(contract.cancelArguments ? {cancelArguments: create(CompanionArgumentsSchema, {fromTryArguments: {...contract.cancelArguments}})} : {}),
+            ...(contract.compensateArguments ? {compensateArguments: create(CompanionArgumentsSchema, {fromTryArguments: {...contract.compensateArguments}})} : {}),
         }),
         compensationStyle: contract.compensating ? CompensationStyle.DELTA : CompensationStyle.NOT_COMPENSATING,
         footprint: [...(contract.footprint ?? [])],
@@ -167,6 +183,21 @@ export function contractViolation(contract: Contract): string | null {
         if (!contract.tryTimeoutSeconds) return 'mode tcc requires a positive tryTimeoutSeconds';
     }
     if (contract.mode === 'saga' && !contract.compensateTool) return 'mode saga requires a compensateTool';
+    for (const [field, companion, mapping] of [
+        ['confirm', contract.confirmTool, contract.confirmArguments],
+        ['cancel', contract.cancelTool, contract.cancelArguments],
+        ['compensate', contract.compensateTool, contract.compensateArguments],
+    ] as const) {
+        const declared = Object.keys(mapping ?? {});
+        // A companion that names nothing cannot identify what it acts on, so the
+        // gateway refuses it; saying so here means the service fails while someone is watching.
+        if (companion && !declared.length) return `${field}Tool is declared without ${field}Arguments`;
+        if (!companion && declared.length) return `${field}Arguments is declared without a ${field}Tool to call`;
+        for (const parameter of declared) {
+            const path = mapping![parameter]!;
+            if (!/^\$\.[A-Za-z_][\w-]*(\.[A-Za-z_][\w-]*)*$/.test(path)) return `${field}Arguments.${parameter} must read a path into this tool's own arguments, written $.name`;
+        }
+    }
     for (const [field, companion] of Object.entries({
         confirmTool: contract.confirmTool,
         cancelTool: contract.cancelTool,

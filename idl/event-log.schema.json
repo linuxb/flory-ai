@@ -140,7 +140,10 @@
                 "confirm_tool": {"type": "string", "minLength": 1},
                 "cancel_tool": {"type": "string", "minLength": 1},
                 "compensate_tool": {"type": "string", "minLength": 1},
-                "status_tool": {"type": "string", "minLength": 1}
+                "status_tool": {"type": "string", "minLength": 1},
+                "confirm_input": {"type": "object"},
+                "cancel_input": {"type": "object"},
+                "compensate_input": {"type": "object"}
             },
             "additionalProperties": false
         },

@@ -66,6 +66,27 @@ message TransactionSpec {
     string cancel_tool = 7;
     string compensate_tool = 8;
     string status_tool = 9;
+    // How each companion operation's arguments are built. A tool declaring a
+    // companion must declare how to call it: a confirm takes the identity of
+    // what was reserved, not the parameters the reservation was made with, and
+    // only the tool knows which of its arguments carry that identity.
+    CompanionArguments confirm_arguments = 10;
+    CompanionArguments cancel_arguments = 11;
+    CompanionArguments compensate_arguments = 12;
+}
+
+// How one companion operation's arguments are built from the try's own.
+//
+// Declared by the tool that owns the bracket, never inferred by an executor:
+// passing the try's arguments through unchanged assumes the companion accepts
+// them, and a companion whose schema is narrower — the usual case, since a
+// confirm needs an identity rather than a description — is refused by the
+// gateway at dispatch, after the pivot has already passed.
+message CompanionArguments {
+    // Companion parameter name -> JSONPath into this tool's own arguments.
+    // A companion taking no arguments declares an empty map, which is a
+    // statement rather than an omission.
+    map<string, string> from_try_arguments = 1;
 }
 
 // The protocol contract for reaching a tool, separate from any endpoint address.

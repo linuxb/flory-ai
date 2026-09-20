@@ -189,8 +189,10 @@ type CancelMember struct {
 	// ToolViewDigest is the frozen view its try was admitted against; the inverse
 	// tool resolves by name inside that same view.
 	ToolViewDigest string
-	Input          map[string]any
-	RetryPolicy    generated.RetryPolicy
+	// InverseInput is what the inverse tool is called with, frozen the same way
+	// a confirm's arguments are.
+	InverseInput map[string]any
+	RetryPolicy  generated.RetryPolicy
 }
 
 // ClaimCancelMember claims the next inverse operation in reverse dependency order.
@@ -206,7 +208,7 @@ func (store *PostgresStore) ClaimCancelMember(ctx context.Context, worker, runID
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(raw, &member.Input); err != nil {
+	if err := json.Unmarshal(raw, &member.InverseInput); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(policyRaw, &member.RetryPolicy); err != nil {
@@ -234,13 +236,20 @@ type SealedBracket struct {
 	ConfirmTool    string
 	// ToolViewDigest is the frozen view this try was admitted against.
 	ToolViewDigest string
-	Input          map[string]any
-	RetryPolicy    generated.RetryPolicy
+	// ConfirmInput is what the confirm tool is called with, frozen by the engine
+	// from the mapping the try's tool declared. It is deliberately not the try's
+	// own arguments: a confirm takes the identity of what was reserved, and its
+	// schema is usually narrower than the reservation's.
+	ConfirmInput map[string]any
+	RetryPolicy  generated.RetryPolicy
 }
 
 // SealedBrackets returns the remaining confirm operations in stable order.
 func (store *PostgresStore) SealedBrackets(ctx context.Context, runID, scopeID string) ([]SealedBracket, error) {
-	rows, err := store.pool.Query(ctx, `SELECT try_vertex_id, idempotency_key, confirm_tool, input, retry_policy, COALESCE(tool_view_digest, '') FROM txn_bracket
+	// confirm_input, not input: the confirm tool's own arguments were frozen by the engine from
+	// the mapping its tool declared. Sending the try's arguments instead is an inference this
+	// process is not entitled to make, and one the gateway refuses after the pivot has passed.
+	rows, err := store.pool.Query(ctx, `SELECT try_vertex_id, idempotency_key, confirm_tool, COALESCE(confirm_input, '{}'::JSONB), retry_policy, COALESCE(tool_view_digest, '') FROM txn_bracket
         WHERE run_id = $1 AND scope_id = $2 AND state = 'sealed' AND confirm_tool IS NOT NULL ORDER BY try_vertex_id`, runID, scopeID)
 	if err != nil {
 		return nil, err
@@ -254,7 +263,7 @@ func (store *PostgresStore) SealedBrackets(ctx context.Context, runID, scopeID s
 		if err := rows.Scan(&bracket.VertexID, &bracket.IdempotencyKey, &bracket.ConfirmTool, &raw, &policyRaw, &bracket.ToolViewDigest); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(raw, &bracket.Input); err != nil {
+		if err := json.Unmarshal(raw, &bracket.ConfirmInput); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(policyRaw, &bracket.RetryPolicy); err != nil {

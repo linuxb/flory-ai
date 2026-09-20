@@ -9,8 +9,9 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 | W1 | Formal verification stage S3 | [Doc 06 §12](../design/06-validation-harness.md#12-formal-verification-design) | Trigger-gated: waiting on first production traffic |
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
+| W6 | Console: observability projection, stream, detail endpoints, UI | [Doc 11](../design/11-console-and-observability.md) | Not started; no projection, no transport, no client |
 
-W4 stays in the Engine apart from one table, so it does not contend with the remaining streams.
+W4 stays in the Engine apart from one table, so it does not contend with the remaining streams. W6 reads what W4 writes, so its increment 4 lands after W4's increment 1.
 
 ---
 
@@ -71,3 +72,23 @@ The two planes, their sequences, and the dual-allocation append path are built. 
 - No reader folds `global_seq`.
 
 **Exclusions.** Stream-identity assignment policy — which domain concepts deserve an aggregate root, and how `stream_id` is derived from `task_input` — belongs with the domain teams that own the reducers. Snapshot retention and compaction, and CDC consumers of `global_seq`, are deferred.
+
+## W6 — Console
+
+[Doc 11](../design/11-console-and-observability.md) specifies an operator view of one run's graph. None of it exists: there is no observability projection, no stream, no detail endpoint, and no client. The design is settled, so what remains is delivery in an order that keeps each step verifiable on its own.
+
+**Increments.**
+
+1. `ConsoleDAGProjection` in the Engine, beside `surface`. Pure, versioned, and reproducible from the log, retaining shadowed vertices and enriching each with scope, pivot position, and timing. Testable with no transport and no browser, which is why it comes first.
+2. The stream: `topology_snapshot`, `subgraph_appended`, `subgraph_shadowed`, `vertex_patched`, each carrying the `run_seq` it reflects, plus the resume-or-resnapshot protocol a reconnecting client drives.
+3. The three detail endpoints, reading prompts, logs, and oversized payloads from blob storage.
+4. The client: canvas, vertex cards, scope enclosures, and the inspector drawer, adapting to light and dark with an explicit override.
+
+**Exit criteria.**
+
+- The projection is a pure function of the log: the same prefix produces the same model, and a shadowed subtree survives a replan rather than disappearing.
+- A client killed mid-run and reconnected reaches a state identical to one that never disconnected, whether the server resumed or re-snapshotted.
+- A router that fell through is visible on the canvas and absent from the downstream planner's prompt in the same run — the two projections disagreeing here is the point, and a scenario should assert it.
+- Nothing in the client folds an event or derives a scope.
+
+**Exclusions.** The open questions in [Doc 11 §7](../design/11-console-and-observability.md#7-open-questions) are out of scope: multi-run fleet views, snapshot retention for completed runs, and which roles may read prompts and tool payloads through the detail endpoints. The last one gates any deployment beyond a trusted network, and should be answered before increment 3 ships rather than after.

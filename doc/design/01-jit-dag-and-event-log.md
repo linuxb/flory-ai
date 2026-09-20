@@ -221,6 +221,10 @@ linearize(surface, planner_vertex) → [ctx_item...]
 
 The function is pure. The same log prefix and harness-state version produce the same prompt, allowing regression assertions without a model.
 
+### 4.3 The surface is not the only reader
+
+Everything §4.2 removes — shadowed subtrees, timestamps, scope membership, a fall-through router — is removed to build a prompt, and an operator needs all of it. That is served by a second, separately versioned projection of the same log rather than by relaxing this one, because each omission here is load-bearing: timestamps would break replay, and a rendered fall-through would destroy prompt-prefix stability. [11 §3](./11-console-and-observability.md#3-the-console-projection) specifies the observability projection and why the two cannot be merged.
+
 ## 5. Replanning In Place, and Forking for Offline Evaluation
 
 Flory deliberately **splits** what dsh unifies. dsh makes resume, fork, and replay one primitive because a session is a cheap local object whose identity carries no external meaning. A Flory run is a **business process** — one order, one replenishment — so run identity has business meaning, and the mechanisms must be kept apart.

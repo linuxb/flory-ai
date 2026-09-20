@@ -50,7 +50,7 @@ func (dispatcher *Dispatcher) Close() {
 // on an UNAVAILABLE status. Whether a side effect may be attempted again depends
 // on idempotency, TCC state, and pivot state that only the calling executor
 // knows, and a gateway that retried on its own would make itself a second
-// transaction authority (ADR-006).
+// transaction authority (design document 09 section 1).
 func (dispatcher *Dispatcher) Execute(ctx context.Context, routeID string, request *gatewayv1.ExecuteRequest) (*gatewayv1.ExecuteResponse, error) {
 	instance, err := dispatcher.table.Pick(routeID)
 	if err != nil {

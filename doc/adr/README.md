@@ -8,6 +8,4 @@ Acceptance is a migration, not a permanent document status. In the accepting cha
 
 Write proposals in English. Implementation and rollout plans belong in [`../plan/`](../plan/). The index below lists only active proposals; accepted decisions are discoverable through the design documents and Git history.
 
-| ADR | Title | Status |
-|---|---|---|
-| [006](./adr-006-console-ui-for-jit-dag.md) | Console UI for JIT-DAG Visualization and Monitoring | Proposed |
+No proposals are active. The next one takes the number after the highest ever used, which Git history records.

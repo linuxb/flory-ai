@@ -1,8 +1,8 @@
 import {Client} from 'pg';
-import {adminClientConfig, coordinatorPassword, enginePassword, gatewayPassword, ownerTarget, quoteIdentifier, quoteLiteral} from './config.js';
+import {adminClientConfig, consolePassword, coordinatorPassword, enginePassword, gatewayPassword, ownerTarget, quoteIdentifier, quoteLiteral} from './config.js';
 
 /**
- * Provisions the cluster-level objects Flory needs: the owner role from `DATABASE_URL`, the two
+ * Provisions the cluster-level objects Flory needs: the owner role from `DATABASE_URL`, the
  * application roles, and the database itself. Roles and databases are cluster-wide, so this is the
  * one administrative step; migrations afterwards run as the owner and touch only that database.
  * It is idempotent and creates nothing else, which is what makes a local server shared with other
@@ -25,6 +25,7 @@ try {
         ['engine_role', enginePassword],
         ['coordinator_role', coordinatorPassword],
         ['gateway_role', gatewayPassword],
+        ['console_role', consolePassword],
     ] as const) {
         const exists = await admin.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [role]);
         if (exists.rowCount === 0) {

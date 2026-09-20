@@ -19,6 +19,8 @@ export const enginePassword = process.env.ENGINE_DB_PASSWORD ?? 'engine-dev-pass
 export const coordinatorPassword = process.env.COORDINATOR_DB_PASSWORD ?? 'coordinator-dev-password';
 /** Login password for the Gateway RBAC application role. */
 export const gatewayPassword = process.env.GATEWAY_DB_PASSWORD ?? 'gateway-dev-password';
+/** Login password for the Console's read-only role. */
+export const consolePassword = process.env.CONSOLE_DB_PASSWORD ?? 'console-dev-password';
 
 /** The database owner and target database named by {@link databaseUrl}. */
 export interface OwnerTarget {
@@ -62,6 +64,13 @@ function withCredentials(role: string, password: string): string {
 export const engineDatabaseUrl = process.env.ENGINE_DATABASE_URL ?? withCredentials('engine_role', enginePassword);
 /** Coordinator-role connection, following {@link databaseUrl}'s host, port, and database by default. */
 export const coordinatorDatabaseUrl = process.env.COORDINATOR_DATABASE_URL ?? withCredentials('coordinator_role', coordinatorPassword);
+/**
+ * Console connection. It may `SELECT` the run event log and nothing else.
+ *
+ * The Console writes nothing, and this is where that is true rather than merely intended: a
+ * type can be widened by whoever is next in the file, a grant cannot.
+ */
+export const consoleDatabaseUrl = process.env.CONSOLE_DATABASE_URL ?? withCredentials('console_role', consolePassword);
 /** Gateway-owned RBAC connection; it has no event-log write privileges. */
 export const gatewayDatabaseUrl = process.env.GATEWAYD_DATABASE_URL ?? withCredentials('gateway_role', gatewayPassword);
 

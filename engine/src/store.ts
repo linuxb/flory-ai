@@ -91,7 +91,14 @@ export function computeForkSlice(source: readonly StoredEvent[], atVertexId: str
     return {seed, independent, invalidated, divergence_seq: divergence.run_seq};
 }
 
-function rowToEvent(row: Record<string, unknown>): StoredEvent {
+/**
+ * Maps one `run_event_log` row onto a stored event.
+ *
+ * Exported so a read-only reader shares it rather than keeping a second copy. The `created_at`
+ * normalization below is load-bearing for anything deriving a duration from the log, and two
+ * copies of it would drift apart silently.
+ */
+export function rowToEvent(row: Record<string, unknown>): StoredEvent {
     return {
         run_id: String(row.run_id),
         run_seq: Number(row.run_seq),
@@ -138,6 +145,18 @@ function toInheritedCopy(event: StoredEvent, pinOverride?: string): Record<strin
 }
 
 /** PostgreSQL-backed event-log store that enforces service event ownership. */
+/**
+ * The read surface a console-class reader needs. {@link EventStore} structurally satisfies it.
+ *
+ * Narrowed so the Console depends on reading rather than on the store that happens to provide it,
+ * and so a reader connected as a role with no write privileges can stand in without pretending to
+ * be an `EventStore`.
+ */
+export interface RunEventReader {
+    readStream(runId: string, atRunSeq?: number): Promise<StoredEvent[]>;
+    readStreamAfter(runId: string, afterRunSeq: number, limit?: number): Promise<StoredEvent[]>;
+}
+
 /** What freeze admission needs to know about the run a subgraph is freezing into. */
 export interface RunAdmissionContext {
     scopes: ScopeSnapshot[];
@@ -215,6 +234,18 @@ export class EventStore {
             client.release();
         }
     }
+    /**
+     * Reads one run's events after a position, for a reader following a live run.
+     *
+     * Distinct from {@link readStream}'s `atRunSeq`, which bounds a fold from above: this bounds it
+     * from below, so following a run costs an index range scan inside one hash partition and
+     * returns nothing at all when nothing has happened.
+     */
+    async readStreamAfter(runId: string, afterRunSeq: number, limit = 512): Promise<StoredEvent[]> {
+        const result = await this.pool.query('SELECT * FROM run_event_log WHERE run_id = $1 AND run_seq > $2 ORDER BY run_seq LIMIT $3', [runId, afterRunSeq, limit]);
+        return result.rows.map(rowToEvent);
+    }
+
     /** Reads one run in ascending stream-sequence order, optionally through a boundary. */
     async readStream(runId: string, atRunSeq?: number): Promise<StoredEvent[]> {
         const result = await this.pool.query('SELECT * FROM run_event_log WHERE run_id = $1 AND ($2::bigint IS NULL OR run_seq <= $2) ORDER BY run_seq', [runId, atRunSeq ?? null]);

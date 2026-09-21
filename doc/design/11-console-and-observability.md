@@ -39,7 +39,7 @@ The one rule the two must agree on is shared rather than restated: `rendersInPla
 
 ### 3.2 The read model
 
-`console/server/src/projection.ts` holds a versioned fold beside the canonical surface projection. It is a projection in the same sense: a pure function of one run's events in `run_seq` order, reproducible from the log, carrying its own version (`console-projector@v1`) so a rendering can be attributed.
+`console/server/src/projection/` holds a versioned fold beside the canonical surface projection. It is a projection in the same sense: a pure function of one run's events in `run_seq` order, reproducible from the log, carrying its own version (`console-projector@v1`) so a rendering can be attributed.
 
 It performs no I/O and **queries no projection table**. `txn_scope` and `txn_bracket` are themselves triggers over these same events, so reading them would be reading a derived copy; they are additionally wrong for a counterfactual, whose inherited rows the trigger skips under `flory.inherit_copy`. Everything below therefore comes from the log:
 

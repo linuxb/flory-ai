@@ -1,4 +1,4 @@
-import type {ConsoleStreamEvent} from '../types/engine.js';
+import type {ConsoleStreamEvent} from '../engine.js';
 
 /**
  * One run's live feed.

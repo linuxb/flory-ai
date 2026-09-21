@@ -1,7 +1,7 @@
-import type {RunEventReader} from '../../../engine/src/store.js';
-import {advanceConsoleDag, emptyConsoleDag} from './projection.js';
+import type {RunEventReader} from '../../../../engine/src/log/store.js';
+import {advanceConsoleDag, emptyConsoleDag} from '../projection/projection.js';
 import {DeltaBuffer} from './stream.js';
-import type {ConsoleDagModel, ConsoleDelta} from './model.js';
+import type {ConsoleDagModel, ConsoleDelta} from '../projection/model.js';
 
 /**
  * Follows one run by polling, and folds what it finds.
@@ -20,7 +20,7 @@ import type {ConsoleDagModel, ConsoleDelta} from './model.js';
 /** Delivers a run's newly committed events. One implementation; the seam exists for the next one. */
 export interface TailSource {
     /** Events after `afterRunSeq`, in ascending order. */
-    poll(runId: string, afterRunSeq: number): Promise<readonly import('../../../engine/src/events.js').StoredEvent[]>;
+    poll(runId: string, afterRunSeq: number): Promise<readonly import('../../../../engine/src/log/events.js').StoredEvent[]>;
 }
 
 /** Polls the event log directly, which is what the database already supports well. */

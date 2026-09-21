@@ -1,8 +1,8 @@
 import {describe, expect, it} from 'vitest';
-import {loadToolRegistry, type ToolViewDocument} from '../../src/tool-view.js';
-import {diffTemplates, digestOfTemplate, publishRuleTemplate, type RuleTemplateDraft} from '../../src/rule-template.js';
-import type {ResolvedToolView} from '../../src/gateway-client.js';
-import type {SubDagProposal} from '../../src/check-rules.js';
+import {loadToolRegistry, type ToolViewDocument} from '../../src/gateway/tool-view.js';
+import {diffTemplates, digestOfTemplate, publishRuleTemplate, type RuleTemplateDraft} from '../../src/router/rule-template.js';
+import type {ResolvedToolView} from '../../src/gateway/gateway-client.js';
+import type {SubDagProposal} from '../../src/admission/check-rules.js';
 
 const digest = `sha256:${'c'.repeat(64)}`;
 

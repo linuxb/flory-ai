@@ -1,9 +1,9 @@
 import {randomUUID} from 'node:crypto';
 import {afterAll, describe, expect, it} from 'vitest';
 import {engineDatabaseUrl} from '../../../db/config.js';
-import {LlmClient, loadLlmConfig} from '../../src/llm-client.js';
-import {PlannerExecutor} from '../../src/planner-executor.js';
-import {EventStore} from '../../src/store.js';
+import {LlmClient, loadLlmConfig} from '../../src/planner/llm-client.js';
+import {PlannerExecutor} from '../../src/planner/planner-executor.js';
+import {EventStore} from '../../src/log/store.js';
 
 const live = process.env.FLORY_LLM_LIVE === '1';
 const store = live ? new EventStore({connectionString: engineDatabaseUrl, actor: 'engine'}) : null;

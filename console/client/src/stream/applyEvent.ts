@@ -1,4 +1,4 @@
-import type {ConsoleDagModel, ConsoleDelta, ConsoleStreamEvent, ConsoleVertex} from '../types/engine.js';
+import type {ConsoleDagModel, ConsoleDelta, ConsoleStreamEvent, ConsoleVertex} from '../engine.js';
 
 /**
  * Applying a delta, which is not the same as folding an event.

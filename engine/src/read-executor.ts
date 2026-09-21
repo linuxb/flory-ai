@@ -1,8 +1,8 @@
 import type {Pool} from 'pg';
 import type {FoldMode} from './generated/event-log.js';
-import type {AttemptOutcome, GatewayClient} from './gateway-client.js';
-import {GatewayRefusal} from './gateway-client.js';
-import type {EventStore} from './store.js';
+import type {AttemptOutcome, GatewayClient} from './gateway/gateway-client.js';
+import {GatewayRefusal} from './gateway/gateway-client.js';
+import type {EventStore} from './log/store.js';
 
 /** One vertex the Orchestrator may execute. */
 export interface ReadWorkItem {

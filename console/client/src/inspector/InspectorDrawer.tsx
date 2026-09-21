@@ -2,7 +2,7 @@ import {DetailsTab} from './DetailsTab.js';
 import {PayloadTab} from './PayloadTab.js';
 import {LogsTab} from './LogsTab.js';
 import {useVertexDetail} from './useVertexDetail.js';
-import type {ConsoleDagModel, ConsoleVertex} from '../types/engine.js';
+import type {ConsoleDagModel, ConsoleVertex} from '../engine.js';
 
 export type DrawerTab = 'details' | 'payload' | 'prompt' | 'logs';
 

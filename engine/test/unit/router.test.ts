@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import {evaluateCondition, evaluateRouter} from '../../src/router.js';
-import {slotIdOf, type PublishedRuleTemplate} from '../../src/rule-template.js';
-import {linearize, type SurfaceVertex} from '../../src/projection.js';
+import {evaluateCondition, evaluateRouter} from '../../src/router/router.js';
+import {slotIdOf, type PublishedRuleTemplate} from '../../src/router/rule-template.js';
+import {linearize, type SurfaceVertex} from '../../src/log/projection.js';
 
 const facts = new Map<string, Record<string, unknown>>([['record.read', {status: 'ready', 'risk.score': 12, amount: 350}]]);
 

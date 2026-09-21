@@ -2,7 +2,7 @@ import {createServer} from 'node:http';
 import {consoleDatabaseUrl} from '../../../db/config.js';
 import {ConsoleEventReader} from './reader.js';
 import {createConsoleHandler} from './server.js';
-import {PollingTailSource, TailerRegistry} from './tail.js';
+import {PollingTailSource, TailerRegistry} from './stream/tail.js';
 
 /**
  * The Console's observability API.

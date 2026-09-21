@@ -1,5 +1,5 @@
 import type {Node, NodeProps} from '@xyflow/react';
-import type {ConsoleScope} from '../types/engine.js';
+import type {ConsoleScope} from '../engine.js';
 import type {PlacedScope} from './layout.js';
 
 export interface ScopeEnclosureData extends Record<string, unknown> {

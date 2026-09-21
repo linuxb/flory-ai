@@ -2,18 +2,18 @@ import {randomUUID} from 'node:crypto';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {Client} from 'pg';
 import {coordinatorDatabaseUrl, engineDatabaseUrl} from '../../../db/config.js';
-import {EventStore} from '../../src/store.js';
-import {loadToolRegistry, type ToolViewDocument, type ToolViewTool} from '../../src/tool-view.js';
-import {WorkflowSubmitter} from '../../src/submission.js';
-import {RuleTemplateStore, slotIdOf, type RuleTemplateDraft} from '../../src/rule-template.js';
-import {RouterExecutor} from '../../src/router-executor.js';
+import {EventStore} from '../../src/log/store.js';
+import {loadToolRegistry, type ToolViewDocument, type ToolViewTool} from '../../src/gateway/tool-view.js';
+import {WorkflowSubmitter} from '../../src/admission/submission.js';
+import {RuleTemplateStore, slotIdOf, type RuleTemplateDraft} from '../../src/router/rule-template.js';
+import {RouterExecutor} from '../../src/router/router-executor.js';
 import {noDeterministicReplan, routerAdmission, routerInvisibility, rulePinSubstitution} from '../../src/harness/oracles.js';
-import {linearize, slice, surface} from '../../src/projection.js';
-import {consoleDag} from '../../../console/server/src/projection.js';
-import {consoleRouterVisibility} from '../../../console/server/src/oracles.js';
-import type {StoredEvent} from '../../src/events.js';
-import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../../src/gateway-client.js';
-import type {WorkflowSubmission} from '../../src/workflow.js';
+import {linearize, slice, surface} from '../../src/log/projection.js';
+import {consoleDag} from '../../../console/server/src/projection/projection.js';
+import {consoleRouterVisibility} from '../../../console/server/src/projection/oracles.js';
+import type {StoredEvent} from '../../src/log/events.js';
+import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../../src/gateway/gateway-client.js';
+import type {WorkflowSubmission} from '../../src/admission/workflow.js';
 
 /**
  * Scenario rows S15, S15b, S16, S17, S18 and S20 of the harness matrix (doc 06 section 6).

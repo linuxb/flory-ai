@@ -1,8 +1,8 @@
 import {randomUUID, createHash} from 'node:crypto';
-import {canonicalJson, type EventDraft} from './events.js';
+import {canonicalJson, type EventDraft} from '../log/events.js';
 import type {ProposalScope, ProposalVertex, RouterPlacement, SubDagProposal, VertexKind} from './check-rules.js';
-import type {ResolvedToolView} from './gateway-client.js';
-import {slotIdOf} from './rule-template.js';
+import type {ResolvedToolView} from '../gateway/gateway-client.js';
+import {slotIdOf} from '../router/rule-template.js';
 
 /** Fields every submitted vertex carries, whatever its role. */
 export interface SubmittedVertexBase {

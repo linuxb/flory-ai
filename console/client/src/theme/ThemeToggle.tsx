@@ -1,4 +1,4 @@
-import {useTheme, type ThemePreference} from '../theme/ThemeProvider.js';
+import {useTheme, type ThemePreference} from './ThemeProvider.js';
 
 const OPTIONS: ThemePreference[] = ['light', 'auto', 'dark'];
 

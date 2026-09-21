@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
-import {checkSubDag, type SubDagProposal} from '../../../engine/src/check-rules.js';
-import {loadToolRegistry, type ToolViewDocument} from '../../../engine/src/tool-view.js';
+import {checkSubDag, type SubDagProposal} from '../../../engine/src/admission/check-rules.js';
+import {loadToolRegistry, type ToolViewDocument} from '../../../engine/src/gateway/tool-view.js';
 import {createComplexCommerceDag, MockCommerceWorld} from './services.js';
 
 /**

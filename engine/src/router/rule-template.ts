@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
-import {checkSubDag, type CheckViolation, type EffectClass, type SubDagProposal} from './check-rules.js';
-import {canonicalJson} from './events.js';
-import type {ResolvedToolView} from './gateway-client.js';
+import {checkSubDag, type CheckViolation, type EffectClass, type SubDagProposal} from '../admission/check-rules.js';
+import {canonicalJson} from '../log/events.js';
+import type {ResolvedToolView} from '../gateway/gateway-client.js';
 
 /** The reserved data-plane stream that records every template mutation. */
 export const CONFIGURATION_STREAM_ID = 'config:rule-templates';

@@ -1,5 +1,5 @@
-import {canonicalJson, type StoredEvent} from '../events.js';
-import {assemble, linearize, slice, surface, type FoldReducer, type SurfaceVertex} from '../projection.js';
+import {canonicalJson, type StoredEvent} from '../log/events.js';
+import {assemble, linearize, slice, surface, type FoldReducer, type SurfaceVertex} from '../log/projection.js';
 
 /** The pass/fail result and optional detail returned by a harness oracle. */
 export interface OracleResult {

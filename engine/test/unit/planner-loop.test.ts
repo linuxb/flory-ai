@@ -1,10 +1,10 @@
 import {describe, expect, it, vi} from 'vitest';
-import {PlannerLoop} from '../../src/planner-loop.js';
-import {loadToolRegistry} from '../../src/tool-view.js';
-import type {ResolvedToolView} from '../../src/gateway-client.js';
-import type {ToolViewDocument} from '../../src/tool-view.js';
-import type {EventDraft} from '../../src/events.js';
-import type {WorkflowSubmission} from '../../src/workflow.js';
+import {PlannerLoop} from '../../src/planner/planner-loop.js';
+import {loadToolRegistry} from '../../src/gateway/tool-view.js';
+import type {ResolvedToolView} from '../../src/gateway/gateway-client.js';
+import type {ToolViewDocument} from '../../src/gateway/tool-view.js';
+import type {EventDraft} from '../../src/log/events.js';
+import type {WorkflowSubmission} from '../../src/admission/workflow.js';
 
 const digest = `sha256:${'c'.repeat(64)}`;
 const document: ToolViewDocument = {

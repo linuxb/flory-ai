@@ -1,6 +1,6 @@
 import {loadToolRegistry, parseToolView, type ToolViewDocument, type ToolViewIdentity} from './tool-view.js';
-import type {ToolRegistry} from './check-rules.js';
-import type {AuthorizationIdentity} from './generated/event-log.js';
+import type {ToolRegistry} from '../admission/check-rules.js';
+import type {AuthorizationIdentity} from '../generated/event-log.js';
 
 /** The four-outcome vocabulary both executors reason with. */
 export type AttemptOutcome = 'succeeded' | 'retryable-failure' | 'permanent-failure' | 'unknown';

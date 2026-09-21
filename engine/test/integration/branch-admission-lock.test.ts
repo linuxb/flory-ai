@@ -2,11 +2,11 @@ import {randomUUID} from 'node:crypto';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {Client} from 'pg';
 import {coordinatorDatabaseUrl, engineDatabaseUrl} from '../../../db/config.js';
-import {EventStore} from '../../src/store.js';
-import {loadToolRegistry, type ToolViewDocument} from '../../src/tool-view.js';
-import {WorkflowSubmitter} from '../../src/submission.js';
-import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../../src/gateway-client.js';
-import type {WorkflowSubmission} from '../../src/workflow.js';
+import {EventStore} from '../../src/log/store.js';
+import {loadToolRegistry, type ToolViewDocument} from '../../src/gateway/tool-view.js';
+import {WorkflowSubmitter} from '../../src/admission/submission.js';
+import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../../src/gateway/gateway-client.js';
+import type {WorkflowSubmission} from '../../src/admission/workflow.js';
 
 /**
  * Branch admission holds the run's scope rows while it decides and while it freezes.

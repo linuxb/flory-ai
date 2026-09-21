@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import {DeltaBuffer, cursorOf, encodeFrame, parseCursor, resolveResume} from '../../../console/server/src/stream.js';
-import type {ConsoleDelta, ConsoleVertex} from '../../../console/server/src/model.js';
+import {DeltaBuffer, cursorOf, encodeFrame, parseCursor, resolveResume} from '../../../console/server/src/stream/stream.js';
+import type {ConsoleDelta, ConsoleVertex} from '../../../console/server/src/projection/model.js';
 
 function vertex(id: string): ConsoleVertex {
     return {

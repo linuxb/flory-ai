@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
-import {checkSubDag, type SubDagProposal, ToolRegistry} from '../../engine/src/check-rules.js';
-import {canonicalize, digestOf, loadToolRegistry, parseToolView, type ToolViewDocument, toolViewDigest, toolViewRef} from '../../engine/src/tool-view.js';
+import {checkSubDag, type SubDagProposal, ToolRegistry} from '../../engine/src/admission/check-rules.js';
+import {canonicalize, digestOf, loadToolRegistry, parseToolView, type ToolViewDocument, toolViewDigest, toolViewRef} from '../../engine/src/gateway/tool-view.js';
 
 interface Fixture {
     canonical_cases: Array<{name: string; value: unknown; canonical: string; digest: string}>;

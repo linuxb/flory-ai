@@ -42,12 +42,12 @@ The linked design documents are authoritative. Active ADRs are proposals only; t
 
 | Component or contract | Repository location | Design route |
 |---|---|---|
-| TypeScript engine | `engine/` | [Doc 00 §3.1](doc/design/00-overview.md#31-service-and-language-boundaries), [Doc 01](doc/design/01-jit-dag-and-event-log.md), [Doc 05](doc/design/05-context-aggregation-and-offline-evaluation.md), [Doc 10](doc/design/10-deterministic-routers.md) |
+| TypeScript engine | `engine/src/log` (vocabulary, store, canonical fold), `admission` (check-rules, compile, freeze), `planner`, `router`, `gateway`, `harness`, plus `read-executor.ts` and `recovery.ts` | [Doc 00 §3.1](doc/design/00-overview.md#31-service-and-language-boundaries), [Doc 01](doc/design/01-jit-dag-and-event-log.md), [Doc 05](doc/design/05-context-aggregation-and-offline-evaluation.md), [Doc 10](doc/design/10-deterministic-routers.md) |
 | Distributed Transaction Coordinator (Go 1.25) | `coordinator/` | [Doc 00 §3.1](doc/design/00-overview.md#31-service-and-language-boundaries), [Doc 02](doc/design/02-transaction-model.md), [Doc 07](doc/design/07-distributed-transaction-coordinator.md) |
 | `gatewayd` (Go 1.25) | `gatewayd/` | [Doc 09](doc/design/09-tool-registry-gateway.md) |
 | Tool-service SDKs and shared IDLs | `gatewayd/sdk/`, `sdk/typescript/`, `idl/` | [Doc 09 §3](doc/design/09-tool-registry-gateway.md#3-registration-and-the-tool-view-contract), [Doc 08 §1](doc/design/08-database-schema.md#1-executable-boundary) |
 | PostgreSQL schema and migrations | `db/` | [Doc 08](doc/design/08-database-schema.md) |
-| Console | `console/server` (projection, SSE stream, read-only HTTP surface), `console/client` (React canvas and inspector) | [Doc 11](doc/design/11-console-and-observability.md) |
+| Console | `console/server/src/projection` (the pure fold and the detail bodies), `stream` (SSE framing and the tail), `reader.ts`/`server.ts`/`main.ts`; `console/client` (React canvas and inspector) | [Doc 11](doc/design/11-console-and-observability.md) |
 
 Do not add a third engine language without a new ADR. Components must use their documented public boundaries rather than importing or calling another component's internals. Shared contract changes start in `idl/`; regenerate every consumer and update required conformance fixtures in the same change.
 

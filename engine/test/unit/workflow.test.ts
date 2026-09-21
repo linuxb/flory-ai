@@ -1,8 +1,8 @@
 import {describe, expect, it} from 'vitest';
 import {checkSubDag, loadToolRegistry} from '../../src/index.js';
-import {compileVertexDrafts, lowerToProposal, normalizeWorkflow, type WorkflowSubmission} from '../../src/workflow.js';
-import type {ResolvedToolView} from '../../src/gateway-client.js';
-import type {ToolViewDocument} from '../../src/tool-view.js';
+import {compileVertexDrafts, lowerToProposal, normalizeWorkflow, type WorkflowSubmission} from '../../src/admission/workflow.js';
+import type {ResolvedToolView} from '../../src/gateway/gateway-client.js';
+import type {ToolViewDocument} from '../../src/gateway/tool-view.js';
 
 const digest = `sha256:${'a'.repeat(64)}`;
 

@@ -5,7 +5,7 @@
 # PostgreSQL, Keycloak, a storage emulator and two Go suites.
 #
 # The split is what makes the cross-package type guarantee hold with no over-broad filter: an
-# engine change that breaks `console/server/src/model.ts` fails the root build, because the server
+# engine change that breaks `console/server/src/projection/model.ts` fails the root build, because the server
 # is in the root tsconfig, and a model change that breaks the client fails here, because both
 # files live under `console/**`.
 name: Console client

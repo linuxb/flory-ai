@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {afterAll, describe, expect, it} from 'vitest';
 import {Client} from 'pg';
 import {databaseUrl, engineDatabaseUrl} from '../../../db/config.js';
-import {EventStore} from '../../src/store.js';
+import {EventStore} from '../../src/log/store.js';
 
 const engine = new EventStore({connectionString: engineDatabaseUrl, actor: 'engine'});
 const plannerId = '00000000-0000-4000-8000-000000000201';

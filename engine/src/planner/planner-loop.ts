@@ -1,11 +1,11 @@
 import {createHash} from 'node:crypto';
-import {assemble, linearize, slice, surface} from './projection.js';
+import {assemble, linearize, slice, surface} from '../log/projection.js';
 import type {PlannerExecutor} from './planner-executor.js';
 import type {LlmMessage} from './llm-client.js';
-import type {EventStore} from './store.js';
-import type {SubmissionResult, WorkflowSubmitter} from './submission.js';
-import type {ResolvedToolView} from './gateway-client.js';
-import type {SubmittedVertex, WorkflowSubmission} from './workflow.js';
+import type {EventStore} from '../log/store.js';
+import type {SubmissionResult, WorkflowSubmitter} from '../admission/submission.js';
+import type {ResolvedToolView} from '../gateway/gateway-client.js';
+import type {SubmittedVertex, WorkflowSubmission} from '../admission/workflow.js';
 
 /** The projection versions a planner turn assembles its prompt under. */
 export interface ProjectionVersions {

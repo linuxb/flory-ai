@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import {GatewayClient, GatewayRefusal} from '../../src/gateway-client.js';
-import {canonicalize, digestOf, type ToolViewDocument, toolViewRef} from '../../src/tool-view.js';
+import {GatewayClient, GatewayRefusal} from '../../src/gateway/gateway-client.js';
+import {canonicalize, digestOf, type ToolViewDocument, toolViewRef} from '../../src/gateway/tool-view.js';
 
 function view(): ToolViewDocument {
     return {

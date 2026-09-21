@@ -1,9 +1,9 @@
-import type {StoredEvent} from './events.js';
+import type {StoredEvent} from '../log/events.js';
 import type {RuleTemplateStore} from './rule-template.js';
 import type {PublishedRuleTemplate} from './rule-template.js';
-import type {EventStore} from './store.js';
-import type {WorkflowSubmitter} from './submission.js';
-import type {SubmittedVertex, WorkflowSubmission} from './workflow.js';
+import type {EventStore} from '../log/store.js';
+import type {WorkflowSubmitter} from '../admission/submission.js';
+import type {SubmittedVertex, WorkflowSubmission} from '../admission/workflow.js';
 import {evaluateRouter, type RouterFacts, type RouterOutcome} from './router.js';
 
 /** What the engine did with one router vertex. */

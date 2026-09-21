@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {checkScopeAdmission, checkSubDag, ToolRegistry, type ProposalVertex, type RuleCode, type ScopeSnapshot, type SubDagProposal} from '../../src/check-rules.js';
+import {checkScopeAdmission, checkSubDag, ToolRegistry, type ProposalVertex, type RuleCode, type ScopeSnapshot, type SubDagProposal} from '../../src/admission/check-rules.js';
 
 function validRegistry(): ToolRegistry {
     const registry = new ToolRegistry();

@@ -1,4 +1,4 @@
-import type {CheckViolation, SubDagProposal} from './check-rules.js';
+import type {CheckViolation, SubDagProposal} from '../admission/check-rules.js';
 import type {BranchTraits, PublishedRuleTemplate} from './rule-template.js';
 
 /** The summary fields one upstream tool lifted into its `vertex/succeeded`, keyed by tool type. */

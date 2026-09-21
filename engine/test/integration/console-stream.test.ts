@@ -4,9 +4,9 @@ import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {consoleDatabaseUrl, engineDatabaseUrl} from '../../../db/config.js';
 import {ConsoleEventReader} from '../../../console/server/src/reader.js';
 import {createConsoleHandler} from '../../../console/server/src/server.js';
-import {PollingTailSource, TailerRegistry} from '../../../console/server/src/tail.js';
-import type {ConsoleDagModel, ConsoleStreamEvent} from '../../../console/server/src/model.js';
-import {EventStore} from '../../src/store.js';
+import {PollingTailSource, TailerRegistry} from '../../../console/server/src/stream/tail.js';
+import type {ConsoleDagModel, ConsoleStreamEvent} from '../../../console/server/src/projection/model.js';
+import {EventStore} from '../../src/log/store.js';
 
 const engine = new EventStore({connectionString: engineDatabaseUrl, actor: 'engine'});
 const reader = new ConsoleEventReader(consoleDatabaseUrl);

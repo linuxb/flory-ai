@@ -1,7 +1,7 @@
 import {Pool} from 'pg';
-import {rowToEvent, type RunEventReader} from '../../../engine/src/store.js';
-import type {StoredEvent} from '../../../engine/src/events.js';
-import type {ConsoleRunSummary} from './model.js';
+import {rowToEvent, type RunEventReader} from '../../../engine/src/log/store.js';
+import type {StoredEvent} from '../../../engine/src/log/events.js';
+import type {ConsoleRunSummary} from './projection/model.js';
 
 /**
  * Reads runs as a role that cannot write to them.

@@ -2,7 +2,7 @@ import {randomUUID} from 'node:crypto';
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {Client} from 'pg';
 import {coordinatorDatabaseUrl, engineDatabaseUrl} from '../../../db/config.js';
-import {EventStore} from '../../src/store.js';
+import {EventStore} from '../../src/log/store.js';
 
 const engine = new EventStore({connectionString: engineDatabaseUrl, actor: 'engine'});
 const coordinator = new EventStore({connectionString: coordinatorDatabaseUrl, actor: 'coordinator'});

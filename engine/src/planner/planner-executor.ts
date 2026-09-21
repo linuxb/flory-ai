@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
-import type {EventDraft} from './events.js';
-import {canonicalJson} from './events.js';
+import type {EventDraft} from '../log/events.js';
+import {canonicalJson} from '../log/events.js';
 import {estimateLlmCost, publicEndpoint, type LlmCallResult, type LlmClient, type LlmMessage} from './llm-client.js';
 
 /** Minimal event-log boundary used by the planner executor. */

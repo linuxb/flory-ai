@@ -1,9 +1,9 @@
-import {assemble, linearize, slice, surface, type Surface} from './projection.js';
-import {causalDescendants} from './store.js';
-import type {EventDraft, StoredEvent} from './events.js';
-import type {LlmPricing} from './llm-client.js';
-import type {PlannerTurn, PlannerTurnRequest} from './planner-loop.js';
-import type {ResolvedToolView} from './gateway-client.js';
+import {assemble, linearize, slice, surface, type Surface} from './log/projection.js';
+import {causalDescendants} from './log/store.js';
+import type {EventDraft, StoredEvent} from './log/events.js';
+import type {LlmPricing} from './planner/llm-client.js';
+import type {PlannerTurn, PlannerTurnRequest} from './planner/planner-loop.js';
+import type {ResolvedToolView} from './gateway/gateway-client.js';
 
 /**
  * The recovery ladder's planning half: choosing where to resume, and discarding what is being

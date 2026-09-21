@@ -15,9 +15,9 @@ import {
     unrecoveredFailures,
     type RecoveryPolicy,
 } from '../../src/recovery.js';
-import {assertEventDraft} from '../../src/events.js';
-import type {StoredEvent} from '../../src/events.js';
-import type {LlmPricing} from '../../src/llm-client.js';
+import {assertEventDraft} from '../../src/log/events.js';
+import type {StoredEvent} from '../../src/log/events.js';
+import type {LlmPricing} from '../../src/planner/llm-client.js';
 
 const run = '00000000-0000-4000-8000-0000000000ff';
 /** Readable ids that are still UUIDs, because the IDL now checks the format. */

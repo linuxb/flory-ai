@@ -1,5 +1,5 @@
-import type {StoredEvent} from '../../../engine/src/events.js';
-import {type FoldReducer, FoldRegistry} from '../../../engine/src/projection.js';
+import type {StoredEvent} from '../../../engine/src/log/events.js';
+import {type FoldReducer, FoldRegistry} from '../../../engine/src/log/projection.js';
 import {foldPermutationInvariant, type OracleResult} from '../../../engine/src/harness/oracles.js';
 
 /** The in-process sandbox's inventory view, used only to validate signed-delta behavior. */

@@ -1,10 +1,10 @@
 import type {IncomingMessage, ServerResponse} from 'node:http';
-import {consoleDag} from './projection.js';
-import {payloadDetail, retentionUnavailable} from './detail.js';
-import {HEARTBEAT_FRAME, SSE_HEADERS, encodeFrame, parseCursor, resolveResume} from './stream.js';
-import type {TailerRegistry} from './tail.js';
+import {consoleDag} from './projection/projection.js';
+import {payloadDetail, retentionUnavailable} from './projection/detail.js';
+import {HEARTBEAT_FRAME, SSE_HEADERS, encodeFrame, parseCursor, resolveResume} from './stream/stream.js';
+import type {TailerRegistry} from './stream/tail.js';
 import type {ConsoleEventReader} from './reader.js';
-import type {ConsoleSnapshot, ConsoleStreamEvent} from './model.js';
+import type {ConsoleSnapshot, ConsoleStreamEvent} from './projection/model.js';
 
 /**
  * The Console's read surface.

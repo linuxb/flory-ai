@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import type {StoredEvent} from '../../../engine/src/events.js';
-import {FoldRegistry} from '../../../engine/src/projection.js';
+import type {StoredEvent} from '../../../engine/src/log/events.js';
+import {FoldRegistry} from '../../../engine/src/log/projection.js';
 import {mockInventoryConservation, mockInventoryPermutationInvariant, mockInventoryReducer, registerMockEcommerceReducers} from './inventory.js';
 
 const run = '00000000-0000-4000-8000-000000000001';

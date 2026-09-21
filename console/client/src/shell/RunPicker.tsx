@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import type {ConsoleRunSummary} from '../types/engine.js';
+import type {ConsoleRunSummary} from '../engine.js';
 
 /**
  * The entry point, because there is otherwise no way into the console but pasting a UUID.

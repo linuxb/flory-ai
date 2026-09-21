@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {DEFAULT_LAYOUT, layout, type LayoutResult} from '../graph/layout.js';
-import type {ConsoleScope} from '../types/engine.js';
+import type {ConsoleScope} from '../engine.js';
 import {model, vertex} from './fixtures.js';
 
 /** The retail run's shape: two parallel reads, a router, a planner, then a transaction chain. */

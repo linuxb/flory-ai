@@ -1,8 +1,8 @@
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
-import {checkSubDag} from '../../engine/src/check-rules.js';
-import {GatewayClient, GatewayRefusal} from '../../engine/src/gateway-client.js';
-import {canonicalize, digestOf, loadToolRegistry, type ToolViewDocument} from '../../engine/src/tool-view.js';
+import {checkSubDag} from '../../engine/src/admission/check-rules.js';
+import {GatewayClient, GatewayRefusal} from '../../engine/src/gateway/gateway-client.js';
+import {canonicalize, digestOf, loadToolRegistry, type ToolViewDocument} from '../../engine/src/gateway/tool-view.js';
 import {createComplexCommerceDag} from '../mocks/ecommerce/services.js';
 
 /**

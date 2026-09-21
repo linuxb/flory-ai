@@ -1,12 +1,12 @@
 import {afterAll, beforeAll, describe, expect, it} from 'vitest';
 import {Client} from 'pg';
 import {engineDatabaseUrl} from '../../../db/config.js';
-import {EventStore} from '../../src/store.js';
-import {loadToolRegistry} from '../../src/tool-view.js';
-import {WorkflowSubmitter} from '../../src/submission.js';
-import type {WorkflowSubmission} from '../../src/workflow.js';
-import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../../src/gateway-client.js';
-import type {ToolViewDocument} from '../../src/tool-view.js';
+import {EventStore} from '../../src/log/store.js';
+import {loadToolRegistry} from '../../src/gateway/tool-view.js';
+import {WorkflowSubmitter} from '../../src/admission/submission.js';
+import type {WorkflowSubmission} from '../../src/admission/workflow.js';
+import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../../src/gateway/gateway-client.js';
+import type {ToolViewDocument} from '../../src/gateway/tool-view.js';
 
 const engine = new EventStore({connectionString: engineDatabaseUrl, actor: 'engine'});
 const engineClient = new Client({connectionString: engineDatabaseUrl});

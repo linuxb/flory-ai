@@ -167,7 +167,7 @@ evaluated against this run's actual role-scoped tool view and its existing-scope
 
 **Static shape and runtime state are different responsibilities.** Freeze admission validates each branch against its declared placement and the recorded scope snapshot. Parent success does not establish that a scope is still open or that a reservation is unexpired, and cancellation never converts an `inside_scope(S)` branch into a fresh transaction at a savepoint. Runtime admission therefore still performs the atomic checks of [07 §3.1](./07-distributed-transaction-coordinator.md#31-work-scheduler) and may reject a branch that was shape-valid at freeze because transaction state has changed. Freeze admission does not promise zero runtime rejection; it promises that no *shape* defect survives to execution.
 
-`engine/src/check-rules.ts` therefore accepts a third argument: an immutable `existing_scope_snapshot` of current scope states ([02 §3.4](./02-transaction-model.md#34-deterministic-check-rules)).
+`engine/src/admission/check-rules.ts` therefore accepts a third argument: an immutable `existing_scope_snapshot` of current scope states ([02 §3.4](./02-transaction-model.md#34-deterministic-check-rules)).
 
 ### 5.2 Multi-dimensional tags and admission logic
 

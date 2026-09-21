@@ -6,7 +6,7 @@
 // case; a change to an existing expectation means the encoders diverged, which
 // is the defect the fixture exists to catch.
 import {writeFile} from 'node:fs/promises';
-import {canonicalize, digestOf, toolViewRef} from '../engine/src/tool-view.ts';
+import {canonicalize, digestOf, toolViewRef} from '../engine/src/gateway/tool-view.ts';
 
 const canonicalValues = [
     {name: 'object keys are sorted', value: {beta: 1, alpha: {z: true, a: false}}},

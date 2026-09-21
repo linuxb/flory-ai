@@ -1,5 +1,5 @@
 import type {Edge, Node} from '@xyflow/react';
-import type {ConsoleDagModel} from '../types/engine.js';
+import type {ConsoleDagModel} from '../engine.js';
 import type {LayoutResult} from './layout.js';
 import type {VertexCardData} from './VertexCard.js';
 import type {ScopeEnclosureData} from './ScopeEnclosure.js';

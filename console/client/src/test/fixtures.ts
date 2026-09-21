@@ -1,4 +1,4 @@
-import type {ConsoleDagModel, ConsoleSpend, ConsoleVertex} from '../types/engine.js';
+import type {ConsoleDagModel, ConsoleSpend, ConsoleVertex} from '../engine.js';
 
 /** A vertex with everything defaulted, so a test states only what it is about. */
 export function vertex(id: string, options: Partial<ConsoleVertex> = {}): ConsoleVertex {

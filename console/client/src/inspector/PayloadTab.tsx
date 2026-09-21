@@ -1,6 +1,6 @@
 import {JsonBlock} from './JsonBlock.js';
 import type {DetailState} from './useVertexDetail.js';
-import type {PayloadDetail} from '../types/engine.js';
+import type {PayloadDetail} from '../engine.js';
 
 export function PayloadTab({state}: {state: DetailState<PayloadDetail | unknown>}): React.JSX.Element {
     if (state.kind === 'loading') return <p className="drawer-empty">loading…</p>;

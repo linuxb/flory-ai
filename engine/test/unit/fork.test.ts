@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import type {StoredEvent} from '../../src/events.js';
-import {causalDescendants, computeForkSlice} from '../../src/store.js';
+import type {StoredEvent} from '../../src/log/events.js';
+import {causalDescendants, computeForkSlice} from '../../src/log/store.js';
 
 const PLANNER = '00000000-0000-4000-8000-000000000001';
 const TOOL = '00000000-0000-4000-8000-000000000002';

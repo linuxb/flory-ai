@@ -1,7 +1,7 @@
 import {describe, expect, it} from 'vitest';
-import type {EventDraft} from '../../src/events.js';
-import {LlmClient, type LlmProviderConfig} from '../../src/llm-client.js';
-import {PlannerExecutor} from '../../src/planner-executor.js';
+import type {EventDraft} from '../../src/log/events.js';
+import {LlmClient, type LlmProviderConfig} from '../../src/planner/llm-client.js';
+import {PlannerExecutor} from '../../src/planner/planner-executor.js';
 
 const plannerId = '00000000-0000-4000-8000-000000000501';
 

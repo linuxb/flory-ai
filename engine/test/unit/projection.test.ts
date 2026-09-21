@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
-import {assertEventDraft, type StoredEvent} from '../../src/events.js';
-import {FoldRegistry, linearize, slice, surface} from '../../src/projection.js';
+import {assertEventDraft, type StoredEvent} from '../../src/log/events.js';
+import {FoldRegistry, linearize, slice, surface} from '../../src/log/projection.js';
 
 const run = '00000000-0000-4000-8000-000000000001';
 function event(run_seq: number, event_type: string, options: Partial<StoredEvent> = {}): StoredEvent {

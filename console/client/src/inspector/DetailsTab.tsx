@@ -1,4 +1,4 @@
-import type {ConsoleDagModel, ConsoleRouterOutcome, ConsoleVertex} from '../types/engine.js';
+import type {ConsoleDagModel, ConsoleRouterOutcome, ConsoleVertex} from '../engine.js';
 import {JsonBlock} from './JsonBlock.js';
 
 /** How an operator should read one router outcome. */

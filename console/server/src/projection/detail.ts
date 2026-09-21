@@ -1,4 +1,4 @@
-import type {StoredEvent} from '../../../engine/src/events.js';
+import type {StoredEvent} from '../../../../engine/src/log/events.js';
 
 /**
  * The bodies the inspector drawer fetches on demand.

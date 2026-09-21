@@ -106,7 +106,7 @@ When extension is impossible, the remedy is not a dead end: if the scope has no 
 
 ### 3.4 Deterministic check-rules
 
-The rules run before a DAG is frozen. **Any violation produces a closed-vocabulary result recorded as `subgraph/rejected`; the planner must regenerate rather than bypass the result.** The executable TypeScript implementation is `engine/src/check-rules.ts`. It accepts only a proposal and an immutable tool-view snapshot, performs no I/O, and returns `{accepted, violations}` with stable R1-R11 rule codes and implicated vertex IDs. Dynamic discovery through `gatewayd` happens before this call and never inside the checker: `loadToolRegistry` turns a published view into the snapshot the checker receives.
+The rules run before a DAG is frozen. **Any violation produces a closed-vocabulary result recorded as `subgraph/rejected`; the planner must regenerate rather than bypass the result.** The executable TypeScript implementation is `engine/src/admission/check-rules.ts`. It accepts only a proposal and an immutable tool-view snapshot, performs no I/O, and returns `{accepted, violations}` with stable R1-R11 rule codes and implicated vertex IDs. Dynamic discovery through `gatewayd` happens before this call and never inside the checker: `loadToolRegistry` turns a published view into the snapshot the checker receives.
 
 | # | Rule | Reason |
 |---|---|---|

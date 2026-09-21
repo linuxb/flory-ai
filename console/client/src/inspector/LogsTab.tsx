@@ -1,5 +1,5 @@
 import type {DetailState} from './useVertexDetail.js';
-import type {RetentionUnavailable} from '../types/engine.js';
+import type {RetentionUnavailable} from '../engine.js';
 
 /**
  * The prompt and execution-log tabs.

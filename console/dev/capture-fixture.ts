@@ -1,11 +1,11 @@
 import {mkdir, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {consoleDatabaseUrl} from '../../db/config.js';
-import {payloadDetail, retentionUnavailable} from '../server/src/detail.js';
-import {advanceConsoleDag, emptyConsoleDag} from '../server/src/projection.js';
+import {payloadDetail, retentionUnavailable} from '../server/src/projection/detail.js';
+import {advanceConsoleDag, emptyConsoleDag} from '../server/src/projection/projection.js';
 import {ConsoleEventReader} from '../server/src/reader.js';
-import {cursorOf} from '../server/src/stream.js';
-import type {ConsoleStreamEvent} from '../server/src/model.js';
+import {cursorOf} from '../server/src/stream/stream.js';
+import type {ConsoleStreamEvent} from '../server/src/projection/model.js';
 
 /**
  * Records one real run as the fixture the mock server replays.

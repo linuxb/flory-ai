@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {applyEvent, clientModel, type ClientModel} from '../stream/applyEvent.js';
-import type {ConsoleScope, ConsoleStreamEvent} from '../types/engine.js';
+import type {ConsoleScope, ConsoleStreamEvent} from '../engine.js';
 import {model, SPEND, vertex} from './fixtures.js';
 
 const scope: ConsoleScope = {

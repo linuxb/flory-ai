@@ -1,8 +1,8 @@
 import {describe, expect, it} from 'vitest';
-import {advanceConsoleDag, consoleDag, emptyConsoleDag} from '../../../console/server/src/projection.js';
-import type {ConsoleDagModel, ConsoleDelta} from '../../../console/server/src/model.js';
-import {surface} from '../../src/projection.js';
-import type {StoredEvent} from '../../src/events.js';
+import {advanceConsoleDag, consoleDag, emptyConsoleDag} from '../../../console/server/src/projection/projection.js';
+import type {ConsoleDagModel, ConsoleDelta} from '../../../console/server/src/projection/model.js';
+import {surface} from '../../src/log/projection.js';
+import type {StoredEvent} from '../../src/log/events.js';
 
 const run = '00000000-0000-4000-8000-000000000001';
 const lookup = '00000000-0000-4000-8000-000000000010';

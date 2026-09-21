@@ -1,6 +1,6 @@
-import {linearize, slice, surface} from '../../../engine/src/projection.js';
-import type {OracleResult} from '../../../engine/src/harness/oracles.js';
-import type {StoredEvent} from '../../../engine/src/events.js';
+import {linearize, slice, surface} from '../../../../engine/src/log/projection.js';
+import type {OracleResult} from '../../../../engine/src/harness/oracles.js';
+import type {StoredEvent} from '../../../../engine/src/log/events.js';
 import {consoleDag} from './projection.js';
 
 /**

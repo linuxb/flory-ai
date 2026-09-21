@@ -1,4 +1,4 @@
-import type {ConsoleDagModel, ConsoleScope, ConsoleVertex} from '../types/engine.js';
+import type {ConsoleDagModel, ConsoleScope, ConsoleVertex} from '../engine.js';
 
 /**
  * Where each vertex sits, computed so that growth does not move what is already on screen.

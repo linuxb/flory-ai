@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
-import {fetchPayload, fetchRetained, type DetailResult} from '../api/detail.js';
-import type {PayloadDetail} from '../types/engine.js';
+import {fetchPayload, fetchRetained, type DetailResult} from './detail.js';
+import type {PayloadDetail} from '../engine.js';
 
 export type DetailState<T> = {kind: 'loading'} | DetailResult<T>;
 

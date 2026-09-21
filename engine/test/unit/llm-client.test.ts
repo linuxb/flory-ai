@@ -1,5 +1,5 @@
 import {describe, expect, it, vi} from 'vitest';
-import {estimateLlmCost, LlmClient, loadLlmConfig, type LlmProviderConfig} from '../../src/llm-client.js';
+import {estimateLlmCost, LlmClient, loadLlmConfig, type LlmProviderConfig} from '../../src/planner/llm-client.js';
 
 const baseConfig: LlmProviderConfig = {
     provider: 'compatible-provider',

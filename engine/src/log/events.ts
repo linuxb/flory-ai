@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {Ajv2020} from 'ajv/dist/2020.js';
-import {EVENT_TYPES, type EventType, type FoldMode, type ForkRequest, type ForkSubstitution} from './generated/event-log.js';
+import {EVENT_TYPES, type EventType, type FoldMode, type ForkRequest, type ForkSubstitution} from '../generated/event-log.js';
 
 export {EVENT_TYPES, type EventType, type FoldMode, type ForkRequest, type ForkSubstitution};
 /** A JSON object suitable for an event payload. */

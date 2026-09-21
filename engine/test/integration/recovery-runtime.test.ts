@@ -2,12 +2,12 @@ import {randomUUID} from 'node:crypto';
 import {afterAll, beforeEach, describe, expect, it} from 'vitest';
 import {Client} from 'pg';
 import {databaseUrl, engineDatabaseUrl} from '../../../db/config.js';
-import {EventStore} from '../../src/store.js';
-import {surface} from '../../src/projection.js';
+import {EventStore} from '../../src/log/store.js';
+import {surface} from '../../src/log/projection.js';
 import {DEFAULT_RECOVERY_POLICY, failureEvidence, outstanding, RecoveryLoop, replanEvents, selectBoundary, stalledPlanners, unrecoveredFailures, type RecoveryPolicy} from '../../src/recovery.js';
-import {PlannerLoop} from '../../src/planner-loop.js';
-import {consoleDag} from '../../../console/server/src/projection.js';
-import type {LlmPricing} from '../../src/llm-client.js';
+import {PlannerLoop} from '../../src/planner/planner-loop.js';
+import {consoleDag} from '../../../console/server/src/projection/projection.js';
+import type {LlmPricing} from '../../src/planner/llm-client.js';
 
 /**
  * What a replan does to a real database.

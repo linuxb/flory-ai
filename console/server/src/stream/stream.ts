@@ -1,4 +1,4 @@
-import type {ConsoleDelta, ConsoleStreamEvent} from './model.js';
+import type {ConsoleDelta, ConsoleStreamEvent} from '../projection/model.js';
 
 /**
  * The wire format and the resume protocol.

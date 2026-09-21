@@ -24,6 +24,22 @@ describe('engine framework boundary', () => {
         }
     });
 
+    it('keeps the console projection pure, which its own directory now makes checkable', async () => {
+        // Design document 11 section 3.2 says the fold performs no I/O, reads no clock and queries
+        // no projection table. That used to be a claim a reviewer had to verify by reading one
+        // file's imports; grouping the pure modules under `projection/` turns it into something a
+        // test can state. `reader.ts` holds the pool, `tail.ts` polls, and `pg` is the database —
+        // an import of any of them from here is the gate failing.
+        const files = await sourceFiles(resolve(process.cwd(), 'console/server/src/projection'));
+        expect(files.length).toBeGreaterThan(1);
+        for (const file of files) {
+            const content = await readFile(file, 'utf8');
+            expect(content, file).not.toMatch(/from ['"]pg['"]/);
+            expect(content, file).not.toMatch(/from ['"][^'"]*(reader|tail|server|main)\.js['"]/);
+            expect(content, file).not.toMatch(/from ['"]node:/);
+        }
+    });
+
     it('is never imported by the console, only the other way round', async () => {
         // The console consumes the engine. An import in this direction would make the core depend
         // on an operator surface, and the first thing to break would be every consumer of

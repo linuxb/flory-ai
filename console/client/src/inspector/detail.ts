@@ -1,4 +1,4 @@
-import type {PayloadDetail, RetentionUnavailable} from '../types/engine.js';
+import type {PayloadDetail, RetentionUnavailable} from '../engine.js';
 
 /**
  * The drawer's fetches.

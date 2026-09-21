@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {Pool, type PoolClient} from 'pg';
-import type {ScopeAdmissionBlock, ScopeSnapshot} from './check-rules.js';
+import type {ScopeAdmissionBlock, ScopeSnapshot} from '../admission/check-rules.js';
 import {assertEventDraft, type BusinessFactDraft, type DomainAppendResult, type EventDraft, type ForkRequest, type ForkSubstitution, type StoredBusinessEvent, type StoredEvent} from './events.js';
 
 /** A service role permitted to append events. */

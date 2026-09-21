@@ -1,6 +1,6 @@
 import {Handle, Position, type NodeProps, type Node} from '@xyflow/react';
 import {RoleIcon} from './roleIcon.js';
-import type {ConsoleVertex} from '../types/engine.js';
+import type {ConsoleVertex} from '../engine.js';
 
 export interface VertexCardData extends Record<string, unknown> {
     vertex: ConsoleVertex;

@@ -1,5 +1,5 @@
 import {readFile} from 'node:fs/promises';
-import type {LlmCostEstimate, LlmProtocol, LlmUsage} from './generated/event-log.js';
+import type {LlmCostEstimate, LlmProtocol, LlmUsage} from '../generated/event-log.js';
 
 export type {LlmCostEstimate, LlmProtocol, LlmUsage};
 

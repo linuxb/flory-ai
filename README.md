@@ -239,7 +239,10 @@ The README hero image is the animated architecture overview; its generator lives
 ├── .env.example           # Overrideable local connection and service settings
 ├── AGENTS.md              # Contributor index, development rules, and review routes
 ├── codegraph.json         # CodeGraph indexing exclusions for generated and cached content
-├── console/               # Read-only operator console: projection and stream server, and its React client
+├── console/               # Read-only operator console
+│   ├── dev/               # Fixture capture and a zero-dependency mock server
+│   ├── server/src/        # projection/ (the pure fold), stream/ (SSE and the tail), and the process
+│   └── client/src/        # React canvas, inspector, and the one file that imports server types
 ├── coordinator/           # Go 1.25 Distributed Transaction Coordinator service
 ├── gatewayd/              # Go 1.25 Tool Registry Gateway and its Go tool-service SDK
 ├── db/                    # PostgreSQL migrations, bootstrap, and migration utilities
@@ -251,7 +254,8 @@ The README hero image is the animated architecture overview; its generator lives
 │   ├── diagram/           # HTML and Draw.io diagrams
 │   └── plan/              # Backlog of specified-but-undelivered work
 ├── spec/                  # TLA+ transaction-protocol model and TLC configurations
-├── engine/                # TypeScript event store, projections, forks, and harness
+├── engine/                # TypeScript core
+│   └── src/               # log/, admission/, planner/, router/, gateway/, harness/, and the loops
 ├── idl/                   # Versioned shared contracts: the event-log JSON Schema and the gateway protobufs
 ├── sdk/                   # TypeScript tool-service SDK
 ├── package.json           # Node 22 scripts and dependencies

@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
-import {assertEventDraft, type EventDraft} from '../../engine/src/events.js';
+import {assertEventDraft, type EventDraft} from '../../engine/src/log/events.js';
 
 interface FixtureEvent extends EventDraft {
     run_seq: number;

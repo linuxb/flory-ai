@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {type EffectClass, ToolRegistry, type ToolMode} from './check-rules.js';
+import {type EffectClass, ToolRegistry, type ToolMode} from '../admission/check-rules.js';
 
 /** The transaction contract of one published tool, in the event log's own vocabulary. */
 export interface ToolViewTransaction {

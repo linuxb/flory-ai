@@ -1,4 +1,4 @@
-import type {SubDagProposal} from '../../../engine/src/check-rules.js';
+import type {SubDagProposal} from '../../../engine/src/admission/check-rules.js';
 
 /** A test-only inventory actor with an oracle-visible signed-delta ledger. */
 export class MockInventoryService {

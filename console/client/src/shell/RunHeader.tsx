@@ -1,6 +1,6 @@
-import {ThemeToggle} from './ThemeToggle.js';
+import {ThemeToggle} from '../theme/ThemeToggle.js';
 import type {ConnectionStatus} from '../stream/connection.js';
-import type {ConsoleDagModel} from '../types/engine.js';
+import type {ConsoleDagModel} from '../engine.js';
 
 export interface RunHeaderProps {
     model: ConsoleDagModel | null;

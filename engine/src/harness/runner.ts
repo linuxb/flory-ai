@@ -1,5 +1,5 @@
-import type {EventDraft, StoredEvent} from '../events.js';
-import {EventStore} from '../store.js';
+import type {EventDraft, StoredEvent} from '../log/events.js';
+import {EventStore} from '../log/store.js';
 import {noInheritedMutation, type OracleResult} from './oracles.js';
 
 /** A pure harness assertion supplied by the framework or a test fixture package. */

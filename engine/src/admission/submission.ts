@@ -1,8 +1,8 @@
 import {checkFreezeAdmission, checkScopeAdmission, checkSubDag, derivePlacement, type CheckViolation, type RouterPlacement, type ScopeSnapshot} from './check-rules.js';
-import type {EventDraft} from './events.js';
-import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from './gateway-client.js';
-import type {PublishedRuleTemplate} from './rule-template.js';
-import type {EventStore} from './store.js';
+import type {EventDraft} from '../log/events.js';
+import type {DiscoveryAuthorization, GatewayClient, ResolvedToolView} from '../gateway/gateway-client.js';
+import type {PublishedRuleTemplate} from '../router/rule-template.js';
+import type {EventStore} from '../log/store.js';
 import {compileVertexDrafts, lowerToProposal, normalizeWorkflow, routerSlotIds, submissionDigest, type RouterBinding, type WorkflowSubmission} from './workflow.js';
 
 /** Which gate refused a submission. */

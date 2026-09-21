@@ -5,7 +5,7 @@ import {toFlow, type FlowNode} from './toFlow.js';
 import {VertexCard} from './VertexCard.js';
 import {ScopeEnclosure} from './ScopeEnclosure.js';
 import {CanvasControls} from './CanvasControls.js';
-import type {ConsoleDagModel, ConsoleVertex} from '../types/engine.js';
+import type {ConsoleDagModel, ConsoleVertex} from '../engine.js';
 
 const NODE_TYPES = {vertex: VertexCard, scope: ScopeEnclosure};
 

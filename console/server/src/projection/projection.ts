@@ -1,6 +1,6 @@
-import {EVENT_TYPES, type EventType, type StoredEvent} from '../../../engine/src/events.js';
-import {rendersInPlannerPrompt} from '../../../engine/src/projection.js';
-import type {EffectClass} from '../../../engine/src/check-rules.js';
+import {EVENT_TYPES, type EventType, type StoredEvent} from '../../../../engine/src/log/events.js';
+import {rendersInPlannerPrompt} from '../../../../engine/src/log/projection.js';
+import type {EffectClass} from '../../../../engine/src/admission/check-rules.js';
 import {
     CONSOLE_PROJECTOR_VERSION,
     type ConsoleBracket,

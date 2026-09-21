@@ -1,4 +1,4 @@
-import type {ConsoleVertex} from '../types/engine.js';
+import type {ConsoleVertex} from '../engine.js';
 
 /** Inline glyphs rather than an icon package, for four roles that will not grow. */
 export function RoleIcon({role}: {role: ConsoleVertex['role']}): React.JSX.Element {

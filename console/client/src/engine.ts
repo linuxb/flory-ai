@@ -4,7 +4,7 @@
  * Everything else imports from here, so there is one place to review and one place to grep. These
  * are re-exports of the projection's own declarations rather than a mirror of them: a field
  * renamed on the server breaks this build, which is the entire point of the arrangement and only
- * works while `@server/model.ts` stays a type leaf with no runtime imports.
+ * works while `@server/projection/model.ts` stays a type leaf with no runtime imports.
  */
 export type {
     ConsoleBracket,
@@ -23,6 +23,6 @@ export type {
     ConsoleTiming,
     ConsoleTxn,
     ConsoleVertex,
-} from '@server/model.js';
+} from '@server/projection/model.js';
 
-export type {PayloadDetail, RetentionUnavailable} from '@server/detail.js';
+export type {PayloadDetail, RetentionUnavailable} from '@server/projection/detail.js';

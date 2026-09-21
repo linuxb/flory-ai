@@ -1,4 +1,4 @@
-import type {EffectClass} from '../../../engine/src/check-rules.js';
+import type {EffectClass} from '../../../../engine/src/admission/check-rules.js';
 
 /**
  * The shapes an operator's view of one run is made of.

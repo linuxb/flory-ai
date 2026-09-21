@@ -194,11 +194,25 @@ export interface ConsoleDagModel {
     console_projector_version: string;
 }
 
+/**
+ * What every delta carries regardless of what changed.
+ *
+ * `spend` is here rather than only on the snapshot because it is a run-level rollup, and a client
+ * forbidden to recompute rollups has no other way to keep it current: it would show the value the
+ * snapshot happened to carry and go stale for the rest of the run. Sending it costs six numbers
+ * per frame and keeps the rule — the client writes only what the server named — intact.
+ */
+interface ConsoleDeltaEnvelope {
+    at_run_seq: number;
+    ordinal: number;
+    spend: ConsoleSpend;
+}
+
 /** A structural or status change one committed batch of events produced. */
 export type ConsoleDelta =
-    | {type: 'subgraph_appended'; at_run_seq: number; ordinal: number; vertices: ConsoleVertex[]; scopes: ConsoleScope[]}
-    | {type: 'subgraph_shadowed'; at_run_seq: number; ordinal: number; replan: ConsoleReplan}
-    | {type: 'vertex_patched'; at_run_seq: number; ordinal: number; vertex: ConsoleVertex};
+    | (ConsoleDeltaEnvelope & {type: 'subgraph_appended'; vertices: ConsoleVertex[]; scopes: ConsoleScope[]})
+    | (ConsoleDeltaEnvelope & {type: 'subgraph_shadowed'; replan: ConsoleReplan})
+    | (ConsoleDeltaEnvelope & {type: 'vertex_patched'; vertex: ConsoleVertex});
 
 /** The whole model, sent on connect and whenever deltas cannot close a gap. */
 export interface ConsoleSnapshot {

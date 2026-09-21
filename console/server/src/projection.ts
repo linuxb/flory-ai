@@ -188,21 +188,39 @@ class FoldState {
         // and is never compared across two runs, so the requirement that forces the other choice
         // does not apply here.
         const ordered = [...this.vertices.values()].sort((first, second) => first.created_seq - second.created_seq || first.vertex_id.localeCompare(second.vertex_id));
-        for (const [frozenSeq, ids] of [...this.appended].sort((first, second) => first[0] - second[0])) {
+        for (const [, ids] of [...this.appended].sort((first, second) => first[0] - second[0])) {
             const vertices = ids.map((id) => this.vertices.get(id)!).sort((first, second) => first.created_seq - second.created_seq);
             const scopeIds = new Set(vertices.map((vertex) => vertex.txn.scope_id).filter((id): id is string => Boolean(id)));
-            this.deltas.push({type: 'subgraph_appended', at_run_seq: frozenSeq, ordinal: this.ordinal++, vertices, scopes: [...scopeIds].map((id) => this.scopes.get(id)!).filter(Boolean)});
+            this.deltas.push({
+                type: 'subgraph_appended',
+                at_run_seq: this.lastSeq,
+                ordinal: this.ordinal++,
+                spend: this.model.spend,
+                vertices,
+                scopes: [...scopeIds].map((id) => this.scopes.get(id)!).filter(Boolean),
+            });
         }
         for (const id of this.patched) {
             const vertex = this.vertices.get(id);
             // Complete replacement, never a sparse patch. A partial one would put merge semantics
             // in the browser — which fields may change, what a null means — and the surest defence
             // of a renderer that folds nothing is a wire format with nothing to be clever about.
-            if (vertex) this.deltas.push({type: 'vertex_patched', at_run_seq: this.lastSeq, ordinal: this.ordinal++, vertex});
+            if (vertex) this.deltas.push({type: 'vertex_patched', at_run_seq: this.lastSeq, ordinal: this.ordinal++, spend: this.model.spend, vertex});
         }
+        const watermark = Math.max(this.model.at_run_seq, this.lastSeq);
         return {
-            model: {...this.model, at_run_seq: Math.max(this.model.at_run_seq, this.lastSeq), vertices: ordered, scopes: [...this.scopes.values()].sort((a, b) => a.opened_seq - b.opened_seq)},
-            deltas: this.deltas,
+            model: {...this.model, at_run_seq: watermark, vertices: ordered, scopes: [...this.scopes.values()].sort((a, b) => a.opened_seq - b.opened_seq)},
+            // Every delta is fenced at the watermark this batch reached, never at the sequence of
+            // the event that motivated it, and ordinals are renumbered in send order. A freeze's
+            // own `run_seq` is *lower* than the `vertex/created` rows committed with it, so an
+            // append fenced there carries a cursor that runs backwards the moment a reader splits
+            // a freeze from its vertices — which it may, because atomicity stops a partial commit
+            // being visible but does not stop a poll boundary or a read limit falling between
+            // them. A subscriber fences on the cursor, so that append is discarded as already
+            // seen and every vertex in it is lost. Nothing is given up by this: which freeze
+            // produced a vertex is on the vertex as `frozen_by_seq`, and which event a shadow
+            // came from is inside the replan it carries.
+            deltas: this.deltas.map((delta, index) => ({...delta, at_run_seq: watermark, ordinal: index, spend: this.model.spend})),
         };
     }
 
@@ -351,7 +369,7 @@ class FoldState {
         // shadowed more than the engine believes would be showing a graph that never existed.
         const replan: ConsoleReplan = {at_run_seq: event.run_seq, vertex_ids: [...hidden], boundary_seq: null, boundary_vertex_id: null, reason: payload.reason ?? null};
         this.model.replans.push(replan);
-        this.deltas.push({type: 'subgraph_shadowed', at_run_seq: event.run_seq, ordinal: this.ordinal++, replan});
+        this.deltas.push({type: 'subgraph_shadowed', at_run_seq: event.run_seq, ordinal: this.ordinal++, spend: this.model.spend, replan});
     }
 
     private boundary(event: StoredEvent): void {
@@ -362,7 +380,7 @@ class FoldState {
         replan.boundary_vertex_id = event.vertex_id;
         replan.reason = payload.reason ?? replan.reason;
         if (!open) this.model.replans.push(replan);
-        this.deltas.push({type: 'subgraph_shadowed', at_run_seq: event.run_seq, ordinal: this.ordinal++, replan});
+        this.deltas.push({type: 'subgraph_shadowed', at_run_seq: event.run_seq, ordinal: this.ordinal++, spend: this.model.spend, replan});
     }
 
     /* ---------------------------------------------------------------- transactions */

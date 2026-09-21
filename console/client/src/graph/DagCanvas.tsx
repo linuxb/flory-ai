@@ -71,7 +71,10 @@ function Canvas({model, selectedVertexId, onSelect}: DagCanvasProps): React.JSX.
         fitted.current = model.run_id;
         known.current = new Set(model.vertices.map((vertex) => vertex.vertex_id));
         setPending([]);
-        void flow.fitView({padding: 0.2, duration: 0});
+        // Capped at 1:1. A run is opened while it is still short — often one vertex — and an
+        // uncapped fit magnifies that single card to fill the pane, so the operator's first sight
+        // of the run is a wall of one node that then shrinks as work arrives.
+        void flow.fitView({padding: 0.2, duration: 0, maxZoom: 1});
     }, [flow, measured, model.run_id, model.vertices]);
 
     useEffect(() => {

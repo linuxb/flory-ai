@@ -32,7 +32,7 @@ function vertex(id: string): ConsoleVertex {
 type VertexPatch = Extract<ConsoleDelta, {type: 'vertex_patched'}>;
 
 function patch(at_run_seq: number, ordinal: number, id = 'v'): VertexPatch {
-    return {type: 'vertex_patched', at_run_seq, ordinal, vertex: {...vertex(id), created_seq: at_run_seq}};
+    return {type: 'vertex_patched', at_run_seq, ordinal, spend: {calls: 0, input_tokens: 0, output_tokens: 0, amount: null, currency: null}, vertex: {...vertex(id), created_seq: at_run_seq}};
 }
 
 describe('stream cursors', () => {

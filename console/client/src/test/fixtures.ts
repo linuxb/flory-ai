@@ -1,4 +1,4 @@
-import type {ConsoleDagModel, ConsoleVertex} from '../types/engine.js';
+import type {ConsoleDagModel, ConsoleSpend, ConsoleVertex} from '../types/engine.js';
 
 /** A vertex with everything defaulted, so a test states only what it is about. */
 export function vertex(id: string, options: Partial<ConsoleVertex> = {}): ConsoleVertex {
@@ -46,3 +46,6 @@ export function model(vertices: ConsoleVertex[], options: Partial<ConsoleDagMode
         ...options,
     };
 }
+
+/** The rollup every delta envelope carries, so a test literal can stay about what it is testing. */
+export const SPEND: ConsoleSpend = {calls: 0, input_tokens: 0, output_tokens: 0, amount: null, currency: null};

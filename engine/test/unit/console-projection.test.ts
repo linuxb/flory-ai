@@ -241,6 +241,34 @@ describe('folding incrementally equals folding at once', () => {
         }
     });
 
+    it('never emits a cursor below the watermark, however a batch is cut', () => {
+        // The failure this guards against was found by the first real run, not by a unit test.
+        // A freeze's own `run_seq` sits below the `vertex/created` rows it committed with, so an
+        // append fenced at the freeze runs backwards as soon as a reader splits the two — which a
+        // poll boundary or a read limit does, since atomicity only stops a partial commit being
+        // visible. A subscriber fences on the cursor, discards the append as already seen, and
+        // loses every vertex in it; the next patch then names a vertex it never received and it
+        // resyncs forever.
+        //
+        // Asserted over every cut, because which cut is the fatal one is exactly what the
+        // original reasoning got wrong.
+        for (let split = 1; split < events.length; split += 1) {
+            let model = emptyConsoleDag(run);
+            let cursor = {seq: 0, ordinal: -1};
+            for (const batch of [events.slice(0, split), events.slice(split)]) {
+                const step = advanceConsoleDag(model, batch);
+                model = step.model;
+                for (const delta of step.deltas) {
+                    expect(delta.at_run_seq > cursor.seq || (delta.at_run_seq === cursor.seq && delta.ordinal > cursor.ordinal)).toBe(true);
+                    // And the cursor never runs past the model it describes, or a subscriber
+                    // would fence out state the server has not sent yet.
+                    expect(delta.at_run_seq).toBeLessThanOrEqual(model.at_run_seq);
+                    cursor = {seq: delta.at_run_seq, ordinal: delta.ordinal};
+                }
+            }
+        }
+    });
+
     it('emits deltas that rebuild the same model as a snapshot would', () => {
         // Deliberately a test-local applier: a production one on the server would be the second
         // folder this design exists to prevent.

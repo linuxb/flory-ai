@@ -27,6 +27,8 @@
     "e2e:up": "node scripts/e2e-up.mjs",
     "record:tool-view": "node scripts/record-tool-view.mjs",
     "console": "tsx console/server/src/main.ts",
+    "console:mock": "node console/dev/mock-server.mjs",
+    "console:capture": "tsx console/dev/capture-fixture.ts",
     "demo:coordinator": "go -C coordinator run ./cmd/coordinator",
     "demo:retail": "tsx scripts/demo/b2b2c-retail.ts",
     "test": "vitest run",

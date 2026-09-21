@@ -1,0 +1,44 @@
+# The console client's own job.
+#
+# Filtered to `console/**` so an engine change never spins up a browser toolchain, and
+# deliberately absent from `event-log.yml`'s filters so a client-only change never starts
+# PostgreSQL, Keycloak, a storage emulator and two Go suites.
+#
+# The split is what makes the cross-package type guarantee hold with no over-broad filter: an
+# engine change that breaks `console/server/src/model.ts` fails the root build, because the server
+# is in the root tsconfig, and a model change that breaks the client fails here, because both
+# files live under `console/**`.
+name: Console client
+
+on:
+  pull_request:
+    paths:
+      - 'console/**'
+      - '.github/workflows/console.yml'
+  push:
+    paths:
+      - 'console/**'
+      - '.github/workflows/console.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console/client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: console/client/package-lock.json
+      - run: npm ci
+      # Typecheck, unit tests and a production build. The typecheck is the step that fails when
+      # the engine renames a field the client reads, which is the whole reason the client imports
+      # those declarations instead of mirroring them.
+      - run: npm run verify

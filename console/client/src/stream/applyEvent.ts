@@ -1,4 +1,4 @@
-import type {ConsoleDagModel, ConsoleStreamEvent, ConsoleVertex} from '../types/engine.js';
+import type {ConsoleDagModel, ConsoleDelta, ConsoleStreamEvent, ConsoleVertex} from '../types/engine.js';
 
 /**
  * Applying a delta, which is not the same as folding an event.
@@ -15,15 +15,24 @@ import type {ConsoleDagModel, ConsoleStreamEvent, ConsoleVertex} from '../types/
  * wrong and the fix belongs in the engine.
  */
 
-/** The client's whole state: the server's model, plus an index. */
+/** The client's whole state: the server's model, plus an index and the cursor it stands at. */
 export interface ClientModel {
     readonly model: ConsoleDagModel;
     /** A lookup built from the same objects, by reference. Indexing is not folding. */
     readonly byId: ReadonlyMap<string, ConsoleVertex>;
+    /**
+     * The ordinal of the last event applied at `model.at_run_seq`.
+     *
+     * The fence is the pair, not the sequence alone, because one committed batch produces several
+     * deltas that all carry that batch's watermark and are told apart only by their ordinal —
+     * which is exactly what the SSE cursor `<run_seq>.<ordinal>` says. Fencing on the sequence
+     * alone applies the first delta of a batch and silently discards the rest.
+     */
+    readonly ordinal: number;
 }
 
-export function clientModel(model: ConsoleDagModel): ClientModel {
-    return {model, byId: new Map(model.vertices.map((vertex) => [vertex.vertex_id, vertex]))};
+export function clientModel(model: ConsoleDagModel, ordinal = 0): ClientModel {
+    return {model, byId: new Map(model.vertices.map((vertex) => [vertex.vertex_id, vertex])), ordinal};
 }
 
 /** What applying one event did. */
@@ -49,16 +58,16 @@ export type ResyncReason = 'delta-before-snapshot' | 'run-mismatch' | 'unknown-v
  * monotonicity is the only sequence rule the client is entitled to.
  */
 export function applyEvent(current: ClientModel | null, event: ConsoleStreamEvent): ApplyOutcome {
-    if (event.type === 'topology_snapshot') return {kind: 'applied', next: clientModel(event.model)};
+    if (event.type === 'topology_snapshot') return {kind: 'applied', next: clientModel(event.model, event.ordinal)};
     if (!current) return {kind: 'resync', reason: 'delta-before-snapshot'};
-    if (event.at_run_seq <= current.model.at_run_seq) return {kind: 'ignored', reason: 'behind-watermark'};
+    if (event.at_run_seq < current.model.at_run_seq || (event.at_run_seq === current.model.at_run_seq && event.ordinal <= current.ordinal)) return {kind: 'ignored', reason: 'behind-watermark'};
 
     switch (event.type) {
         case 'subgraph_appended': {
             // Inserted verbatim, edges included: the payload carries them, so the client never
             // reads `parent_refs` to decide that an edge exists.
             const scopeIds = new Set(event.scopes.map((scope) => scope.scope_id));
-            return applied(current, event.at_run_seq, {
+            return applied(current, event, {
                 vertices: [...current.model.vertices, ...event.vertices],
                 scopes: [...current.model.scopes.filter((scope) => !scopeIds.has(scope.scope_id)), ...event.scopes],
             });
@@ -68,7 +77,7 @@ export function applyEvent(current: ClientModel | null, event: ConsoleStreamEven
             // Exactly the ids listed. Walking edges to find descendants would be shadow tracking
             // in the browser, which is the review gate this file exists to satisfy.
             for (const id of hidden) if (!current.byId.has(id)) return {kind: 'resync', reason: 'unknown-vertex'};
-            return applied(current, event.at_run_seq, {
+            return applied(current, event, {
                 vertices: current.model.vertices.map((vertex) => (hidden.has(vertex.vertex_id) ? {...vertex, is_shadowed: true, shadowed_at_seq: event.replan.at_run_seq} : vertex)),
                 replans: [...current.model.replans.filter((replan) => replan.at_run_seq !== event.replan.at_run_seq), event.replan],
             });
@@ -77,7 +86,7 @@ export function applyEvent(current: ClientModel | null, event: ConsoleStreamEven
             if (!current.byId.has(event.vertex.vertex_id)) return {kind: 'resync', reason: 'unknown-vertex'};
             // The whole vertex, not a sparse patch: there is nothing here to merge and therefore
             // nothing to be clever about.
-            return applied(current, event.at_run_seq, {
+            return applied(current, event, {
                 vertices: current.model.vertices.map((vertex) => (vertex.vertex_id === event.vertex.vertex_id ? event.vertex : vertex)),
             });
         }
@@ -88,8 +97,10 @@ export function applyEvent(current: ClientModel | null, event: ConsoleStreamEven
     }
 }
 
-/** Rebuilds the model with the given changes, advancing the watermark in the same construction. */
-function applied(current: ClientModel, atRunSeq: number, changes: Partial<ConsoleDagModel>): ApplyOutcome {
-    // The watermark moves with the state it describes, so the two cannot drift apart.
-    return {kind: 'applied', next: clientModel({...current.model, ...changes, at_run_seq: atRunSeq})};
+/** Rebuilds the model with the given changes, advancing the cursor in the same construction. */
+function applied(current: ClientModel, event: ConsoleDelta, changes: Partial<ConsoleDagModel>): ApplyOutcome {
+    // The cursor moves with the state it describes, so the two cannot drift apart. `spend` is
+    // copied from the envelope rather than summed here: a run-level rollup is exactly the kind of
+    // value this client may not compute, and it goes stale within seconds if it is not carried.
+    return {kind: 'applied', next: clientModel({...current.model, ...changes, spend: event.spend, at_run_seq: event.at_run_seq}, event.ordinal)};
 }

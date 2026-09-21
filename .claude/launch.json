@@ -4,8 +4,24 @@
         {
             "name": "console-client",
             "runtimeExecutable": "npm",
-            "runtimeArgs": ["run", "dev", "--prefix", "console/client"],
+            "runtimeArgs": [
+                "run",
+                "dev",
+                "--prefix",
+                "console/client"
+            ],
             "port": 5173
+        },
+        {
+            "name": "console-client-mock",
+            "runtimeExecutable": "npm",
+            "runtimeArgs": [
+                "run",
+                "dev:mock",
+                "--prefix",
+                "console/client"
+            ],
+            "port": 5174
         }
     ]
 }

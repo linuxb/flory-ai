@@ -28,6 +28,7 @@
                                 "subgraph/frozen",
                                 "subgraph/rejected",
                                 "subgraph/shadowed",
+                                "subgraph/unreadable",
                                 "replan/boundary",
                                 "fork/created",
                                 "vertex/created",
@@ -61,6 +62,7 @@
         {"if": {"properties": {"event_type": {"const": "subgraph/frozen"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphFrozenPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "subgraph/rejected"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphRejectedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "subgraph/shadowed"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphShadowedPayload"}}}},
+        {"if": {"properties": {"event_type": {"const": "subgraph/unreadable"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphUnreadablePayload"}}}},
         {"if": {"properties": {"event_type": {"const": "replan/boundary"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/replanBoundaryPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "vertex/created"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/vertexCreatedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "txn/scope"}}, "required": ["event_type"]}, "then": {"required": ["scope_id"], "properties": {"payload": {"$ref": "#/$defs/txnScopePayload"}}}},
@@ -215,6 +217,17 @@
                         "additionalProperties": false
                     }
                 }
+            },
+            "additionalProperties": false
+        },
+        "subgraphUnreadablePayload": {
+            "type": "object",
+            "required": ["planner_vertex_id", "reason", "answer_digest"],
+            "properties": {
+                "planner_vertex_id": {"type": "string", "format": "uuid"},
+                "reason": {"type": "string", "minLength": 1},
+                "answer_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+                "answer_length": {"type": "integer", "minimum": 0}
             },
             "additionalProperties": false
         },

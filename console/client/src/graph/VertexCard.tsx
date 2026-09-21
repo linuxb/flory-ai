@@ -43,6 +43,9 @@ export function VertexCard({data, selected}: NodeProps<Node<VertexCardData, 'ver
                 {vertex.bracket ? <span className="chip bracket">{vertex.bracket.state}</span> : null}
                 {vertex.router_outcome && vertex.router_outcome.kind !== 'pending' ? <span className="chip router">{routerLabel(vertex.router_outcome.kind)}</span> : null}
                 {vertex.cost ? <span className="chip cost">{vertex.cost.input_tokens + vertex.cost.output_tokens} tok</span> : null}
+                {/* A planner that answered and produced nothing looks identical to one that has
+                    not been reached yet, and it is the reason a run stopped. */}
+                {vertex.stall ? <span className="chip stalled">answer unreadable</span> : null}
                 {vertex.is_shadowed ? <span className="chip shadowed">discarded</span> : null}
             </div>
             <Handle type="source" position={Position.Bottom} isConnectable={false} />

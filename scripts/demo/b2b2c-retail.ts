@@ -26,7 +26,7 @@ import {PlannerExecutor} from '../../engine/src/planner-executor.js';
 import {PlannerLoop} from '../../engine/src/planner-loop.js';
 import {ReadExecutor} from '../../engine/src/read-executor.js';
 import {RouterExecutor} from '../../engine/src/router-executor.js';
-import {DEFAULT_RECOVERY_POLICY, RecoveryLoop, unrecoveredFailures} from '../../engine/src/recovery.js';
+import {DEFAULT_RECOVERY_POLICY, outstanding, RecoveryLoop, stalledPlanners} from '../../engine/src/recovery.js';
 import {RuleTemplateStore, slotIdOf, type RuleTemplateDraft} from '../../engine/src/rule-template.js';
 import {WorkflowSubmitter} from '../../engine/src/submission.js';
 import {surface} from '../../engine/src/projection.js';
@@ -282,9 +282,11 @@ async function advance(engine: EventStore, runId: string, reads: ReadExecutor, r
 
     // Recovery comes before routing and planning, and the order is the point: a failure left
     // unanswered would let the next planner turn build on top of work that is already dead.
-    if (unrecoveredFailures(events).length) {
-        const failed = unrecoveredFailures(events)[0]!;
-        heading(`Recovery: ${names.get(failed) ?? failed.slice(0, 8)} failed`);
+    const blocked = outstanding(events);
+    if (blocked.length) {
+        const failed = blocked[0]!;
+        const stalled = stalledPlanners(events).includes(failed);
+        heading(`Recovery: ${names.get(failed) ?? failed.slice(0, 8)} ${stalled ? 'answered unreadably' : 'failed'}`);
         const outcome = await recovery.recoverOne({runId, taskInput: TASK_INPUT, workflowType: WORKFLOW_TYPE, goalFor: (vertexId) => goalFor(names.get(vertexId) ?? '')}, view);
         if (outcome.status !== 'idle') {
             const {decision} = outcome;
@@ -343,10 +345,10 @@ async function advance(engine: EventStore, runId: string, reads: ReadExecutor, r
         } else {
             line(`unreadable answer: ${turn.reason}`);
             note(turn.content.slice(0, 300));
-            // The planner call succeeded — the model answered — so nothing failed and the ladder
-            // has no trigger. The ladder recovers failed *work*; a planner that answered
-            // unreadably produced no work at all, which is a different hole and an open one.
-            note('the planner answered but the answer was not a proposal; the ladder recovers failed work, and nothing failed here');
+            // Nothing failed — the model answered and the engine refused to read the answer —
+            // so the ladder has no failed vertex to find. It finds the stall instead, from the
+            // `subgraph/unreadable` the loop just appended, and asks this planner again.
+            note('the answer was not a proposal; recorded as a stall, and the ladder will ask this planner again with the refusal as evidence');
         }
         progressed = true;
     }

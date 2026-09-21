@@ -55,6 +55,7 @@ It performs no I/O and **queries no projection table**. `txn_scope` and `txn_bra
 | `cost`, `spend` | `budget/charged`, which carries the model, duration, full token usage and an optional priced estimate |
 | `depth` | the fold, assigned once when a vertex is created |
 | `in_planner_prompt` | `rendersInPlannerPrompt`, shared with `linearize` |
+| `stall` | `subgraph/unreadable`: a planner that answered and produced no work. A field rather than a status, because the vertex did not fail — and it is the reason a run that simply stopped, stopped ([03 §2.6](./03-replan-and-recovery.md)) |
 
 Four additions beyond what a first sketch of this document listed, each because the canvas is unreadable without it:
 

@@ -54,6 +54,23 @@ export interface ConsoleVertex {
     cost: ConsoleCallCost | null;
     /** Whether `linearize` would render this vertex into a downstream planner's prompt. */
     in_planner_prompt: boolean;
+    /** Set on a planner whose answer the engine could not read as a proposal. */
+    stall: ConsoleStall | null;
+}
+
+/**
+ * A planner turn that produced no work.
+ *
+ * Worth a field of its own rather than a status, because the vertex did not fail: the model
+ * answered and the engine refused to read the answer as a proposal. An operator looking at a run
+ * that simply stopped needs to see which planner stopped it and why, and neither the status nor
+ * the payload says so.
+ */
+export interface ConsoleStall {
+    reason: string;
+    /** The answer is not retained, for the same reason no prompt is; its digest identifies it. */
+    answer_digest: string;
+    at_run_seq: number;
 }
 
 /** Transaction position, all of it derived and none of it declared. */

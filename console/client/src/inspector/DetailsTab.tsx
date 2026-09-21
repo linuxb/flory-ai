@@ -162,6 +162,17 @@ export function DetailsTab({vertex, model}: {vertex: ConsoleVertex; model: Conso
                 </section>
             ) : null}
 
+            {vertex.stall ? (
+                <section className="router-note tone-error">
+                    <h4>this planner answered, and the answer was not a proposal</h4>
+                    <p>{vertex.stall.reason}</p>
+                    <p className="drawer-note mono">{vertex.stall.answer_digest}</p>
+                    <p className="drawer-note">
+                        Nothing failed here, so the run has no failed vertex — it simply stopped. The recovery ladder treats this as a stall and asks this planner again with the refusal as evidence.
+                    </p>
+                </section>
+            ) : null}
+
             {vertex.is_shadowed ? (
                 <section className="router-note tone-warning">
                     <h4>discarded by a replan at run_seq {vertex.shadowed_at_seq}</h4>

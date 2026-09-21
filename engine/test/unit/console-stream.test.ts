@@ -25,6 +25,7 @@ function vertex(id: string): ConsoleVertex {
         bracket: null,
         router_outcome: null,
         cost: null,
+        stall: null,
         in_planner_prompt: true,
     };
 }

@@ -2,7 +2,7 @@
 
 > Status: Draft v0.2 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md)
 
-> Implemented: L0 (the executors' retry policy), L1 and L2 (`engine/src/recovery.ts`), and the guards that decide when neither is available. L3 and L4 act on the world rather than on the plan, so the ladder records the decision to escalate and stops; compensation belongs to the Coordinator and is not written yet.
+> Implemented: L0 (the executors' retry policy), L1 and L2 (`engine/src/recovery.ts`), both triggers — failed work and a stalled planner (§2.6) — and the guards that decide when neither level is available. L3 and L4 act on the world rather than on the plan, so the ladder records the decision to escalate and stops; compensation belongs to the Coordinator and is not written yet.
 
 > Diagram: [diagram/replan-flow.drawio](../diagram/replan-flow.drawio), including the full flow and the L0–L4 escalation ladder.
 
@@ -90,6 +90,21 @@ The ladder for a failed deterministic branch is therefore:
 
 Two adjacent cases are **not** deterministic failures and keep the ordinary ladder. A router that matches nothing has not failed: `no_match` is structural fall-through, and the downstream planner decides as it always would. A router whose runtime admission rejects an otherwise shape-valid branch (`proposal_rejected`) appends `vertex/failed` with its reason and publishes no runnable work; the transaction outcome belongs to the Coordinator, and control does not fall through to a planner as a consolation path ([10 §6](./10-deterministic-routers.md#6-closed-outcome-vocabulary)).
 
+### 2.6 The other way a run stops: a planner that produced no work
+
+Everything above is triggered by failed work. A run has a second way to stop, and it satisfies none of those conditions: the planner's call **succeeds**, the model answers, and the engine cannot read the answer as a proposal. Nothing failed, no vertex is outstanding, and the planner already has `vertex/succeeded` in the log — so no executor will ever call it again, nothing downstream can become ready, and the run simply stops with no record of why.
+
+The engine appends **`subgraph/unreadable`** naming the planner, the refusal, and a digest of the answer. The answer itself is not retained, for the same reason no prompt is ([11 §3.4](./11-console-and-observability.md)); the digest is enough to tell whether two runs received the same bad answer.
+
+The ladder then treats the stall as it treats a failure, with two differences that fall out of the situation rather than being special-cased:
+
+- **The boundary is the planner itself**, at distance zero. It is the nearest planner with the authority to answer differently, and asking an ancestor instead would discard work for no reason.
+- **The discard set is empty.** Nothing was created, so there is nothing to shadow — and `replan/boundary` is appended with no `subgraph/shadowed` after it, exactly as an escalation is.
+
+Everything else is unchanged, including the per-planner counter: a planner that keeps answering unreadably is dropped after `N` turns and the ladder looks further back, which is L2. Detection reads the recorded refusal rather than the absence of children, deliberately — a reader positioned between a planner's `vertex/succeeded` and the freeze that follows it also sees a childless succeeded planner, and would call a healthy run stalled.
+
+A proposal that is *readable* and then refused by check-rules is the same shape with a different cause, and §3 already routes repeated check-rule rejection to L3.
+
 ## 3. Rollback (L3)
 
 - Trigger when any of the following occurs: token budget is exhausted (§4); the same planner fails `N = 2` replans in succession; an episode reaches `E = 2` replans regardless of planner identity; or repeated check-rule rejection produces no legal plan. The per-planner limit handles a repeated local premise; the episode cap closes alternating-planner oscillation.
@@ -167,7 +182,6 @@ dsh unifies resume, fork, and replay into one primitive because a session is a c
 
 - **Oscillation across planners — resolved.** The consecutive-failure counter in §3 is per planner, so two planners that alternate would never trip it. The S1 TLC discovery model in the [formal verification design](./06-validation-harness.md#12-formal-verification-design) found the shortest lasso `P2 -> P1 -> P2`, containing two `replan/boundary` transitions. The engine therefore permits at most `E = 2` replans in one failure episode, independent of planner identity; the next cancellation escalates to L3. This is a protocol bound, not a budget heuristic. Scenario S3c verifies the same rule ([06 §6](./06-validation-harness.md)); the executable evidence is in [`spec/`](../../spec/README.md).
 - **What delimits a failure episode.** §3 bounds one episode at `E = 2` replans and does not say when an episode ends, and the answer decides whether the bound binds at all. The first implementation ended an episode on any success, and a live run replanned indefinitely: each replan's subtree did produce a passing call or two before failing again, so the counter reset every time. The engine now ends an episode only when some frozen subgraph had **every** vertex in it succeed — work the next replan is about to discard is not progress — which terminates, and which is a stricter reading than this document states. It should say which it means.
-- **A planner that answers unreadably is not covered by this ladder, and a live run stalled on it.** The ladder recovers failed *work*. When a planner's call succeeds but its answer is not a proposal the engine can read, nothing failed, no vertex is outstanding, and the run simply stops making progress — the planner has already succeeded in the log and no executor will call it again. This is a real hole with a plausible answer (re-ask the same planner with the parse error as evidence, which is L1 with an empty discard set), and it is a different trigger from the one §2 specifies.
 - Expressing negative failure evidence so planners do not recreate isomorphic subgraphs. A candidate is to inject disproven `(tool, parameter pattern)` pairs as check-rule constraints rather than mere prompts.
 - Merging concurrent failures in parallel branches when both compete for the same ancestor planner as a boundary: serialize by first arrival and make the later failure wait for the new surface.
 - How long forward closure (§2.2 step 2) may be attempted on a post-pivot scope before the run is declared L4. Too short suspends a recoverable run for a human; too long holds resources indefinitely. The validation harness currently asserts only that L4 is eventually reached, not when ([06 §13](./06-validation-harness.md#13-open-questions)).

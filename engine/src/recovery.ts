@@ -144,11 +144,20 @@ export function ruleAuthored(events: readonly StoredEvent[], vertexId: string): 
     return false;
 }
 
-/** Succeeded ancestor planners of a vertex, nearest first. */
+/**
+ * Succeeded planners this vertex could resume at, nearest first.
+ *
+ * A vertex that is itself a succeeded planner is its own nearest candidate, at distance zero. That
+ * is not a special case bolted on: the nearest planner with the authority to propose something
+ * different really is that planner, and there is nothing below it to discard. It is how a stalled
+ * planner — one whose answer produced no work at all — re-enters the ladder.
+ */
 export function ancestorPlanners(events: readonly StoredEvent[], vertexId: string): {vertexId: string; seq: number; depth: number}[] {
     const created = new Map(events.filter((event) => event.event_type === 'vertex/created' && event.vertex_id).map((event) => [event.vertex_id!, event]));
     const succeeded = new Map(events.filter((event) => event.event_type === 'vertex/succeeded' && event.vertex_id).map((event) => [event.vertex_id!, event.run_seq]));
     const found: {vertexId: string; seq: number; depth: number}[] = [];
+    const ownSeq = succeeded.get(vertexId);
+    if (created.get(vertexId)?.payload.role === 'planner' && ownSeq !== undefined) found.push({vertexId, seq: ownSeq, depth: 0});
     const seen = new Set<string>([vertexId]);
     let frontier = created.get(vertexId)?.parent_refs ?? [];
     for (let depth = 1; frontier.length; depth += 1) {
@@ -221,7 +230,21 @@ export interface FailureEvidence {
 export function failureEvidence(events: readonly StoredEvent[], failedVertexId: string, discarded: readonly string[]): FailureEvidence {
     const created = events.find((event) => event.event_type === 'vertex/created' && event.vertex_id === failedVertexId);
     const failed = [...events].reverse().find((event) => event.event_type === 'vertex/failed' && event.vertex_id === failedVertexId);
+    // A stalled planner has no failure to read, because nothing failed: the call succeeded and the
+    // answer was not a proposal. Its evidence is the parse refusal the engine recorded.
+    const unreadable = [...events].reverse().find((event) => event.event_type === 'subgraph/unreadable' && event.payload.planner_vertex_id === failedVertexId);
     const payload = (failed?.payload ?? {}) as {attempts?: number; outcome?: string; error?: string};
+    if (!failed && unreadable) {
+        return {
+            failed_vertex_id: failedVertexId,
+            tool: null,
+            error_class: 'unreadable_answer',
+            error: String(unreadable.payload.reason ?? ''),
+            attempts: events.filter((event) => event.event_type === 'subgraph/unreadable' && event.payload.planner_vertex_id === failedVertexId).length,
+            discarded_vertices: discarded.length,
+            cancelled_scopes: [],
+        };
+    }
     return {
         failed_vertex_id: failedVertexId,
         tool: typeof created?.payload.tool === 'string' ? created.payload.tool : null,
@@ -448,10 +471,10 @@ export class RecoveryLoop {
         private readonly policy: RecoveryPolicy,
     ) {}
 
-    /** Recovers the oldest unrecovered failure, or reports that there is none. */
+    /** Recovers the oldest thing blocking the run — a failure or a stall — or reports none. */
     async recoverOne(request: RecoveryRequest, view: ResolvedToolView): Promise<RecoveryResult> {
         const events = await this.store.readStream(request.runId);
-        const failed = unrecoveredFailures(events)[0];
+        const failed = outstanding(events)[0];
         if (!failed) return {status: 'idle'};
 
         const decision = selectBoundary(events, failed, this.policy);
@@ -483,6 +506,45 @@ export class RecoveryLoop {
  * what is still outstanding. A failure that was retried and then succeeded is not outstanding
  * either: L0 already handled it.
  */
+export function outstanding(events: readonly StoredEvent[]): string[] {
+    // Failures first. A stall is the run having nothing left to do; a failure is work that has
+    // already been attempted, and answering it may well be what unsticks the planner.
+    return [...unrecoveredFailures(events), ...stalledPlanners(events)];
+}
+
+/**
+ * Planners whose turn produced no work, and which no replan has answered since.
+ *
+ * This is the other way a run stops, and for a while the ladder could not see it at all. The
+ * planner's *call* succeeded — the model answered — so nothing failed, no vertex is outstanding,
+ * and the planner has already succeeded in the log, so no executor will ever call it again.
+ * Nothing downstream can become ready, and the run just stops.
+ *
+ * Detected from the recorded refusal rather than from the absence of children, deliberately. A
+ * reader between a planner's `vertex/succeeded` and the freeze that follows it sees a childless
+ * succeeded planner too, and would call a perfectly healthy run stalled.
+ */
+export function stalledPlanners(events: readonly StoredEvent[]): string[] {
+    const answered = new Set<string>();
+    for (const event of events) {
+        if (event.event_type === 'replan/boundary') {
+            const failed = event.payload.failed_vertex_id;
+            if (typeof failed === 'string') answered.add(failed);
+        }
+    }
+    const stalled: string[] = [];
+    for (const event of events) {
+        if (event.event_type !== 'subgraph/unreadable') continue;
+        const planner = event.payload.planner_vertex_id;
+        if (typeof planner !== 'string' || answered.has(planner) || stalled.includes(planner)) continue;
+        // A later freeze that gave this planner a child means the stall is over: either a replan
+        // answered it or the driver called it again and it answered readably this time.
+        const recovered = events.some((later) => later.run_seq > event.run_seq && later.event_type === 'vertex/created' && later.parent_refs.includes(planner));
+        if (!recovered) stalled.push(planner);
+    }
+    return stalled;
+}
+
 export function unrecoveredFailures(events: readonly StoredEvent[]): string[] {
     const shadowed = new Set<string>();
     for (const event of events) {

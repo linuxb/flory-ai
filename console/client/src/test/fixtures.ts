@@ -24,6 +24,7 @@ export function vertex(id: string, options: Partial<ConsoleVertex> = {}): Consol
         bracket: null,
         router_outcome: null,
         cost: null,
+        stall: null,
         in_planner_prompt: true,
         ...options,
     };

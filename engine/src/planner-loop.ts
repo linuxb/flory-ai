@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {assemble, linearize, slice, surface} from './projection.js';
 import type {PlannerExecutor} from './planner-executor.js';
 import type {LlmMessage} from './llm-client.js';
@@ -74,7 +75,27 @@ export class PlannerLoop {
         const {content} = await this.planner.execute({runId: request.runId, plannerId: request.plannerVertexId, messages});
 
         const parsed = readProposal(content);
-        if ('reason' in parsed) return {status: 'unreadable', reason: parsed.reason, content};
+        if ('reason' in parsed) {
+            // Recorded, not merely returned. A planner that answers unreadably has succeeded in
+            // the log and produced no work, so nothing downstream of it can ever become ready and
+            // no executor will call it again — the run simply stops. Without this event the stall
+            // is invisible: the recovery ladder has no failure to find, and a replay cannot
+            // reproduce why the run stopped. The answer itself is not retained, only its digest,
+            // for the same reason no prompt is (design document 11 section 3.4).
+            await this.store.appendEvents(request.runId, [
+                {
+                    event_type: 'subgraph/unreadable',
+                    vertex_id: request.plannerVertexId,
+                    payload: {
+                        planner_vertex_id: request.plannerVertexId,
+                        reason: parsed.reason,
+                        answer_digest: `sha256:${createHash('sha256').update(content).digest('hex')}`,
+                        answer_length: content.length,
+                    },
+                },
+            ]);
+            return {status: 'unreadable', reason: parsed.reason, content};
+        }
 
         const submission: WorkflowSubmission = {
             submissionId: request.attempt ? `${request.plannerVertexId}:replan-${request.attempt}` : `${request.plannerVertexId}:turn`,

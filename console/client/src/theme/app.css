@@ -355,6 +355,11 @@ body {
     border-style: dashed;
 }
 
+.chip.stalled {
+    border-color: var(--status-failed);
+    color: var(--status-failed);
+}
+
 .edge-shadowed {
     opacity: 0.4;
 }

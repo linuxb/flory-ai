@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'vitest';
 import {
     ancestorPlanners,
+    outstanding,
     backtrackFloor,
     DEFAULT_RECOVERY_POLICY,
     failureEvidence,
@@ -10,6 +11,7 @@ import {
     ruleAuthored,
     selectBoundary,
     shadowSet,
+    stalledPlanners,
     unrecoveredFailures,
     type RecoveryPolicy,
 } from '../../src/recovery.js';
@@ -160,6 +162,81 @@ describe('reading the log for recovery', () => {
         const tried = [...baseRun(), event('txn/try', {scope_id: SCOPE, vertex_id: TOOL, payload: {}})];
         expect([...openBracketScopes(tried)]).toEqual([SCOPE]);
         expect([...openBracketScopes([...tried, event('txn/cancel', {scope_id: SCOPE, payload: {}})])]).toEqual([]);
+    });
+});
+
+describe('a planner whose answer produced no work', () => {
+    /** The planner answered, the engine could not read it as a proposal, and nothing was frozen. */
+    function stalledRun(): StoredEvent[] {
+        sequence = 0;
+        return [
+            event('run/start', {payload: {}}),
+            ...frozen('submitted', vertex(P1, 'planner', [])),
+            ...ran(P1),
+            ...frozen('submitted', vertex(P2, 'planner', [P1])),
+            ...ran(P2),
+            event('subgraph/unreadable', {
+                vertex_id: P2,
+                payload: {planner_vertex_id: P2, reason: 'quote names a parent outside this answer', answer_digest: `sha256:${'a'.repeat(64)}`, answer_length: 412},
+            }),
+        ];
+    }
+
+    it('is stuck in a way no failure describes, and the ladder still sees it', () => {
+        // The planner's call succeeded, so there is no `vertex/failed` anywhere and the run has
+        // nothing outstanding by the ordinary reading. It is still stuck: nothing downstream can
+        // become ready, and no executor will call a succeeded planner again.
+        const events = stalledRun();
+        expect(unrecoveredFailures(events)).toEqual([]);
+        expect(stalledPlanners(events)).toEqual([P2]);
+        expect(outstanding(events)).toEqual([P2]);
+    });
+
+    it('resumes at the planner itself, discarding nothing', () => {
+        const decision = selectBoundary(stalledRun(), P2, POLICY);
+        expect(decision.level).toBe('L1');
+        // Itself, at distance zero: it is the nearest planner with the authority to answer again,
+        // and there is nothing below it to throw away.
+        expect(decision.selected).toBe(P2);
+        expect(decision.shadowed).toEqual([]);
+    });
+
+    it('tells that planner why its last answer was refused', () => {
+        const events = stalledRun();
+        expect(failureEvidence(events, P2, [])).toMatchObject({
+            failed_vertex_id: P2,
+            error_class: 'unreadable_answer',
+            error: 'quote names a parent outside this answer',
+            attempts: 1,
+            discarded_vertices: 0,
+        });
+    });
+
+    it('stops reporting the stall once a freeze gave that planner a child', () => {
+        // Either a replan answered it or the driver asked again and got a readable answer. Both
+        // end the stall, and neither appends anything that says so directly.
+        const events = [...stalledRun(), ...frozen('submitted', vertex(TOOL, 'tool', [P2], 'first.tool'))];
+        expect(stalledPlanners(events)).toEqual([]);
+    });
+
+    it('stops reporting the stall once a replan has answered it', () => {
+        const events = [...stalledRun(), event('replan/boundary', {vertex_id: P2, payload: {level: 'L1', reason: 'unreadable', failed_vertex_id: P2, candidates: [], selected: P2}})];
+        expect(stalledPlanners(events)).toEqual([]);
+    });
+
+    it('gives up on a planner that keeps answering unreadably', () => {
+        // The per-planner counter is what stops an endless re-ask. After N turns the planner is
+        // dropped and the ladder looks further back, which is L2.
+        const events = [
+            ...stalledRun(),
+            event('replan/boundary', {vertex_id: P2, payload: {level: 'L1', reason: 'a', failed_vertex_id: P2, candidates: [], selected: P2}}),
+            event('replan/boundary', {vertex_id: P2, payload: {level: 'L1', reason: 'b', failed_vertex_id: P2, candidates: [], selected: P2}}),
+            event('subgraph/unreadable', {vertex_id: P2, payload: {planner_vertex_id: P2, reason: 'again', answer_digest: `sha256:${'b'.repeat(64)}`, answer_length: 9}}),
+        ];
+        const decision = selectBoundary(events, P2, {...POLICY, maxReplansPerEpisode: 9});
+        expect(decision.candidates.find((entry) => entry.planner_vertex_id === P2)!.rejected).toBe('failure_counter_exhausted');
+        expect(decision.selected).toBe(P1);
+        expect(decision.level).toBe('L2');
     });
 });
 

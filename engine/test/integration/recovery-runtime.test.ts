@@ -4,7 +4,8 @@ import {Client} from 'pg';
 import {databaseUrl, engineDatabaseUrl} from '../../../db/config.js';
 import {EventStore} from '../../src/store.js';
 import {surface} from '../../src/projection.js';
-import {failureEvidence, replanEvents, selectBoundary, unrecoveredFailures, DEFAULT_RECOVERY_POLICY, type RecoveryPolicy} from '../../src/recovery.js';
+import {DEFAULT_RECOVERY_POLICY, failureEvidence, outstanding, RecoveryLoop, replanEvents, selectBoundary, stalledPlanners, unrecoveredFailures, type RecoveryPolicy} from '../../src/recovery.js';
+import {PlannerLoop} from '../../src/planner-loop.js';
 import {consoleDag} from '../../../console/server/src/projection.js';
 import type {LlmPricing} from '../../src/llm-client.js';
 
@@ -172,5 +173,73 @@ describe('replanning against a real log', () => {
         // The abandoned work is still queued, because nothing was abandoned: an escalation hands
         // the run to a human or to the Coordinator with its state intact.
         expect(await queued([sibling])).toEqual([sibling]);
+    });
+});
+
+describe('a planner that answers unreadably', () => {
+    /** A planner loop whose model returns whatever the test hands it, against the real store. */
+    function loopReturning(...answers: string[]): {loop: PlannerLoop; prompts: string[]} {
+        const prompts: string[] = [];
+        const planner = {
+            execute: async ({messages}: {messages: {role: string; content: string}[]}) => {
+                prompts.push(messages.map((message) => message.content).join('\n'));
+                return {content: answers[prompts.length - 1] ?? answers.at(-1)!};
+            },
+        };
+        const submitter = {submit: async () => ({status: 'accepted' as const, proposedSeq: 1, frozenSeq: 2, vertexIds: new Map<string, string>()})};
+        return {loop: new PlannerLoop(engine, planner as never, submitter as never, {projector_version: 'p@v1', harness_state_version: 'h@v1'}), prompts};
+    }
+
+    const toolView = {document: {tools: []}, identity: {tool_view_ref: 'ref', tool_view_digest: toolViewDigest}} as never;
+
+    it('records the stall, and the ladder finds it although nothing failed', async () => {
+        const runId = await engine.createRun();
+        const plannerId = randomUUID();
+        await engine.appendEvents(runId, [
+            {event_type: 'run/start', payload: {}},
+            plannerVertex(plannerId),
+            {event_type: 'vertex/started', vertex_id: plannerId, payload: {attempt: 1}},
+            {event_type: 'vertex/succeeded', vertex_id: plannerId, payload: {attempts: 1, result: {}}},
+        ]);
+
+        const {loop} = loopReturning('this is not a proposal');
+        const turn = await loop.advance({runId, plannerVertexId: plannerId, taskInput: {}, workflowType: 'demo', goal: 'go'}, toolView);
+        expect(turn.status).toBe('unreadable');
+
+        const events = await engine.readStream(runId);
+        // Nothing failed. The planner succeeded, the model answered, and the run is stuck anyway.
+        expect(unrecoveredFailures(events)).toEqual([]);
+        expect(stalledPlanners(events)).toEqual([plannerId]);
+        expect(outstanding(events)).toEqual([plannerId]);
+    });
+
+    it('asks the same planner again, telling it what was wrong with the last answer', async () => {
+        const runId = await engine.createRun();
+        const plannerId = randomUUID();
+        await engine.appendEvents(runId, [
+            {event_type: 'run/start', payload: {}},
+            plannerVertex(plannerId),
+            {event_type: 'vertex/started', vertex_id: plannerId, payload: {attempt: 1}},
+            {event_type: 'vertex/succeeded', vertex_id: plannerId, payload: {attempts: 1, result: {}}},
+        ]);
+        const {loop, prompts} = loopReturning('not a proposal', '{"vertices":[{"id":"next","kind":"planner"}]}');
+        await loop.advance({runId, plannerVertexId: plannerId, taskInput: {}, workflowType: 'demo', goal: 'go'}, toolView);
+
+        const recovery = new RecoveryLoop(engine, loop, POLICY);
+        const outcome = await recovery.recoverOne({runId, taskInput: {}, workflowType: 'demo', goalFor: () => 'go'}, toolView);
+
+        expect(outcome.status).toBe('replanned');
+        if (outcome.status !== 'replanned') return;
+        // Itself, at distance zero, discarding nothing: there is nothing below it to throw away.
+        expect(outcome.decision.selected).toBe(plannerId);
+        expect(outcome.decision.level).toBe('L1');
+        expect(outcome.decision.shadowed).toEqual([]);
+        expect(outcome.turn.status).toBe('frozen');
+        // And the second prompt carried the refusal, so the model is not asked to guess twice.
+        expect(prompts[1]).toContain('unreadable_answer');
+        expect(prompts[1]).toContain('A previous attempt from here failed');
+
+        // The stall is answered: the loop must not decide it again on the next pass.
+        expect(stalledPlanners(await engine.readStream(runId))).toEqual([]);
     });
 });

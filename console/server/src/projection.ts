@@ -1,4 +1,4 @@
-import {EVENT_TYPES, type StoredEvent} from '../../../engine/src/events.js';
+import {EVENT_TYPES, type EventType, type StoredEvent} from '../../../engine/src/events.js';
 import {rendersInPlannerPrompt} from '../../../engine/src/projection.js';
 import type {EffectClass} from '../../../engine/src/check-rules.js';
 import {
@@ -123,7 +123,10 @@ class FoldState {
         this.lastSeq = Math.max(this.lastSeq, event.run_seq);
         if (!this.model.run_id) this.model.run_id = event.run_id;
 
-        switch (event.event_type) {
+        // Narrowed once, so the default branch below can be checked for exhaustiveness: the wire
+        // type is `EventType | string`, and a `string` default can never be `never`.
+        const known = event.event_type as EventType;
+        switch (known) {
             case 'run/start':
                 this.model.started_at = event.created_at;
                 return;
@@ -157,6 +160,9 @@ class FoldState {
             case 'replan/boundary':
                 this.boundary(event);
                 return;
+            case 'subgraph/unreadable':
+                this.unreadable(event);
+                return;
             case 'txn/scope':
                 this.scopeState(event);
                 return;
@@ -177,7 +183,11 @@ class FoldState {
             case 'run/end':
                 return;
             default:
-                return;
+                // Exhaustive over the vocabulary, so adding an event type to the IDL breaks this
+                // build rather than being silently dropped by a reader that looked like it was
+                // handling it. `event_type` widens to `string` on the wire, so the narrowing cast
+                // above is what lets the compiler check the cases at all.
+                return assertHandled(known);
         }
     }
 
@@ -275,6 +285,7 @@ class FoldState {
             bracket: null,
             router_outcome: role === 'router' ? {kind: 'pending'} : null,
             cost: null,
+            stall: null,
             in_planner_prompt: rendersInPlannerPrompt({role}),
         };
         this.vertices.set(vertex.vertex_id, vertex);
@@ -349,6 +360,15 @@ class FoldState {
     }
 
     /* ---------------------------------------------------------------- shadowing and replans */
+
+    /** A planner answered, and the engine could not read the answer as a proposal. */
+    private unreadable(event: StoredEvent): void {
+        const payload = event.payload as {planner_vertex_id?: string; reason?: string; answer_digest?: string};
+        const vertex = payload.planner_vertex_id ? this.vertices.get(payload.planner_vertex_id) : undefined;
+        if (!vertex) return;
+        vertex.stall = {reason: payload.reason ?? 'the answer was not a proposal', answer_digest: payload.answer_digest ?? '', at_run_seq: event.run_seq};
+        this.touch(vertex.vertex_id);
+    }
 
     private shadow(event: StoredEvent): void {
         const payload = event.payload as {vertex_ids?: unknown; vertex_seqs?: unknown; reason?: string; boundary_seq?: number; boundary_vertex_id?: string};
@@ -552,3 +572,8 @@ function elapsed(startedAt: string | null, completedAt: string): number | null {
 }
 
 export type {ConsoleBracket};
+
+/** Fails the build when the vocabulary grows and this fold was not told about it. */
+function assertHandled(event: never): void {
+    void event;
+}

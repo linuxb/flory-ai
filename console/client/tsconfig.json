@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "lib": ["ES2022", "DOM", "DOM.Iterable"],
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "jsx": "react-jsx",
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "forceConsistentCasingInFileNames": true,
+        // Forces every engine import to be written `import type`, which esbuild erases outright.
+        // Vite therefore never resolves an engine specifier: the server's `./model.js` does not
+        // exist on disk, and a value import of it would fail the bundle. The compiler enforces the
+        // rule rather than review.
+        "verbatimModuleSyntax": true,
+        "isolatedModules": true,
+        "skipLibCheck": true,
+        "noEmit": true,
+        "paths": {"@server/*": ["../server/src/*"]}
+    },
+    "include": ["src"]
+}

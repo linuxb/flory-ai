@@ -1,0 +1,79 @@
+/*
+ * Palette and surface tokens, lifted from doc/diagram/router-admission.html so the console reads
+ * as part of the same system.
+ *
+ * Status colours are declared once, here, and never inside a theme block. That is what makes
+ * theme-invariance structural rather than conventional: a reviewer checks one thing — that no
+ * `--status-` name appears under a `@media (prefers-color-scheme)` or a `[data-theme]` selector.
+ * Red must mean the same thing in both themes, and only ink, background and fill alpha move.
+ */
+:root {
+    --green-fill: #b2f2bb;
+    --green-stroke: #2f9e44;
+    --red-fill: #ffc9c9;
+    --red-stroke: #e03131;
+    --blue-fill: #a5d8ff;
+    --blue-stroke: #1971c2;
+    --violet-fill: #d0bfff;
+    --violet-stroke: #6741d9;
+    --orange-fill: #ffd8a8;
+    --orange-stroke: #e8590c;
+    --teal-fill: #96f2d7;
+    --teal-stroke: #0ca678;
+    --grey-fill: #dee2e6;
+    --grey-stroke: #868e96;
+
+    --status-succeeded: var(--green-stroke);
+    --status-succeeded-fill: var(--green-fill);
+    --status-started: var(--blue-stroke);
+    --status-started-fill: var(--blue-fill);
+    --status-failed: var(--red-stroke);
+    --status-failed-fill: var(--red-fill);
+    --status-created: var(--grey-stroke);
+    --status-created-fill: var(--grey-fill);
+    --status-retried: var(--orange-stroke);
+    --status-retried-fill: var(--orange-fill);
+    --accent-router: var(--teal-stroke);
+    --accent-pivot: var(--violet-stroke);
+    --accent-counterfactual: var(--orange-stroke);
+
+    --bg: #ffffff;
+    --surface: #f8f9fa;
+    --surface-raised: #ffffff;
+    --ink: #1e1e1e;
+    --muted: #868e96;
+    --line: #dee2e6;
+    --node-fill-alpha: 0.22;
+    --shadow: 0 1px 3px rgb(0 0 0 / 12%);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    /*
+     * A system stack rather than the CDN webfont the diagrams use. An operator console may be
+     * opened on an isolated network during exactly the incident it exists for, and a font fetch
+     * that hangs delays first paint of the thing they are trying to read.
+     */
+    --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+        --bg: #16181c;
+        --surface: #1e2126;
+        --surface-raised: #242830;
+        --ink: #e9ecef;
+        --muted: #adb5bd;
+        --line: #343a40;
+        --node-fill-alpha: 0.3;
+        --shadow: 0 2px 8px rgb(0 0 0 / 50%);
+    }
+}
+
+:root[data-theme='dark'] {
+    --bg: #16181c;
+    --surface: #1e2126;
+    --surface-raised: #242830;
+    --ink: #e9ecef;
+    --muted: #adb5bd;
+    --line: #343a40;
+    --node-fill-alpha: 0.3;
+    --shadow: 0 2px 8px rgb(0 0 0 / 50%);
+}

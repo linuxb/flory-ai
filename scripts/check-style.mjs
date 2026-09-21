@@ -4,9 +4,12 @@ import {join} from 'node:path';
 const MAX_LINE_LENGTH = 200;
 const SOURCE_DIRECTORIES = ['console', 'db', 'engine', 'scripts', 'sdk', 'test'];
 const STYLE_FILES = ['idl/event-log.schema.json'];
-const TYPE_SCRIPT_EXTENSIONS = new Set(['.cts', '.mts', '.ts', '.mjs']);
+const TYPE_SCRIPT_EXTENSIONS = new Set(['.cts', '.mts', '.ts', '.tsx', '.mjs']);
 // Generated protobuf stubs are exempt: protoc-gen-es owns their layout.
 const EXCLUDED_DIRECTORIES = new Set(['sdk/typescript/gen', 'sdk/typescript/gen-health']);
+// Installed and built output, wherever it sits. The console client keeps its own install, so a
+// source directory can now contain one of these at any depth.
+const EXCLUDED_NAMES = new Set(['node_modules', 'dist']);
 
 async function listSourceFiles(directory) {
     const entries = await readdir(directory, {withFileTypes: true});
@@ -14,7 +17,7 @@ async function listSourceFiles(directory) {
         entries.map((entry) => {
             const path = join(directory, entry.name);
             if (entry.isDirectory()) {
-                return EXCLUDED_DIRECTORIES.has(path) ? [] : listSourceFiles(path);
+                return EXCLUDED_DIRECTORIES.has(path) || EXCLUDED_NAMES.has(entry.name) ? [] : listSourceFiles(path);
             }
             return TYPE_SCRIPT_EXTENSIONS.has(path.slice(path.lastIndexOf('.'))) ? [path] : [];
         }),

@@ -2,3 +2,7 @@ node_modules
 # Generated protobuf stubs: shape is owned by protoc-gen-es, not by our style rules.
 sdk/typescript/gen
 sdk/typescript/gen-health
+
+# Built client bundle: owned by Vite, not by our style rules.
+console/client/dist
+console/client/node_modules

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="color-scheme" content="light dark" />
+        <title>Flory console</title>
+        <script>
+            /*
+             * Applied before first paint, so an explicit override does not flash the other theme
+             * on its way in. `auto` deliberately sets nothing and lets the media query decide.
+             */
+            try {
+                var choice = localStorage.getItem('flory.console.theme');
+                if (choice === 'light' || choice === 'dark') document.documentElement.setAttribute('data-theme', choice);
+            } catch (error) {
+                /* a console that cannot read storage still renders */
+            }
+        </script>
+    </head>
+    <body>
+        <div id="root"></div>
+        <script type="module" src="/src/main.tsx"></script>
+    </body>
+</html>

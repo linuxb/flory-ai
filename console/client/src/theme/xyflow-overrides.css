@@ -1,0 +1,55 @@
+/*
+ * React Flow's own variables, pointed at the repository's tokens.
+ *
+ * The library ships a light palette and a dark one selected by a `colorMode` prop. Both are
+ * bypassed: this console's theme is one set of CSS variables, and having the canvas follow a
+ * second mechanism is how a background ends up light while every card around it is dark.
+ */
+.react-flow {
+    --xy-background-color: var(--bg);
+    --xy-edge-stroke: var(--line);
+    --xy-edge-stroke-selected: var(--ink);
+    --xy-attribution-background-color: transparent;
+    --minimap-mask: color-mix(in srgb, var(--bg) 75%, transparent);
+}
+
+.react-flow__node {
+    font-family: var(--sans);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+/* The card draws its own selection ring, so the library's outline would double it. */
+.react-flow__node.selected,
+.react-flow__node:focus,
+.react-flow__node:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
+.react-flow__handle {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.react-flow__edge-path {
+    stroke-width: 1.5;
+}
+
+.react-flow__edge.animated .react-flow__edge-path {
+    stroke: var(--status-started);
+}
+
+.react-flow__minimap,
+.react-flow__attribution {
+    background: var(--surface);
+}
+
+.react-flow__minimap {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+}
+
+.react-flow__attribution a {
+    color: var(--muted);
+}

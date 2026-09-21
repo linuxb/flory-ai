@@ -12,7 +12,7 @@ PostgreSQL has four development roles. `flory` owns migrations. `engine_role` cr
 
 Storage has two planes, because a run and a business entity are different lifetimes ([01 §3.1](./01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences)).
 
-`run(run_id, next_seq, seed_floor, created_at)` allocates `run_seq`; `seed_floor` is non-null only for fork runs, where it equals `eval_up_to_seq` and pins own-event numbering above it. `stream(stream_id, next_seq, created_at)` allocates `stream_seq` for one aggregate root.
+`run(run_id, next_seq, seed_floor, created_at)` allocates `run_seq`; `seed_floor` is non-null only for a counterfactual, where it equals `eval_up_to_seq` and pins own-event numbering above it. `stream(stream_id, next_seq, created_at)` allocates `stream_seq` for one aggregate root.
 
 `run_event_log` is the orchestration plane: hash partitioned by `run_id`, primary key `(run_id, run_seq)`, with a non-foldable generated `global_seq` for operations only. Each row contains the event type, causal and scope columns, `pin_version`, explicit `ignorable`, an `inherited` provenance marker (true only on read-only copies from a fork's source run), JSON payload, and creation time.
 

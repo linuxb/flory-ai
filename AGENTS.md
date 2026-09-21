@@ -47,7 +47,7 @@ The linked design documents are authoritative. Active ADRs are proposals only; t
 | `gatewayd` (Go 1.25) | `gatewayd/` | [Doc 09](doc/design/09-tool-registry-gateway.md) |
 | Tool-service SDKs and shared IDLs | `gatewayd/sdk/`, `sdk/typescript/`, `idl/` | [Doc 09 §3](doc/design/09-tool-registry-gateway.md#3-registration-and-the-tool-view-contract), [Doc 08 §1](doc/design/08-database-schema.md#1-executable-boundary) |
 | PostgreSQL schema and migrations | `db/` | [Doc 08](doc/design/08-database-schema.md) |
-| Console | not yet implemented | [Doc 11](doc/design/11-console-and-observability.md) |
+| Console | `console/server` (projection, SSE stream, read-only HTTP surface), `console/client` (React canvas and inspector) | [Doc 11](doc/design/11-console-and-observability.md) |
 
 Do not add a third engine language without a new ADR. Components must use their documented public boundaries rather than importing or calling another component's internals. Shared contract changes start in `idl/`; regenerate every consumer and update required conformance fixtures in the same change.
 

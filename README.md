@@ -123,14 +123,21 @@ running the Coordinator integration tests:
 FLORY_INTEGRATION=1 ENGINE_DATABASE_URL=postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory COORDINATOR_DATABASE_URL=postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory go -C coordinator test ./...
 ```
 
-Both integration suites claim from the same work queue — which is global by design, because one
-worker pool serves every run — and both leave unfinished work behind. Each therefore expects an
-empty database and fails after the other has run, or after a second consecutive run of itself. CI
-never notices, because every job gets a fresh container. On a persistent local server, run
-`npm run db:refresh` before each integration suite to drop and re-migrate the Flory schema:
+**`npm run verify` uses a database of its own.** On first run it provisions `<your database>_test`
+with the same bootstrap and migrations, and it empties the work queue before every run. Nothing it
+does touches the development database, and nothing running against that database disturbs it — so
+a Coordinator or a demo left open in another terminal is no longer a reason for a test to fail.
+Point `FLORY_TEST_DATABASE_URL` somewhere else to override it.
+
+That isolation matters because `work_queue` is **global by design**: one worker pool serves every
+run, so any process claiming from it is a competing worker. A live Coordinator would claim the very
+vertex a leasing test had just enqueued, and the test would fail on an assertion about leasing
+rather than about whatever had actually broken.
+
+The Go suites still share the development database and still leave unfinished work behind, so they
+expect an empty one. Refresh before each:
 
 ```sh
-npm run db:refresh && npm run verify
 npm run db:refresh && go -C coordinator test ./...   # with the two URLs exported as above
 ```
 

@@ -36,14 +36,10 @@ const POLICY: RecoveryPolicy = {...DEFAULT_RECOVERY_POLICY, pricing: PRICING};
 const created: string[] = [];
 
 afterAll(async () => {
-    // The queue is shared across every run in this database, and the orchestrator claims from it
-    // globally rather than per run. A leased row left here would be claimed by nothing and skipped
-    // by everything for the life of the database, and a ready one would be picked up by the next
-    // demo as a stray. Both are noise a later reader would spend real time on.
-    //
-    // Deleted by primary key, not by `run_id`, which has no index: the scan that costs makes a
-    // concurrent `claim_ready_work` in another suite come back empty, and that suite then fails
-    // on an assertion about exclusivity that has nothing to do with this one.
+    // The queue is global within a database, and two of these tests leave a row in it on purpose.
+    // The global setup empties it before each run, so this is about the files that come after this
+    // one in the same run: a ready row they did not create is a row their assertions can claim.
+    // By primary key rather than by `run_id`, which has no index.
     await owner.query('DELETE FROM work_queue WHERE vertex_id = ANY($1::uuid[])', [created]);
     await client.end();
     await owner.end();

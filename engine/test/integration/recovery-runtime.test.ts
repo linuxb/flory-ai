@@ -31,7 +31,19 @@ const toolViewDigest = `sha256:${'0'.repeat(64)}`;
 const PRICING: LlmPricing = {currency: 'CNY', cache_hit_input_per_million: 1, cache_miss_input_per_million: 4, output_per_million: 16, reference: 'test'};
 const POLICY: RecoveryPolicy = {...DEFAULT_RECOVERY_POLICY, pricing: PRICING};
 
+/** Queue rows this suite created and, in two cases, deliberately left behind. */
+const created: string[] = [];
+
 afterAll(async () => {
+    // The queue is shared across every run in this database, and the orchestrator claims from it
+    // globally rather than per run. A leased row left here would be claimed by nothing and skipped
+    // by everything for the life of the database, and a ready one would be picked up by the next
+    // demo as a stray. Both are noise a later reader would spend real time on.
+    //
+    // Deleted by primary key, not by `run_id`, which has no index: the scan that costs makes a
+    // concurrent `claim_ready_work` in another suite come back empty, and that suite then fails
+    // on an assertion about exclusivity that has nothing to do with this one.
+    await owner.query('DELETE FROM work_queue WHERE vertex_id = ANY($1::uuid[])', [created]);
     await client.end();
     await owner.end();
     await engine.close();
@@ -69,6 +81,7 @@ beforeEach(async () => {
     planner = randomUUID();
     failing = randomUUID();
     sibling = randomUUID();
+    created.push(failing, sibling);
     await engine.appendEvents(runId, [
         {event_type: 'run/start', payload: {}},
         plannerVertex(planner),

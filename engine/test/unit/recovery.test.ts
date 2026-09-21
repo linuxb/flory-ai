@@ -7,7 +7,7 @@ import {
     openBracketScopes,
     replanEvents,
     replanHistory,
-    routerEmitted,
+    ruleAuthored,
     selectBoundary,
     shadowSet,
     unrecoveredFailures,
@@ -60,13 +60,28 @@ function event(event_type: string, options: Partial<StoredEvent> = {}): StoredEv
     };
 }
 
-/** A vertex that was created, ran and succeeded — the ordinary shape of completed work. */
-function completed(vertexId: string, role: string, parents: string[], extra: Partial<StoredEvent> = {}): StoredEvent[] {
-    return [
-        event('vertex/created', {vertex_id: vertexId, parent_refs: parents, payload: {role, ...(role === 'tool' ? {tool: 'mock.tool'} : {})}, ...extra}),
-        event('vertex/started', {vertex_id: vertexId, payload: {attempt: 1}}),
-        event('vertex/succeeded', {vertex_id: vertexId, payload: {attempts: 1, result: {}}}),
-    ];
+/**
+ * One freeze, and the vertices it created.
+ *
+ * The proposal is not decoration: who authored a vertex is read from the `source` its proposal
+ * recorded, so a fixture that skipped the proposal would be testing a different engine.
+ */
+function frozen(source: 'submitted' | 'router', ...created: StoredEvent[]): StoredEvent[] {
+    const proposed = event('subgraph/proposed', {payload: {source}});
+    return [proposed, event('subgraph/frozen', {payload: {proposed_seq: proposed.run_seq, vertices: []}}), ...created];
+}
+
+function vertex(vertexId: string, role: string, parents: string[], tool = 'mock.tool'): StoredEvent {
+    return event('vertex/created', {vertex_id: vertexId, parent_refs: parents, payload: {role, ...(role === 'tool' ? {tool} : {})}});
+}
+
+/** A vertex that ran and succeeded. */
+function ran(vertexId: string): StoredEvent[] {
+    return [event('vertex/started', {vertex_id: vertexId, payload: {attempt: 1}}), event('vertex/succeeded', {vertex_id: vertexId, payload: {attempts: 1, result: {}}})];
+}
+
+function failed(vertexId: string, error = 'refused'): StoredEvent {
+    return event('vertex/failed', {vertex_id: vertexId, payload: {attempts: 3, outcome: 'permanent-failure', error}});
 }
 
 /**
@@ -79,25 +94,31 @@ function baseRun(): StoredEvent[] {
     sequence = 0;
     return [
         event('run/start', {payload: {}}),
-        ...completed(P1, 'planner', []),
-        ...completed(P2, 'planner', [P1]),
-        event('vertex/created', {vertex_id: TOOL, parent_refs: [P2], payload: {role: 'tool', tool: 'supplier.order'}}),
-        event('vertex/created', {vertex_id: SIBLING, parent_refs: [P2], payload: {role: 'tool', tool: 'market.demand'}}),
-        event('vertex/created', {vertex_id: GRANDCHILD, parent_refs: [SIBLING], payload: {role: 'tool', tool: 'inventory.check'}}),
+        ...frozen('submitted', vertex(P1, 'planner', [])),
+        ...ran(P1),
+        ...frozen('submitted', vertex(P2, 'planner', [P1])),
+        ...ran(P2),
+        ...frozen('submitted', vertex(TOOL, 'tool', [P2], 'first.tool'), vertex(SIBLING, 'tool', [P2], 'second.tool'), vertex(GRANDCHILD, 'tool', [SIBLING], 'third.tool')),
         event('vertex/started', {vertex_id: TOOL, payload: {attempt: 3}}),
-        event('vertex/failed', {vertex_id: TOOL, payload: {attempts: 3, outcome: 'permanent-failure', error: 'supplier refused the order'}}),
+        failed(TOOL, 'the counterparty refused'),
     ];
 }
 
-/** The same failure, but reached through a router's matched branch. */
+/** The same failure, but in a branch a rule authored. */
 function routedRun(): StoredEvent[] {
     sequence = 0;
     return [
         event('run/start', {payload: {}}),
-        ...completed(P1, 'planner', []),
-        ...completed(ROUTER, 'router', [P1]),
-        event('vertex/created', {vertex_id: BRANCH, parent_refs: [ROUTER], payload: {role: 'tool', tool: 'supplier.order'}}),
-        event('vertex/failed', {vertex_id: BRANCH, payload: {attempts: 3, outcome: 'permanent-failure', error: 'refused'}}),
+        ...frozen('submitted', vertex(P1, 'planner', [])),
+        ...ran(P1),
+        ...frozen('submitted', vertex(ROUTER, 'router', [P1])),
+        event('vertex/started', {vertex_id: ROUTER, payload: {attempt: 1}}),
+        // The router's own proposal. This is the one event that makes the branch rule-authored,
+        // and reading it is the difference between refusing to replan a rule's work and refusing
+        // to replan everything downstream of any router.
+        ...frozen('router', vertex(BRANCH, 'tool', [ROUTER], 'first.tool')),
+        event('vertex/succeeded', {vertex_id: ROUTER, payload: {attempts: 1, result: {}, matched_condition: 'always'}}),
+        failed(BRANCH),
     ];
 }
 
@@ -109,6 +130,14 @@ describe('reading the log for recovery', () => {
         // the loop replans the same vertex forever without ever reaching a counter.
         const answered = [...events, event('subgraph/shadowed', {payload: {vertex_ids: [TOOL], reason: 'replanned'}})];
         expect(unrecoveredFailures(answered)).toEqual([]);
+    });
+
+    it('treats an escalation as an answer, so it is decided once', () => {
+        // An escalation discards nothing, so no shadow will ever answer it. A live run appended
+        // eight identical L4 boundaries because the driver kept re-deciding the same failure on
+        // every pass — the ladder had already said this needs a human, and said it again.
+        const events = [...routedRun(), event('replan/boundary', {payload: {level: 'L4', reason: 'a rule authored it', failed_vertex_id: BRANCH, candidates: [], selected: null}})];
+        expect(unrecoveredFailures(events)).toEqual([]);
     });
 
     it('does not treat a failure that later succeeded as outstanding', () => {
@@ -211,6 +240,33 @@ describe('choosing a replan boundary', () => {
         expect(replanHistory(events).episode).toBe(2);
     });
 
+    it('does not count work a later replan discards as the episode ending', () => {
+        // The reading a live run falsified. Each replan's subtree produced a passing tool call
+        // before failing again, so a counter that reset on any success never fired and the run
+        // replanned indefinitely. An episode ends when a replan *worked* — when some frozen
+        // subgraph had every vertex in it succeed — and a partial success is not that.
+        sequence = 0;
+        const partial = id(10);
+        const stillFailing = id(11);
+        const events = [
+            event('run/start', {payload: {}}),
+            ...frozen('submitted', vertex(P1, 'planner', [])),
+            ...ran(P1),
+            ...frozen('submitted', vertex(TOOL, 'tool', [P1], 'first.tool')),
+            failed(TOOL),
+            event('replan/boundary', {vertex_id: P1, payload: {level: 'L1', reason: 'a', failed_vertex_id: TOOL, candidates: [], selected: P1}}),
+            event('subgraph/shadowed', {payload: {vertex_ids: [TOOL], reason: 'a'}}),
+            // The replanned subtree: one vertex passes, the other does not. The freeze is not
+            // resolved, so the episode is still open.
+            ...frozen('submitted', vertex(partial, 'tool', [P1], 'second.tool'), vertex(stillFailing, 'tool', [P1], 'third.tool')),
+            ...ran(partial),
+            failed(stillFailing),
+            event('replan/boundary', {vertex_id: P1, payload: {level: 'L1', reason: 'b', failed_vertex_id: stillFailing, candidates: [], selected: P1}}),
+        ];
+        expect(replanHistory(events).episode).toBe(2);
+        expect(selectBoundary(events, stillFailing, POLICY).level).toBe('L3');
+    });
+
     it('rejects a candidate the remaining budget cannot pay for', () => {
         const decision = selectBoundary(baseRun(), TOOL, {...POLICY, budgetRemaining: 0});
         expect(decision.candidates.every((entry) => entry.rejected === 'budget_exceeded')).toBe(true);
@@ -220,8 +276,36 @@ describe('choosing a replan boundary', () => {
 
 describe('work a rule authored', () => {
     it('is recognised however deep the failure sits under the router', () => {
-        expect(routerEmitted(routedRun(), BRANCH)).toBe(true);
-        expect(routerEmitted(baseRun(), TOOL)).toBe(false);
+        expect(ruleAuthored(routedRun(), BRANCH)).toBe(true);
+        expect(ruleAuthored(baseRun(), TOOL)).toBe(false);
+    });
+
+    it('does not extend to what a planner inside that branch went on to propose', () => {
+        // The case a live run found, and the reason authorship is read rather than inferred. A
+        // rule may emit a *planner*; everything that planner proposes is a model's work and is
+        // perfectly replannable, by that planner. Walking ancestry cannot tell the two apart,
+        // because the router is an ancestor of both, and the run stalled at L4 on work no rule
+        // had ever seen.
+        const routedPlanner = id(8);
+        const itsWork = id(9);
+        sequence = 0;
+        const events = [
+            event('run/start', {payload: {}}),
+            ...frozen('submitted', vertex(P1, 'planner', [])),
+            ...ran(P1),
+            ...frozen('submitted', vertex(ROUTER, 'router', [P1])),
+            event('vertex/started', {vertex_id: ROUTER, payload: {attempt: 1}}),
+            ...frozen('router', vertex(routedPlanner, 'planner', [ROUTER])),
+            event('vertex/succeeded', {vertex_id: ROUTER, payload: {attempts: 1, result: {}, matched_condition: 'always'}}),
+            ...ran(routedPlanner),
+            ...frozen('submitted', vertex(itsWork, 'tool', [routedPlanner], 'first.tool')),
+            failed(itsWork),
+        ];
+        expect(ruleAuthored(events, routedPlanner)).toBe(true);
+        expect(ruleAuthored(events, itsWork)).toBe(false);
+        const decision = selectBoundary(events, itsWork, POLICY);
+        expect(decision.level).toBe('L1');
+        expect(decision.selected).toBe(routedPlanner);
     });
 
     it('never reaches a planner, whatever the boundary would have been', () => {
@@ -232,7 +316,7 @@ describe('work a rule authored', () => {
         expect(decision.level).toBe('L4');
         expect(decision.selected).toBeNull();
         expect(decision.candidates).toEqual([]);
-        expect(decision.reason).toContain('router');
+        expect(decision.reason).toContain('a rule authored this work');
     });
 });
 
@@ -261,7 +345,7 @@ describe('the events one replan appends', () => {
     it('carries evidence a planner can act on without being shown the discarded work', () => {
         const events = baseRun();
         const evidence = failureEvidence(events, TOOL, shadowSet(events, P2));
-        expect(evidence).toMatchObject({failed_vertex_id: TOOL, tool: 'supplier.order', error_class: 'permanent-failure', attempts: 3, discarded_vertices: 3});
+        expect(evidence).toMatchObject({failed_vertex_id: TOOL, tool: 'first.tool', error_class: 'permanent-failure', attempts: 3, discarded_vertices: 3});
     });
 
     it('does not discard the same vertex twice', () => {

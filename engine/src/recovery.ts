@@ -119,24 +119,27 @@ export function openBracketScopes(events: readonly StoredEvent[]): Set<string> {
 }
 
 /**
- * Whether this vertex was emitted by a deterministic router's matched branch.
+ * Whether a rule authored this vertex, rather than a model.
  *
- * Such work has no author with the authority to propose a different approach: it came from an
- * audited business rule, and handing its failure to a planner invites exactly the action the rule
- * exists to prevent (03 §2.5). The check walks ancestry rather than reading a flag because the
- * rule governs the whole branch, not only the vertex the router attached directly.
+ * Rule-authored work has no author with standing to propose a replacement: it came from an audited
+ * business rule, and handing its failure to a planner invites exactly the action the rule exists to
+ * prevent (03 §2.5).
+ *
+ * Read from the proposal that froze the vertex, because the engine records who made it — the
+ * router executor stamps `source: 'router'` on its own proposals. Walking ancestry to find a
+ * router instead gets this wrong, and a live run showed how: a router's branch may contain a
+ * *planner*, and everything that planner goes on to propose is model-authored and perfectly
+ * replannable. Ancestry cannot tell those apart, because the router is an ancestor of both.
  */
-export function routerEmitted(events: readonly StoredEvent[], vertexId: string): boolean {
-    const created = new Map(events.filter((event) => event.event_type === 'vertex/created' && event.vertex_id).map((event) => [event.vertex_id!, event]));
-    const routers = new Set(events.filter((event) => event.event_type === 'vertex/created' && event.vertex_id && event.payload.role === 'router').map((event) => event.vertex_id!));
-    const seen = new Set<string>([vertexId]);
-    const frontier = [...(created.get(vertexId)?.parent_refs ?? [])];
-    while (frontier.length) {
-        const current = frontier.pop()!;
-        if (seen.has(current)) continue;
-        seen.add(current);
-        if (routers.has(current)) return true;
-        frontier.push(...(created.get(current)?.parent_refs ?? []));
+export function ruleAuthored(events: readonly StoredEvent[], vertexId: string): boolean {
+    const proposalSource = new Map<number, string>();
+    for (const event of events) {
+        if (event.event_type === 'subgraph/proposed') proposalSource.set(event.run_seq, (event.payload.source as string | undefined) ?? 'submitted');
+    }
+    let currentSource = 'submitted';
+    for (const event of events) {
+        if (event.event_type === 'subgraph/frozen') currentSource = proposalSource.get(event.payload.proposed_seq as number) ?? 'submitted';
+        if (event.event_type === 'vertex/created' && event.vertex_id === vertexId) return currentSource === 'router';
     }
     return false;
 }
@@ -167,26 +170,38 @@ export function ancestorPlanners(events: readonly StoredEvent[], vertexId: strin
 /**
  * How many replans this failure episode has already used, and how many each planner has taken.
  *
- * An episode is the run of replans since the last piece of work that actually succeeded and was not
- * later discarded: progress ends an episode, and its absence is what an episode is. The bound
- * exists because the per-planner counter alone cannot see two planners alternating — the S1 TLC
- * model found the lasso `P2 -> P1 -> P2`, and the cap is a protocol bound rather than a heuristic
- * (03 §3, 03 §6).
+ * An episode ends when a replan *worked*: when some frozen subgraph had every one of its vertices
+ * reach a success. Anything weaker does not terminate, and a live run showed why — the first
+ * reading counted any success as progress, and each replan's subtree did produce a passing tool
+ * call or two before failing again, so the counter reset every time and the run replanned
+ * indefinitely. Work that the next replan is about to discard is not progress.
+ *
+ * The bound exists because the per-planner counter alone cannot see two planners alternating — the
+ * S1 TLC model found the lasso `P2 -> P1 -> P2` — so it is a protocol bound rather than a
+ * heuristic (03 §3, 03 §6).
  */
 export function replanHistory(events: readonly StoredEvent[]): {episode: number; perPlanner: Map<string, number>} {
-    const shadowed = new Set<string>();
-    for (const event of events) {
-        if (event.event_type !== 'subgraph/shadowed') continue;
-        for (const id of (event.payload.vertex_ids as string[] | undefined) ?? []) shadowed.add(id);
+    const succeeded = new Set(events.filter((event) => event.event_type === 'vertex/succeeded' && event.vertex_id).map((event) => event.vertex_id!));
+
+    // The freeze each replan produced, and whether every vertex in it went on to succeed.
+    const resolvedAt: number[] = [];
+    for (const [index, event] of events.entries()) {
+        if (event.event_type !== 'subgraph/frozen') continue;
+        const created: string[] = [];
+        for (const later of events.slice(index + 1)) {
+            if (later.event_type !== 'vertex/created') break;
+            if (later.vertex_id) created.push(later.vertex_id);
+        }
+        if (created.length && created.every((id) => succeeded.has(id))) resolvedAt.push(event.run_seq);
     }
-    const progressAt = events.reduce((seq, event) => (event.event_type === 'vertex/succeeded' && event.vertex_id && !shadowed.has(event.vertex_id) ? event.run_seq : seq), 0);
+    const lastResolved = resolvedAt.at(-1) ?? 0;
 
     let episode = 0;
     const perPlanner = new Map<string, number>();
     for (const event of events) {
         if (event.event_type !== 'replan/boundary') continue;
         const selected = event.payload.selected as string | null | undefined;
-        if (event.run_seq > progressAt) episode += 1;
+        if (event.run_seq > lastResolved) episode += 1;
         if (selected) perPlanner.set(selected, (perPlanner.get(selected) ?? 0) + 1);
     }
     return {episode, perPlanner};
@@ -232,8 +247,8 @@ export function selectBoundary(events: readonly StoredEvent[], failedVertexId: s
 
     // Work a rule authored is not a plan, and no planner has standing to author a replacement for
     // it. The ladder skips L1 and L2 outright rather than finding them illegal (03 §2.5).
-    if (routerEmitted(events, failedVertexId)) {
-        return {...base, level: 'L4', reason: 'the failed work was emitted by a deterministic router branch, which no planner has the authority to replan'};
+    if (ruleAuthored(events, failedVertexId)) {
+        return {...base, level: 'L4', reason: 'a rule authored this work, and no planner has the authority to propose a replacement for it'};
     }
     if (episode >= policy.maxReplansPerEpisode) {
         return {...base, level: 'L3', reason: `this failure episode has already used ${episode} replans, the protocol bound`};
@@ -471,8 +486,17 @@ export class RecoveryLoop {
 export function unrecoveredFailures(events: readonly StoredEvent[]): string[] {
     const shadowed = new Set<string>();
     for (const event of events) {
-        if (event.event_type !== 'subgraph/shadowed') continue;
-        for (const id of (event.payload.vertex_ids as string[] | undefined) ?? []) shadowed.add(id);
+        if (event.event_type === 'subgraph/shadowed') {
+            for (const id of (event.payload.vertex_ids as string[] | undefined) ?? []) shadowed.add(id);
+        }
+        // An escalation discards nothing, so a shadow will never answer it. It is still an
+        // answer — the ladder has said this needs compensation or a human — and treating it as
+        // outstanding makes the driver re-decide it on every pass. A live run appended eight
+        // identical L4 boundaries before the loop ran out of other work to do.
+        if (event.event_type === 'replan/boundary' && event.payload.selected === null) {
+            const failed = event.payload.failed_vertex_id;
+            if (typeof failed === 'string') shadowed.add(failed);
+        }
     }
     const outcome = new Map<string, string>();
     for (const event of events) {

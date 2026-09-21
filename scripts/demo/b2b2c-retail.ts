@@ -21,11 +21,12 @@ import {Pool} from 'pg';
 import {coordinatorDatabaseUrl, engineDatabaseUrl} from '../../db/config.js';
 import {EventStore} from '../../engine/src/store.js';
 import {GatewayClient, type ResolvedToolView} from '../../engine/src/gateway-client.js';
-import {LlmClient, loadLlmConfig} from '../../engine/src/llm-client.js';
+import {LlmClient, loadLlmConfig, type LlmPricing} from '../../engine/src/llm-client.js';
 import {PlannerExecutor} from '../../engine/src/planner-executor.js';
 import {PlannerLoop} from '../../engine/src/planner-loop.js';
 import {ReadExecutor} from '../../engine/src/read-executor.js';
 import {RouterExecutor} from '../../engine/src/router-executor.js';
+import {DEFAULT_RECOVERY_POLICY, RecoveryLoop, unrecoveredFailures} from '../../engine/src/recovery.js';
 import {RuleTemplateStore, slotIdOf, type RuleTemplateDraft} from '../../engine/src/rule-template.js';
 import {WorkflowSubmitter} from '../../engine/src/submission.js';
 import {surface} from '../../engine/src/projection.js';
@@ -35,8 +36,26 @@ import type {WorkflowSubmission} from '../../engine/src/workflow.js';
 const GATEWAY_URL = process.env.GATEWAY_BASE_URL ?? 'http://127.0.0.1:8092';
 const SANDBOX_URL = process.env.SANDBOX_BASE_URL ?? 'http://127.0.0.1:8090';
 const WORKFLOW_TYPE = 'b2b2c-retail';
+/**
+ * A tool to make fail, so the run exercises the recovery ladder rather than only the happy path.
+ *
+ * The sandbox already owns a deterministic fault schedule keyed by `(seed, tool, attempt)`, so
+ * nothing new is injected here: the demo just schedules one and lets the ordinary machinery
+ * produce a real `vertex/failed`. Read-only tools only, deliberately — a failing side effect would
+ * need cancellation before a boundary is legal, and cancellation is the Coordinator's, not this
+ * ladder's.
+ */
+const FAULT_TOOL = process.env.FLORY_DEMO_FAULT?.trim();
 const CATEGORY = 'portable-espresso';
 const VERSIONS = {projector_version: 'projector@v1', harness_state_version: 'harness@v1'};
+/**
+ * Prices used to compare replan boundaries when the provider configuration carries none.
+ *
+ * Boundary selection compares candidates, so what matters is the ratio between input and output,
+ * not the absolute figures. They are named here rather than hidden in a default so a reader of the
+ * log knows the estimate came from the demo and not from a provider's price list.
+ */
+const DEMO_PRICING: LlmPricing = {currency: 'CNY', cache_hit_input_per_million: 1, cache_miss_input_per_million: 4, output_per_million: 16, reference: 'demo-price-list'};
 /** Bounds the run so a demo cannot spend an unbounded number of model calls. */
 const MAX_TURNS = 8;
 
@@ -176,6 +195,7 @@ async function main(): Promise<void> {
     const routers = new RouterExecutor(engine, templates, submitter);
     const reads = new ReadExecutor(engine, pool, gateway, 'demo-orchestrator');
     const loop = new PlannerLoop(engine, new PlannerExecutor(engine, new LlmClient(llmConfig)), submitter, VERSIONS);
+    const recovery = new RecoveryLoop(engine, loop, {...DEFAULT_RECOVERY_POLICY, pricing: llmConfig.pricing ?? DEMO_PRICING});
 
     try {
         const view = await gateway.resolveToolView();
@@ -183,7 +203,18 @@ async function main(): Promise<void> {
         line(`gateway     ${GATEWAY_URL}`);
         line(`tool view   ${view.identity.tool_view_digest} (${view.document.tools.length} tools)`);
         line(`model       ${llmConfig.provider} / ${llmConfig.model} via ${llmConfig.protocol}`);
-        await fetch(`${SANDBOX_URL}/test/reset`, {method: 'POST', headers: {'content-type': 'application/json'}, body: '{}'}).catch(() => undefined);
+        // One schedule covers every attempt of the named tool, so the failure is definitive
+        // rather than something L0 retries away. A transient one would never reach the ladder.
+        const faults = FAULT_TOOL ? Object.fromEntries([1, 2, 3, 4].map((attempt) => [`demo:${FAULT_TOOL}:${attempt}`, 'permanent-failure'])) : {};
+        await fetch(`${SANDBOX_URL}/test/reset`, {
+            method: 'POST',
+            headers: {'content-type': 'application/json'},
+            body: JSON.stringify({seed: 'demo', faults}),
+        }).catch(() => undefined);
+        if (FAULT_TOOL) {
+            line(`fault       ${FAULT_TOOL} fails every attempt`);
+            note('Scheduled in the sandbox, so the engine learns about it the same way it would learn about a real outage.');
+        }
 
         heading('Publish the deterministic policies');
         for (const draft of policies()) {
@@ -207,7 +238,7 @@ async function main(): Promise<void> {
         await reportRouters(engine, runId);
 
         for (let turn = 0; turn < MAX_TURNS; turn += 1) {
-            const progressed = await advance(engine, runId, reads, routers, loop, view);
+            const progressed = await advance(engine, runId, reads, routers, loop, recovery, view);
             // Nothing here is ready, but the Coordinator may still be driving a transaction in its
             // own process. Waiting for it is not politeness: its commit is what unblocks whatever
             // comes after, and reading the ledger before it settles reports a half-finished world.
@@ -230,7 +261,7 @@ async function main(): Promise<void> {
  * because a router may insert work a planner would otherwise be asked to invent. Planners last,
  * and one per pass, so every model call sees everything that happened before it.
  */
-async function advance(engine: EventStore, runId: string, reads: ReadExecutor, routers: RouterExecutor, loop: PlannerLoop, view: ResolvedToolView): Promise<boolean> {
+async function advance(engine: EventStore, runId: string, reads: ReadExecutor, routers: RouterExecutor, loop: PlannerLoop, recovery: RecoveryLoop, view: ResolvedToolView): Promise<boolean> {
     let progressed = false;
 
     const executed: string[] = [];
@@ -246,8 +277,37 @@ async function advance(engine: EventStore, runId: string, reads: ReadExecutor, r
         await reportSummaries(engine, runId);
     }
 
-    const events = await engine.readStream(runId);
-    const names = authorNames(events);
+    let events = await engine.readStream(runId);
+    let names = authorNames(events);
+
+    // Recovery comes before routing and planning, and the order is the point: a failure left
+    // unanswered would let the next planner turn build on top of work that is already dead.
+    if (unrecoveredFailures(events).length) {
+        const failed = unrecoveredFailures(events)[0]!;
+        heading(`Recovery: ${names.get(failed) ?? failed.slice(0, 8)} failed`);
+        const outcome = await recovery.recoverOne({runId, taskInput: TASK_INPUT, workflowType: WORKFLOW_TYPE, goalFor: (vertexId) => goalFor(names.get(vertexId) ?? '')}, view);
+        if (outcome.status !== 'idle') {
+            const {decision} = outcome;
+            line(`ladder      ${decision.level}  ${decision.reason}`);
+            for (const candidate of decision.candidates) {
+                const label = names.get(candidate.planner_vertex_id) ?? candidate.planner_vertex_id.slice(0, 8);
+                line(`  ${label.padEnd(12)} ${candidate.rejected ? `rejected: ${candidate.rejected}` : `${candidate.cost} ${candidate.currency}`}`);
+            }
+            note('The engine publishes the whole comparison, not only its answer: boundary selection is policy, so a harness checks it rather than recomputing it.');
+        }
+        if (outcome.status === 'replanned') {
+            line(`discarded   ${outcome.decision.shadowed.length} vertices, none deleted`);
+            line(`replanned   at ${names.get(outcome.decision.selected!) ?? outcome.decision.selected!.slice(0, 8)} (${outcome.turn.status})`);
+            note('Same run, same run_id. The shadowed subtree stays in the log as evidence, and the planner was told what failed rather than shown the work.');
+        } else if (outcome.status === 'escalated') {
+            line('escalated   no legal boundary; this run needs compensation or a human');
+            note('L3 and L4 act on the world rather than on the plan, so the ladder records the decision and stops here.');
+        }
+        events = await engine.readStream(runId);
+        names = authorNames(events);
+        progressed = true;
+    }
+
     for (const pending of readyNonTool(events, ['router'])) {
         heading(`Router ${names.get(pending.vertexId) ?? pending.vertexId} decides`);
         const evaluation = await routers.evaluate(runId, pending.vertexId);
@@ -283,9 +343,10 @@ async function advance(engine: EventStore, runId: string, reads: ReadExecutor, r
         } else {
             line(`unreadable answer: ${turn.reason}`);
             note(turn.content.slice(0, 300));
-            // The planner has already succeeded in the log, so this vertex will never be retried by
-            // this driver. Recovery is the ladder's job, and the ladder is not built yet.
-            note('no recovery ladder exists yet, so this run cannot continue past an unreadable answer');
+            // The planner call succeeded — the model answered — so nothing failed and the ladder
+            // has no trigger. The ladder recovers failed *work*; a planner that answered
+            // unreadably produced no work at all, which is a different hole and an open one.
+            note('the planner answered but the answer was not a proposal; the ladder recovers failed work, and nothing failed here');
         }
         progressed = true;
     }

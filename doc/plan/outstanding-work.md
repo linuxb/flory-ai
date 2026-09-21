@@ -10,6 +10,7 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
 | W6 | Console: observability projection, stream, detail endpoints, UI | [Doc 11](../design/11-console-and-observability.md) | Delivered, less two endpoints blocked on retention that does not exist |
+| W7 | Recovery ladder L3 and L4: compensation, suspension, and the prices they need | [Doc 03](../design/03-replan-and-recovery.md) | L0-L2 delivered; L3 and L4 are decided and not executed |
 
 W4 stays in the Engine apart from one table, so it does not contend with the remaining streams. W6 is delivered and reads the run plane directly; pointing domain read models at the business plane stays with W4.
 
@@ -45,11 +46,9 @@ The Coordinator runtime, its PostgreSQL projections, the orphan sweep, and the r
 - S12 passes as a runtime integration scenario, and its row in Doc 06 §6 no longer says pending.
 - TCC confirm after `txn/pivot-passed` stays safe under duplicate delivery.
 
-**Also waiting on the recovery loop.** Scenario S16 asserts that a failure inside a router-emitted
-branch never reaches a planner. Its oracle, `O2.no_deterministic_replan`, is delivered and has a
-negative control, but no engine code appends `replan/boundary` yet, so the assertion currently
-holds vacuously over a constructed failure rather than over a recovery loop exercising restraint.
-It becomes a real scenario the day recovery is implemented, and the oracle is what will hold it.
+**S16 is no longer vacuous.** It asserts that a failure inside a rule-authored branch never reaches
+a planner, and `engine/src/recovery.ts` now appends `replan/boundary` — so the restraint is
+exercised rather than assumed. The oracle `O2.no_deterministic_replan` holds it.
 
 ## W4 — Business-plane consumers
 
@@ -72,6 +71,44 @@ The two planes, their sequences, and the dual-allocation append path are built. 
 - No reader folds `global_seq`.
 
 **Exclusions.** Stream-identity assignment policy — which domain concepts deserve an aggregate root, and how `stream_id` is derived from `task_input` — belongs with the domain teams that own the reducers. Snapshot retention and compaction, and CDC consumers of `global_seq`, are deferred.
+
+## W7 — The rest of the recovery ladder
+
+L0, L1 and L2 are delivered in `engine/src/recovery.ts`: boundary selection with a published
+candidate set, the backtrack floor, the open-bracket condition, the per-planner and per-episode
+counters, and the rule that work a deterministic router authored never reaches a planner. What a
+replan produces is verified end to end against a real model.
+
+**L3 and L4 are decided and not executed.** When no boundary is legal the ladder appends a
+`replan/boundary` recording the level and its reason, and stops. Nothing compensates, nothing
+suspends, and the run's queued work is left where it is — which is correct as far as it goes,
+because an escalation hands the run over intact, and incorrect as an ending, because nobody is
+there to take it.
+
+**Increments.**
+
+1. Cancel-before-replan ([03 §2.4](../design/03-replan-and-recovery.md) rule 1). The Coordinator
+   cancels an open scope to its savepoint on the Engine's request, which turns the most common
+   `open_bracket` rejection into a legal boundary and makes L3 reachable from L1.
+2. Price the two terms the cost model cannot compute. `compensation_cost` and the tool half of
+   `rework_cost` have no source: no tool contract carries a call price or a cancel price. This is a
+   gateway contract change and a prerequisite for comparing boundaries that require compensation.
+3. L4 suspension as a state rather than a stop: a run that needs a human should be visibly
+   suspended in the console and in the run list, not merely idle.
+4. The planner-answered-unreadably hole ([03 §6](../design/03-replan-and-recovery.md#6-open-questions)).
+   A run stalls there today with nothing outstanding for the ladder to find.
+
+**Exit criteria.**
+
+- A pre-pivot failure inside an open bracket cancels the scope and then replans at a boundary that
+  was illegal before the cancellation, with the candidate set showing both states.
+- A post-pivot failure never cancels, and reaches L4 with its committed state and unconfirmed
+  tries preserved.
+- Scenario S2 and S2b assert the ordering, and S3c asserts the episode bound.
+
+**Exclusions.** How long forward closure may be attempted before a run is declared L4 stays open
+([03 §6](../design/03-replan-and-recovery.md#6-open-questions)); the harness asserts that L4 is
+eventually reached, not when.
 
 ## W6 — Console
 

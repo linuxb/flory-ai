@@ -153,6 +153,20 @@ STORAGE_EMULATOR_HOST=http://localhost:4443 GATEWAYD_BLOB_BACKEND=gcs npm run e2
 
 With the topology up, `GATEWAY_BASE_URL=http://127.0.0.1:8092 npx vitest run test/conformance/gateway-e2e.test.ts` exercises the live path, and `npm run record:tool-view` refreshes the recorded view the check-rule fixtures read. Then run the Coordinator with `go -C coordinator run ./cmd/coordinator`; its health endpoints default to `127.0.0.1:8091`. Production business adapters are intentionally not included.
 
+### Watching a run recover
+
+`npm run demo:retail` takes an optional fault, so the run hits a real failure and the recovery
+ladder has something to do:
+
+```bash
+FLORY_DEMO_FAULT=inventory.check npm run demo:retail
+```
+
+The named tool then fails every attempt, scheduled through the sandbox's own fault table, so the
+engine learns about it exactly as it would learn about an outage. The run shadows the discarded
+subtree, calls the chosen planner again with the failure as evidence, and continues in the same
+run — and the console draws what was abandoned beside what replaced it.
+
 ### Watching a run in the console
 
 The console is read-only and reads the log as `console_role`, which `npm run db:setup` creates. Start the API and the client:

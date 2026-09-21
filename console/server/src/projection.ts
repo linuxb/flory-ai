@@ -351,7 +351,7 @@ class FoldState {
     /* ---------------------------------------------------------------- shadowing and replans */
 
     private shadow(event: StoredEvent): void {
-        const payload = event.payload as {vertex_ids?: unknown; vertex_seqs?: unknown; reason?: string};
+        const payload = event.payload as {vertex_ids?: unknown; vertex_seqs?: unknown; reason?: string; boundary_seq?: number; boundary_vertex_id?: string};
         const named = Array.isArray(payload.vertex_ids) ? payload.vertex_ids.filter((id): id is string => typeof id === 'string') : [];
         const bySeq = Array.isArray(payload.vertex_seqs) ? payload.vertex_seqs.filter((seq): seq is number => typeof seq === 'number') : [];
         const hidden = new Set(named);
@@ -367,20 +367,40 @@ class FoldState {
         // Only the named ids, never their descendants — the same rule the surface applies. The two
         // projections must disagree about retention and agree about membership; a console that
         // shadowed more than the engine believes would be showing a graph that never existed.
-        const replan: ConsoleReplan = {at_run_seq: event.run_seq, vertex_ids: [...hidden], boundary_seq: null, boundary_vertex_id: null, reason: payload.reason ?? null};
-        this.model.replans.push(replan);
+        const replan = this.replanFor(event, payload.boundary_seq, payload.boundary_vertex_id);
+        replan.vertex_ids = [...new Set([...replan.vertex_ids, ...hidden])];
+        replan.reason = payload.reason ?? replan.reason;
         this.deltas.push({type: 'subgraph_shadowed', at_run_seq: event.run_seq, ordinal: this.ordinal++, spend: this.model.spend, replan});
     }
 
     private boundary(event: StoredEvent): void {
-        const payload = event.payload as {boundary_seq?: number; reason?: string};
-        const open = [...this.model.replans].reverse().find((replan) => replan.boundary_seq === null);
-        const replan = open ?? {at_run_seq: event.run_seq, vertex_ids: [], boundary_seq: null, boundary_vertex_id: null, reason: null};
-        replan.boundary_seq = payload.boundary_seq ?? event.run_seq;
-        replan.boundary_vertex_id = event.vertex_id;
+        const payload = event.payload as {boundary_seq?: number; boundary_vertex_id?: string; reason?: string};
+        const replan = this.replanFor(event, payload.boundary_seq, payload.boundary_vertex_id ?? event.vertex_id ?? undefined);
         replan.reason = payload.reason ?? replan.reason;
-        if (!open) this.model.replans.push(replan);
         this.deltas.push({type: 'subgraph_shadowed', at_run_seq: event.run_seq, ordinal: this.ordinal++, spend: this.model.spend, replan});
+    }
+
+    /**
+     * The replan record these two events belong to, created on whichever arrives first.
+     *
+     * Paired by the boundary they name rather than by arrival order. The engine appends
+     * `replan/boundary` before `subgraph/shadowed` (design document 03 section 2.3) so a log read
+     * forwards never shows work vanish before the reason for it — but a fold that relied on that
+     * order would be relying on the writer, and an escalation appends a boundary with no discard
+     * after it at all. Both events now carry the boundary, so neither has to be guessed at.
+     */
+    private replanFor(event: StoredEvent, boundarySeq: number | undefined, boundaryVertexId: string | undefined): ConsoleReplan {
+        const existing = boundarySeq === undefined ? undefined : this.model.replans.find((replan) => replan.boundary_seq === boundarySeq);
+        if (existing) return existing;
+        const replan: ConsoleReplan = {
+            at_run_seq: event.run_seq,
+            vertex_ids: [],
+            boundary_seq: boundarySeq ?? null,
+            boundary_vertex_id: boundaryVertexId ?? null,
+            reason: null,
+        };
+        this.model.replans.push(replan);
+        return replan;
     }
 
     /* ---------------------------------------------------------------- transactions */

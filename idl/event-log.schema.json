@@ -60,6 +60,8 @@
         {"if": {"properties": {"event_type": {"const": "rule_template/published"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/ruleTemplatePublishedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "subgraph/frozen"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphFrozenPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "subgraph/rejected"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphRejectedPayload"}}}},
+        {"if": {"properties": {"event_type": {"const": "subgraph/shadowed"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphShadowedPayload"}}}},
+        {"if": {"properties": {"event_type": {"const": "replan/boundary"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/replanBoundaryPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "vertex/created"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/vertexCreatedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "txn/scope"}}, "required": ["event_type"]}, "then": {"required": ["scope_id"], "properties": {"payload": {"$ref": "#/$defs/txnScopePayload"}}}},
         {
@@ -213,6 +215,60 @@
                         "additionalProperties": false
                     }
                 }
+            },
+            "additionalProperties": false
+        },
+        "subgraphShadowedPayload": {
+            "type": "object",
+            "required": ["vertex_ids", "reason"],
+            "properties": {
+                "vertex_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}},
+                "reason": {"type": "string", "minLength": 1},
+                "boundary_seq": {"type": "integer", "minimum": 1},
+                "boundary_vertex_id": {"type": "string", "format": "uuid"},
+                "failed_vertex_id": {"type": "string", "format": "uuid"}
+            },
+            "additionalProperties": false
+        },
+        "replanBoundaryPayload": {
+            "type": "object",
+            "required": ["level", "reason", "failed_vertex_id", "candidates"],
+            "properties": {
+                "level": {"enum": ["L1", "L2", "L3", "L4"]},
+                "reason": {"type": "string", "minLength": 1},
+                "failed_vertex_id": {"type": "string", "format": "uuid"},
+                "boundary_seq": {"type": "integer", "minimum": 1},
+                "boundary_vertex_id": {"type": "string", "format": "uuid"},
+                "episode": {"type": "integer", "minimum": 1},
+                "cancelled_scopes": {"type": "array", "items": {"type": "string", "format": "uuid"}},
+                "estimated_cost": {"type": "number", "minimum": 0},
+                "currency": {"type": "string", "minLength": 1},
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["planner_vertex_id"],
+                        "properties": {
+                            "planner_vertex_id": {"type": "string", "format": "uuid"},
+                            "planner_seq": {"type": "integer", "minimum": 1},
+                            "cost": {"type": "number", "minimum": 0},
+                            "currency": {"type": "string", "minLength": 1},
+                            "terms": {
+                                "type": "object",
+                                "properties": {
+                                    "context_cost": {"type": "number", "minimum": 0},
+                                    "rework_cost": {"type": "number", "minimum": 0},
+                                    "compensation_cost": {"type": "number", "minimum": 0},
+                                    "risk_premium": {"type": "number", "minimum": 1}
+                                },
+                                "additionalProperties": false
+                            },
+                            "rejected": {"enum": ["open_bracket", "below_floor", "savepoint_precedes", "budget_exceeded", "failure_counter_exhausted"]}
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "selected": {"type": ["string", "null"], "format": "uuid"}
             },
             "additionalProperties": false
         },

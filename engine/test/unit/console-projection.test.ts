@@ -61,6 +61,40 @@ describe('the console fold', () => {
         expect(model.replans).toEqual([{at_run_seq: 5, vertex_ids: [lookup], boundary_seq: null, boundary_vertex_id: null, reason: 'replanned'}]);
     });
 
+    it('pairs a boundary with its discard, in the order the engine appends them', () => {
+        // The engine records the decision before the discard it authorises, so a log read forwards
+        // never shows work vanish before the reason for it. An earlier fold here paired the two by
+        // arrival order and assumed the opposite order, which produced two replan records for one
+        // replan the moment a real recovery loop started writing them.
+        const events = [
+            ...freeze(3, [{author_id: 'p', vertex_id: planner, role: 'planner'}]),
+            event(4, 'vertex/created', {vertex_id: planner, payload: {role: 'planner'}}),
+            ...freeze(6, [{author_id: 'look', vertex_id: lookup, role: 'tool'}]),
+            event(7, 'vertex/created', {vertex_id: lookup, parent_refs: [planner], payload: {role: 'tool', tool: 'inventory.check'}}),
+            event(8, 'replan/boundary', {
+                vertex_id: planner,
+                payload: {level: 'L1', reason: 'supplier refused', failed_vertex_id: lookup, boundary_seq: 4, boundary_vertex_id: planner, candidates: [], selected: planner},
+            }),
+            event(9, 'subgraph/shadowed', {payload: {vertex_ids: [lookup], reason: 'supplier refused', boundary_seq: 4, boundary_vertex_id: planner}}),
+        ];
+        const model = consoleDag(events);
+        expect(model.replans).toEqual([{at_run_seq: 8, vertex_ids: [lookup], boundary_seq: 4, boundary_vertex_id: planner, reason: 'supplier refused'}]);
+        expect(byId(model, lookup).is_shadowed).toBe(true);
+    });
+
+    it('records an escalation that discarded nothing', () => {
+        // L3 and L4 append a boundary and no discard: the work is still there, and whoever picks
+        // it up needs to see it. A fold that only created a replan on a discard would show an
+        // escalated run as one where nothing happened.
+        const events = [
+            ...freeze(3, [{author_id: 'p', vertex_id: planner, role: 'planner'}]),
+            event(4, 'vertex/created', {vertex_id: planner, payload: {role: 'planner'}}),
+            event(5, 'replan/boundary', {payload: {level: 'L4', reason: 'the failed work was emitted by a deterministic router branch', failed_vertex_id: lookup, candidates: [], selected: null}}),
+        ];
+        const model = consoleDag(events);
+        expect(model.replans).toEqual([{at_run_seq: 5, vertex_ids: [], boundary_seq: null, boundary_vertex_id: null, reason: 'the failed work was emitted by a deterministic router branch'}]);
+    });
+
     it('shadows exactly the named vertices, never their descendants', () => {
         // The surface does not walk `parent_refs` either. The two must agree about membership and
         // disagree only about retention; shadowing more would draw a graph that never existed.

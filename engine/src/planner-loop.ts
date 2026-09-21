@@ -29,6 +29,21 @@ export interface PlannerTurnRequest {
     workflowType: string;
     /** Extra instruction for this junction only, such as what decision is being asked for. */
     goal: string;
+    /**
+     * What already failed here, when this turn is a replan rather than a first attempt.
+     *
+     * Structured rather than a log excerpt, so the planner is told which approach is disproven
+     * without being handed the discarded work to copy (03 §2.3). It also makes the extra input
+     * cost of a replan bounded and predictable, which is what the budget preflight assumes.
+     */
+    evidence?: Record<string, unknown>;
+    /**
+     * Distinguishes this turn from the planner's earlier ones in the submission log.
+     *
+     * A replanned planner submits twice from the same vertex, and two submissions sharing an id
+     * would make the audit trail claim one proposal where there were two.
+     */
+    attempt?: number;
 }
 
 /**
@@ -62,7 +77,7 @@ export class PlannerLoop {
         if ('reason' in parsed) return {status: 'unreadable', reason: parsed.reason, content};
 
         const submission: WorkflowSubmission = {
-            submissionId: `${request.plannerVertexId}:turn`,
+            submissionId: request.attempt ? `${request.plannerVertexId}:replan-${request.attempt}` : `${request.plannerVertexId}:turn`,
             schemaVersion: 'v1',
             workflowType: request.workflowType,
             vertices: parsed.vertices,
@@ -91,6 +106,15 @@ export class PlannerLoop {
                     `# Goal for this step\n${request.goal}`,
                     `# Tools you may call\n${catalogue(view)}`,
                     `# What has happened so far\n${context}`,
+                    // Placed after the surface and before the instruction, because it is a fact
+                    // about the surface the planner is looking at: the work it describes has been
+                    // discarded and is no longer in that surface at all.
+                    ...(request.evidence
+                        ? [
+                              `# A previous attempt from here failed and was discarded\n${JSON.stringify(request.evidence, null, 2)}\n` +
+                                  'Propose a different approach. Repeating the failed call will fail again.',
+                          ]
+                        : []),
                     '# Your answer\nReturn one JSON object and nothing else.',
                 ].join('\n\n'),
             },

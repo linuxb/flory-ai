@@ -56,7 +56,7 @@ export class FoldRegistry {
 }
 
 const known = new Set<string>(EVENT_TYPES);
-function assertReadable(events: StoredEvent[]): void {
+function assertReadable(events: readonly StoredEvent[]): void {
     for (const event of events) if (!known.has(event.event_type) && !event.ignorable) throw new Error(`unknown non-ignorable event in stream: ${event.event_type}`);
 }
 function stringArray(value: unknown): string[] {
@@ -64,7 +64,7 @@ function stringArray(value: unknown): string[] {
 }
 
 /** Folds a run's events into its active vertex surface. */
-export function surface(events: StoredEvent[], atRunSeq = Number.MAX_SAFE_INTEGER): Surface {
+export function surface(events: readonly StoredEvent[], atRunSeq = Number.MAX_SAFE_INTEGER): Surface {
     assertReadable(events);
     const included = events.filter((event) => event.run_seq <= atRunSeq);
     const vertices = new Map<string, SurfaceVertex>();

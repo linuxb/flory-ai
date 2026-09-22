@@ -40,6 +40,17 @@ describe('engine framework boundary', () => {
         }
     });
 
+    it('does not let this suite run the client package, which it cannot install', async () => {
+        // Two installs, two jobs, and only one of them is the client's. Vitest's default include
+        // sweeps `console/client/src/test` into this suite, which passed for as long as a
+        // developer's machine happened to have both `node_modules` trees — and failed the moment a
+        // client test imported a client-only package, in the job that installs the root and
+        // nothing else. Asserted here so the exclusion is a stated boundary rather than a line
+        // someone tidies away.
+        const config = await readFile(resolve(process.cwd(), 'vitest.config.ts'), 'utf8');
+        expect(config).toMatch(/exclude:.*'console\/client\/\*\*'/);
+    });
+
     it('keeps the type leaf the browser imports free of anything with a runtime', async () => {
         // The client typechecks with only its own `node_modules`, and `tsc` follows an
         // `import type` into the imported file and typechecks that too. So one bare specifier

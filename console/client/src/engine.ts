@@ -23,6 +23,6 @@ export type {
     ConsoleTiming,
     ConsoleTxn,
     ConsoleVertex,
+    PayloadDetail,
+    RetentionUnavailable,
 } from '@server/projection/model.js';
-
-export type {PayloadDetail, RetentionUnavailable} from '@server/projection/detail.js';

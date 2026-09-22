@@ -1,4 +1,10 @@
 import type {StoredEvent} from '../../../../engine/src/log/events.js';
+import type {PayloadDetail, RetentionUnavailable} from './model.js';
+
+// Re-exported so a server caller still finds them beside the builders that produce them. Their
+// declarations live in `model.ts` because that is the one module the browser client imports, and
+// it must stay reachable without pulling in anything that has a runtime.
+export type {PayloadDetail, RetentionUnavailable};
 
 /**
  * The bodies the inspector drawer fetches on demand.
@@ -7,36 +13,6 @@ import type {StoredEvent} from '../../../../engine/src/log/events.js';
  * operator reads one payload at a time and the canvas would otherwise pay, on every update, for
  * bytes almost never looked at.
  */
-
-/** Everything the drawer can show about one vertex from the log alone. */
-export interface PayloadDetail {
-    vertex_id: string;
-    role: string;
-    status: string;
-    /** The frozen input a tool was called with, or a planner's goal. */
-    input: unknown;
-    result: unknown;
-    failure: unknown;
-    /** The summary fields lifted for a rule to read. */
-    log_fields: Record<string, unknown> | null;
-    attempts: number;
-    /**
-     * References to bulk output held outside the log. Always empty today: both executors write the
-     * whole result inline, so nothing is offloaded yet. The field stays so that when retention
-     * lands a reference appears rather than the shape changing.
-     */
-    blob_refs: string[];
-}
-
-/** Why a detail this design promises cannot be served yet. */
-export interface RetentionUnavailable {
-    error: 'retention_unavailable';
-    reason: string;
-    /** What the log *does* hold, which is enough to compare two runs. */
-    input_digest: string | null;
-    output_digest: string | null;
-    prerequisite: string;
-}
 
 /** Builds the payload view, or null when the run holds no such vertex. */
 export function payloadDetail(events: readonly StoredEvent[], vertexId: string): PayloadDetail | null {

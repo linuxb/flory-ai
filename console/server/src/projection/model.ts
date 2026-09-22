@@ -250,3 +250,35 @@ export interface ConsoleRunSummary {
     /** Highest allocated sequence, which is activity rather than completion: runs do not end. */
     event_count: number;
 }
+
+/* ------------------------------------------------------- the detail endpoints' response shapes */
+
+/** Everything the drawer can show about one vertex from the log alone. */
+export interface PayloadDetail {
+    vertex_id: string;
+    role: string;
+    status: string;
+    /** The frozen input a tool was called with, or a planner's goal. */
+    input: unknown;
+    result: unknown;
+    failure: unknown;
+    /** The summary fields lifted for a rule to read. */
+    log_fields: Record<string, unknown> | null;
+    attempts: number;
+    /**
+     * References to bulk output held outside the log. Always empty today: both executors write the
+     * whole result inline, so nothing is offloaded yet. The field stays so that when retention
+     * lands a reference appears rather than the shape changing.
+     */
+    blob_refs: string[];
+}
+
+/** Why a detail this design promises cannot be served yet. */
+export interface RetentionUnavailable {
+    error: 'retention_unavailable';
+    reason: string;
+    /** What the log *does* hold, which is enough to compare two runs. */
+    input_digest: string | null;
+    output_digest: string | null;
+    prerequisite: string;
+}

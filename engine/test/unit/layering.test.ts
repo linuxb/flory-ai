@@ -40,6 +40,37 @@ describe('engine framework boundary', () => {
         }
     });
 
+    it('keeps the type leaf the browser imports free of anything with a runtime', async () => {
+        // The client typechecks with only its own `node_modules`, and `tsc` follows an
+        // `import type` into the imported file and typechecks that too. So one bare specifier
+        // anywhere in this closure breaks a build that installs neither `ajv` nor Node's types.
+        //
+        // It did. `detail.ts` imported `StoredEvent` from the engine's event module, which loads a
+        // JSON schema with `node:fs` and validates it with `ajv`, and the console-client job
+        // failed on five consecutive pushes before anyone looked at it.
+        const root = resolve(process.cwd(), 'console/server/src/projection/model.ts');
+        const seen = new Set<string>();
+        const offences: string[] = [];
+        const visit = async (file: string): Promise<void> => {
+            if (seen.has(file)) return;
+            seen.add(file);
+            const content = await readFile(file, 'utf8');
+            for (const match of content.matchAll(/from ['"]([^'"]+)['"]/g)) {
+                const specifier = match[1]!;
+                if (!specifier.startsWith('.')) {
+                    offences.push(`${file.slice(process.cwd().length + 1)} imports ${specifier}`);
+                    continue;
+                }
+                await visit(resolve(file, '..', specifier.replace(/\.js$/, '.ts')));
+            }
+        };
+        await visit(root);
+
+        expect(offences).toEqual([]);
+        // And the closure is small enough to state, so growing it is a deliberate act.
+        expect([...seen].map((file) => file.slice(process.cwd().length + 1)).sort()).toEqual(['console/server/src/projection/model.ts', 'engine/src/admission/check-rules.ts']);
+    });
+
     it('is never imported by the console, only the other way round', async () => {
         // The console consumes the engine. An import in this direction would make the core depend
         // on an operator surface, and the first thing to break would be every consumer of

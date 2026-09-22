@@ -360,8 +360,80 @@ body {
     color: var(--status-failed);
 }
 
-.edge-shadowed {
-    opacity: 0.4;
+/* Discarded work, on the edge as well as on the card: dashed *and* faded, because faded alone
+   reads as "far away" rather than as "this was thrown out". */
+.react-flow__edge.edge-shadowed .react-flow__edge-path {
+    stroke-dasharray: 6 4;
+}
+
+.react-flow__edge.edge-shadowed {
+    opacity: 0.45;
+}
+
+/* ── what one selection highlights ────────────────────────────────────── */
+
+.react-flow__node.related-upstream .vertex-card {
+    box-shadow:
+        0 0 0 2px var(--relation-upstream),
+        var(--shadow);
+}
+
+.react-flow__node.related-downstream .vertex-card {
+    box-shadow:
+        0 0 0 2px var(--relation-downstream),
+        var(--shadow);
+}
+
+/* Everything unrelated recedes rather than disappearing: the shape of the whole run stays
+   readable, which is what makes the highlighted part locatable within it. */
+.react-flow__node.related-dimmed,
+.react-flow__edge.related-dimmed {
+    opacity: 0.16;
+}
+
+.react-flow__edge.related-upstream .react-flow__edge-path {
+    stroke: var(--relation-upstream);
+    stroke-width: 2.5;
+}
+
+.react-flow__edge.related-downstream .react-flow__edge-path {
+    stroke: var(--relation-downstream);
+    stroke-width: 2.5;
+}
+
+/* A selected edge keeps its dash when it was discarded, so the two facts compose. */
+.react-flow__edge.related-upstream,
+.react-flow__edge.related-downstream {
+    opacity: 1;
+}
+
+.relation-legend {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow);
+    font-size: 11px;
+    color: var(--muted);
+}
+
+.relation-legend i {
+    display: inline-block;
+    width: 16px;
+    height: 2px;
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
+.relation-legend .upstream i {
+    background: var(--relation-upstream);
+}
+
+.relation-legend .downstream i {
+    background: var(--relation-downstream);
 }
 
 /* ── scope enclosure ──────────────────────────────────────────────────── */

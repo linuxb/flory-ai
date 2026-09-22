@@ -4,6 +4,8 @@ export interface CanvasControlsProps {
     /** Vertices appended since the operator last looked, in arrival order. */
     pending: readonly string[];
     onFollow: () => void;
+    /** True while a vertex is selected, which is the only time the relation colours mean anything. */
+    showRelationLegend: boolean;
 }
 
 /**
@@ -13,10 +15,24 @@ export interface CanvasControlsProps {
  * operator who has panned to a failing branch must not be yanked away by unrelated work finishing.
  * So growth is *announced* and moving there is a click.
  */
-export function CanvasControls({pending, onFollow}: CanvasControlsProps): React.JSX.Element {
+export function CanvasControls({pending, onFollow, showRelationLegend}: CanvasControlsProps): React.JSX.Element {
     const flow = useReactFlow();
     return (
         <div className="canvas-controls">
+            {/* Shown only while something is selected. A permanent legend for a transient state is
+                clutter the rest of the time, and the colours mean nothing without a selection. */}
+            {showRelationLegend ? (
+                <div className="relation-legend">
+                    <span className="upstream">
+                        <i aria-hidden="true" />
+                        derived this
+                    </span>
+                    <span className="downstream">
+                        <i aria-hidden="true" />
+                        derived from this
+                    </span>
+                </div>
+            ) : null}
             {pending.length ? (
                 <button type="button" className="growth-pill" onClick={onFollow}>
                     +{pending.length} new

@@ -33,6 +33,12 @@
     --status-created-fill: var(--grey-fill);
     --status-retried: var(--orange-stroke);
     --status-retried-fill: var(--orange-fill);
+    /* Selection relations. Invariant for the same reason status colour is: "this derived that"
+       must not change meaning between light and dark. */
+    --relation-upstream: var(--violet-stroke);
+    --relation-downstream: var(--teal-stroke);
+    --edge-arrow: var(--grey-stroke);
+
     --accent-router: var(--teal-stroke);
     --accent-pivot: var(--violet-stroke);
     --accent-counterfactual: var(--orange-stroke);

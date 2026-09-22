@@ -49,7 +49,7 @@ function Canvas({model, selectedVertexId, onSelect}: DagCanvasProps): React.JSX.
         return next;
     }, [model]);
 
-    const graph = useMemo(() => toFlow(model, placed), [model, placed]);
+    const graph = useMemo(() => toFlow(model, placed, selectedVertexId), [model, placed, selectedVertexId]);
 
     // Held in React Flow's own state, and fed back through `onNodesChange`, because that callback
     // is how the library returns a node's measured size. Passing a freshly built array on every
@@ -116,7 +116,7 @@ function Canvas({model, selectedVertexId, onSelect}: DagCanvasProps): React.JSX.
                 <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
                 <MiniMap pannable zoomable nodeColor={miniMapColor} nodeStrokeWidth={0} maskColor="var(--minimap-mask)" />
             </ReactFlow>
-            <CanvasControls pending={pending} onFollow={follow} />
+            <CanvasControls pending={pending} onFollow={follow} showRelationLegend={Boolean(selectedVertexId)} />
         </div>
     );
 }

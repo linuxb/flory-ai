@@ -2,7 +2,7 @@
 
 > Status: Draft v0.2 | Depends on: [01](./01-jit-dag-and-event-log.md), [02](./02-transaction-model.md)
 
-> Implemented: L0 (the executors' retry policy), L1 and L2 (`engine/src/recovery.ts`), both triggers — failed work and a stalled planner (§2.6) — and the guards that decide when neither level is available. L3 and L4 act on the world rather than on the plan, so the ladder records the decision to escalate and stops; compensation belongs to the Coordinator and is not written yet.
+> Implemented: L0 (the executors' retry policy), L1 and L2 (`engine/src/recovery.ts`), both triggers — failed work and a stalled planner (§2.6) — the guards that decide when neither level is available, and cancel-before-replan (§2.2 step 1, §2.4 rule 1): the ladder requests the cancellations a boundary needs, the Coordinator executes them, and the ladder waits for them to complete before it replans or escalates. Still open: L3's terminal replan at the savepoint and its postmortem (§3), compensation pricing (§4.1), and a run-level L4 state.
 
 > Diagram: [diagram/replan-flow.drawio](../diagram/replan-flow.drawio), including the full flow and the L0–L4 escalation ladder.
 
@@ -41,20 +41,24 @@ From a failed vertex, follow `parent_refs` to the **nearest ancestor planner** t
 
 If the nearest ancestor planner fails condition (i) because its subgraph has open tries:
 
-1. If the scope's pivot has **not** passed, **close the bracket by cancelling the scope** (see §3). Cancellation returns the world to the scope savepoint and closes the bracket, after which boundaries at or after the savepoint satisfy both conditions. This stays L1 when the newly legal boundary is still the nearest planner, and becomes L2 when the savepoint precedes it and an earlier planner must be used.
+1. If the scope's pivot has **not** passed, **close the bracket by cancelling the scope** (see §3). Cancellation returns the world to the scope savepoint and closes the bracket, after which boundaries at or after the savepoint satisfy both conditions. This stays L1 when the newly legal boundary is still the nearest planner, and becomes L2 when the savepoint precedes it and an earlier planner must be used (`savepoint_precedes`) — including after the cancellation has run, since the planner would otherwise be handed a context in which work its ancestor authored still stands.
 2. If the scope's pivot **has** passed, cancellation is impossible and backtracking may not be used to make the boundary legal — searching further back would cross the floor. Drive the scope **forward** to closure instead: idempotently retry its post-pivot successors (L0), which R1 guarantees are safe to retry. Once the bracket closes, the nearest planner at or after `txn/pivot-passed` becomes legal and normal replanning resumes. If forward closure cannot succeed, the only exit is **L4**.
 
 ### 2.3 Replan flow
 
 ```
-vertex/failed (retries exhausted)
-  → select backtrack planner P*                          (§4.1 cost model)
-  → cancel-before-replan: cancel every open txn/try between P* and the failure
-  → replan/boundary {boundary_seq = P* succeeded seq, reason, cancelled_scopes}
-  → subgraph/shadowed marks the failed subtree            (same run; nothing is deleted)
+vertex/failed (retries exhausted)                          (the same append fences an open scope)
+  → select backtrack planner P*                            (§4.1 cost model)
+  → replan/cancel-requested {scope_ids, candidates before}  (every open scope P*'s discard set touches)
+  → Coordinator: txn/cancel requested → inverses → completed (or txn/scope suspended)
+  → the ladder waits until every scope it asked about has resolved
+  → replan/boundary {boundary_seq = P* succeeded seq, reason, cancelled_scopes, cancel_request_seq}
+  → subgraph/shadowed marks the failed subtree              (same run; nothing is deleted)
   → call P* again with linearize() and structured failure evidence
   → propose new sub-DAG → check-rules → freeze and execute
 ```
+
+Each pass of the ladder is one of three things: **record** a boundary or an escalation, **request** the cancellations a boundary needs, or **wait** for cancellations already under way — including one the orphan sweep started. A request answers nothing; the failure stays outstanding until the cancellation resolves, and neither a request nor a wait spends an episode. The request carries the candidate set as it stood before cancelling and the boundary carries it as it stands after, so the log shows both. If the Coordinator suspends a cancellation instead of completing it, the failure escalates to L4 with nothing replanned.
 
 Every step appends to the **same run**. No child run is created and no prefix is copied; `run_id` is stable for the life of the business task ([01 §5.1](./01-jit-dag-and-event-log.md)).
 
@@ -68,7 +72,7 @@ This controls replan input cost and clearly identifies paths already disproven.
 
 ### 2.4 Three hard rules for replanning and transactions
 
-1. **Cancel before replan.** Planning never resumes across an active `try`; compensation precedes backtracking. (Note: Offline forks, due to their causal evaluation nature, are exempt from this online constraint. They handle active tries via mock injection or lazy termination rather than cancellation). Live runs cancel to make a boundary legal.
+1. **Cancel before replan.** Planning never resumes across an active `try`; compensation precedes backtracking. A bracket is closed only by `txn/cancel {completed}` (or a confirm); `requested` means the inverses have not run. The ladder decides and appends while holding the run's scope rows, so what it read cannot change before what it wrote lands, and the database refuses a `subgraph/shadowed` into any scope that has not closed. (Note: Offline forks, due to their causal evaluation nature, are exempt from this online constraint. They handle active tries via mock injection or lazy termination rather than cancellation). Live runs cancel to make a boundary legal.
 2. **The pivot is a one-way gate.** Once `txn/pivot-passed` is appended, that seq becomes the backtrack floor (§2.1): no replan boundary may be selected below it, for the remainder of the run. Within the pivot's own scope, a subsequent failure may only retry the suffix idempotently (L0) or reach human intervention (L4). The prohibition is on *planner position*, not on business action — a refund issued from a boundary above the floor is a new forward action and is permitted ([02 §3.3](./02-transaction-model.md)). R1 guarantees that every forward-path node is safely idempotent.
 3. **Shadowing does not delete.** A replan-rejected subtree remains in the log for auditability and as evidence that prevents repeating the same failed approach.
 
@@ -131,7 +135,7 @@ cost(P) = context_cost(P) + rework_cost(P) + compensation_cost(P) × risk_premiu
 | `compensation_cost(P)` | Sum of registered compensation prices for every open scope between `P` and the failure | **Computable** from the log plus the recorded tool view: count open `txn/try` brackets and sum their declared cancel costs. |
 | `risk_premium` | A scalar `≥ 1` applied to compensation only | **Policy.** The only real weight in the model. Compensation touches the external world, and a failed cancel is worse than an equal amount of wasted tokens, so this encodes risk aversion rather than price. |
 
-**Two of the four terms have no price source today, and the implementation omits them rather than reporting zero.** No tool contract carries a call price or a cancel price — not in the protobuf, not in the tool view — so `compensation_cost` and the tool half of `rework_cost` cannot be computed. A reported zero would claim the term was priced and came to nothing; omitting it says what is true. It also cannot change a selection while L3 is unimplemented: a candidate with an open bracket between it and the failure is rejected as `open_bracket` before it is ever priced, so nothing selectable has anything to compensate. Pricing them is a gateway contract change, and it is a prerequisite for L3 rather than for L1.
+**Two of the four terms have no price source today, and the implementation omits them rather than reporting zero.** No tool contract carries a call price or a cancel price — not in the protobuf, not in the tool view — so `compensation_cost` and the tool half of `rework_cost` cannot be computed. A reported zero would claim the term was priced and came to nothing; omitting it says what is true. Now that a candidate needing a cancellation is selectable, the omission can bias a comparison toward it: two candidates that need the same scopes cancelled still compare correctly, ones that need different scopes do not. Each such candidate carries `requires_cancel`, so the comparison is at least visible. Pricing the terms is a gateway contract change (W7).
 
 `context_cost` is exact in the sense that matters — `linearize` is pure, so the prompt is computed rather than estimated — but the token count is not: no tokenizer is vendored, and the engine divides the assembled length by a stated constant. The ratio is uniform across candidates, so it cannot change which candidate is cheapest; it moves only the absolute figure, which is why `replan/boundary` publishes the terms as well as the total.
 
@@ -160,7 +164,7 @@ The model prices *attempts*, not correctness. If a failure's true cause invalida
 }
 ```
 
-Rejection reasons come from a closed vocabulary: `open_bracket`, `below_floor`, `savepoint_precedes`, `budget_exceeded`, `failure_counter_exhausted`. Both this payload and `subgraph/shadowed` are now in [`idl/event-log.schema.json`](../../idl/event-log.schema.json), so the vocabulary is enforced rather than observed — the two events in the vocabulary that carry a decision were, until the ladder was built, the two that nothing validated.
+Rejection reasons come from a closed vocabulary: `open_bracket`, `below_floor`, `savepoint_precedes`, `budget_exceeded`, `failure_counter_exhausted`. `open_bracket` means a bracket no cancellation can close — a scope suspended, or at or past its pivot; a scope that is merely open is not a rejection but a `requires_cancel` on a selectable candidate. Both this payload and `subgraph/shadowed` are now in [`idl/event-log.schema.json`](../../idl/event-log.schema.json), so the vocabulary is enforced rather than observed — the two events in the vocabulary that carry a decision were, until the ladder was built, the two that nothing validated.
 
 A candidate record contains either a selectable candidate's computed cost or a closed-vocabulary rejection reason. Rejected candidates do not receive a cost: they are ineligible for selection, so giving them one would falsely suggest participation in the cost comparison. This exists for verifiability. A harness cannot check "did the engine pick the right boundary" by recomputing the answer, because legality and cost *are* the policy, so a second implementation would both duplicate the policy and — worse — is likely to repeat the original author's misunderstanding, producing a green test over a wrong engine. Publishing the candidate set converts the problem from *generating* an answer into *checking* one: the harness enumerates ancestor planners by pure `parent_refs` traversal (topology, not policy), then asserts completeness, minimality among non-rejected candidates using the published costs, and that each cited rejection reason is factually true of the log. See [06 §7](./06-validation-harness.md) oracle O2 for the three assertions, and O5 for comparing `estimated_cost` against what the replan actually cost.
 

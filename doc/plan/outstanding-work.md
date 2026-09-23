@@ -10,7 +10,7 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
 | W6 | Console: observability projection, stream, detail endpoints, UI | [Doc 11](../design/11-console-and-observability.md) | Delivered, less two endpoints blocked on retention that does not exist |
-| W7 | Recovery ladder L3 and L4: compensation, suspension, and the prices they need | [Doc 03](../design/03-replan-and-recovery.md) | L0-L2 delivered; L3 and L4 are decided and not executed |
+| W7 | Recovery ladder L3 and L4: compensation, suspension, and the prices they need | [Doc 03](../design/03-replan-and-recovery.md) | L0-L2 and cancel-before-replan delivered; prices, run-level suspension and L3's terminal replan pending |
 
 W4 stays in the Engine apart from one table, so it does not contend with the remaining streams. W6 is delivered and reads the run plane directly; pointing domain read models at the business plane stays with W4.
 
@@ -79,32 +79,41 @@ candidate set, the backtrack floor, the open-bracket condition, the per-planner 
 counters, and the rule that work a deterministic router authored never reaches a planner. What a
 replan produces is verified end to end against a real model.
 
-**L3 and L4 are decided and not executed.** When no boundary is legal the ladder appends a
-`replan/boundary` recording the level and its reason, and stops. Nothing compensates, nothing
-suspends, and the run's queued work is left where it is — which is correct as far as it goes,
-because an escalation hands the run over intact, and incorrect as an ending, because nobody is
-there to take it.
+**Cancel-before-replan is delivered** (migration 017). A pre-pivot failure fences its scope; the
+Engine alone requests a failure-driven cancellation (`replan/cancel-requested`), the Coordinator
+executes it, and the ladder decides under the run's scope locks and waits for every scope it asked
+about to complete — or suspend — before it replans or escalates. The orphan sweep is the one
+cancellation the Coordinator still starts, on the same cancel key. This closed the race in which the
+ladder escalated a failure a moment before its cancellation made a boundary legal, and the one in
+which it replanned between `requested` and `completed`. It is asserted over every interleaving by
+`engine/test/unit/recovery-cancel-interleavings.test.ts` (with the old ladder as a negative control),
+against real rows at every split point by `engine/test/integration/recovery-cancellation.test.ts`,
+and on the Coordinator side by its integration suite. The stalled-planner hole (formerly increment 4)
+was closed earlier by `subgraph/unreadable` ([03 §2.6](../design/03-replan-and-recovery.md#26-the-other-way-a-run-stops-a-planner-that-produced-no-work)).
 
 **Increments.**
 
-1. Cancel-before-replan ([03 §2.4](../design/03-replan-and-recovery.md) rule 1). The Coordinator
-   cancels an open scope to its savepoint on the Engine's request, which turns the most common
-   `open_bracket` rejection into a legal boundary and makes L3 reachable from L1.
-2. Price the two terms the cost model cannot compute. `compensation_cost` and the tool half of
-   `rework_cost` have no source: no tool contract carries a call price or a cancel price. This is a
-   gateway contract change and a prerequisite for comparing boundaries that require compensation.
-3. L4 suspension as a state rather than a stop: a run that needs a human should be visibly
-   suspended in the console and in the run list, not merely idle.
-4. The planner-answered-unreadably hole ([03 §6](../design/03-replan-and-recovery.md#6-open-questions)).
-   A run stalls there today with nothing outstanding for the ladder to find.
+1. Price the two terms the cost model cannot compute. `compensation_cost` and the tool half of
+   `rework_cost` have no source: no tool contract carries a call price or a cancel price. A
+   candidate that needs a cancellation is now selectable and carries `requires_cancel`, so the
+   omission can bias a comparison between candidates that need different scopes cancelled. This is
+   a gateway contract change.
+2. L4 suspension as a state rather than a stop: a run that needs a human should be visibly
+   suspended in the console and in the run list, not merely idle. The console shows the scope's
+   `suspended` state and the ladder's cancellation requests; nothing marks the run itself.
+3. L3's terminal replan at the savepoint and its postmortem ([03 §3](../design/03-replan-and-recovery.md#3-rollback-l3)).
+   The ladder now cancels the failure's scope before recording L3, and records nothing further.
+4. Liveness after a timeout cancel. The orphan sweep deletes a cancelled scope's pending members,
+   and nothing appends `vertex/failed` for them, so a run whose scope was swept can stop with nothing
+   outstanding for the ladder to find.
 
 **Exit criteria.**
 
-- A pre-pivot failure inside an open bracket cancels the scope and then replans at a boundary that
-  was illegal before the cancellation, with the candidate set showing both states.
 - A post-pivot failure never cancels, and reaches L4 with its committed state and unconfirmed
-  tries preserved.
-- Scenario S2 and S2b assert the ordering, and S3c asserts the episode bound.
+  tries preserved. (Met for the ladder and the Coordinator; the run-level state is increment 2.)
+- Scenario S3c asserts the episode bound end to end.
+- Every candidate that needs a cancellation is priced, or the comparison it takes part in says it
+  was not.
 
 **Exclusions.** How long forward closure may be attempted before a run is declared L4 stays open
 ([03 §6](../design/03-replan-and-recovery.md#6-open-questions)); the harness asserts that L4 is
@@ -123,7 +132,7 @@ eventually reached, not when.
 
 **Blocked, and not on this work stream.** `GET .../prompt` and `GET .../logs` answer `501` with the digests the log does hold. Nothing in the Engine persists a prompt, a completion, or tool execution output, and the Engine has no blob client to persist them with. The endpoints exist so the contract stays whole and the gap stays visible; they light up when a retention write path does ([Doc 11 §7](../design/11-console-and-observability.md#7-open-questions)).
 
-**Also not yet exercisable.** The shadowed-branch rendering has no producer: nothing appends `subgraph/shadowed` or `replan/boundary`, because online replanning is not implemented. The projection handles shadowing and is unit-tested against hand-built events, and no live run shows it until the recovery loop lands.
+**Now exercisable.** The recovery ladder appends `replan/boundary`, `subgraph/shadowed` and `replan/cancel-requested` in live runs, so the shadowed-branch rendering has a producer; the projection records cancellation requests as `cancel_requests` (projector `v2`).
 
 **Exit criteria, all met.**
 

@@ -9,6 +9,7 @@ export const EVENT_TYPES = [
     'subgraph/shadowed',
     'subgraph/unreadable',
     'replan/boundary',
+    'replan/cancel-requested',
     'fork/created',
     'vertex/created',
     'vertex/started',

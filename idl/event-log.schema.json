@@ -30,6 +30,7 @@
                                 "subgraph/shadowed",
                                 "subgraph/unreadable",
                                 "replan/boundary",
+                                "replan/cancel-requested",
                                 "fork/created",
                                 "vertex/created",
                                 "vertex/started",
@@ -64,6 +65,10 @@
         {"if": {"properties": {"event_type": {"const": "subgraph/shadowed"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphShadowedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "subgraph/unreadable"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/subgraphUnreadablePayload"}}}},
         {"if": {"properties": {"event_type": {"const": "replan/boundary"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/replanBoundaryPayload"}}}},
+        {
+            "if": {"properties": {"event_type": {"const": "replan/cancel-requested"}}, "required": ["event_type"]},
+            "then": {"properties": {"payload": {"$ref": "#/$defs/replanCancelRequestedPayload"}}}
+        },
         {"if": {"properties": {"event_type": {"const": "vertex/created"}}, "required": ["event_type"]}, "then": {"properties": {"payload": {"$ref": "#/$defs/vertexCreatedPayload"}}}},
         {"if": {"properties": {"event_type": {"const": "txn/scope"}}, "required": ["event_type"]}, "then": {"required": ["scope_id"], "properties": {"payload": {"$ref": "#/$defs/txnScopePayload"}}}},
         {
@@ -256,32 +261,45 @@
                 "cancelled_scopes": {"type": "array", "items": {"type": "string", "format": "uuid"}},
                 "estimated_cost": {"type": "number", "minimum": 0},
                 "currency": {"type": "string", "minLength": 1},
-                "candidates": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["planner_vertex_id"],
-                        "properties": {
-                            "planner_vertex_id": {"type": "string", "format": "uuid"},
-                            "planner_seq": {"type": "integer", "minimum": 1},
-                            "cost": {"type": "number", "minimum": 0},
-                            "currency": {"type": "string", "minLength": 1},
-                            "terms": {
-                                "type": "object",
-                                "properties": {
-                                    "context_cost": {"type": "number", "minimum": 0},
-                                    "rework_cost": {"type": "number", "minimum": 0},
-                                    "compensation_cost": {"type": "number", "minimum": 0},
-                                    "risk_premium": {"type": "number", "minimum": 1}
-                                },
-                                "additionalProperties": false
-                            },
-                            "rejected": {"enum": ["open_bracket", "below_floor", "savepoint_precedes", "budget_exceeded", "failure_counter_exhausted"]}
-                        },
-                        "additionalProperties": false
-                    }
+                "candidates": {"type": "array", "items": {"$ref": "#/$defs/boundaryCandidate"}},
+                "selected": {"type": ["string", "null"], "format": "uuid"},
+                "cancel_request_seq": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+        },
+        "replanCancelRequestedPayload": {
+            "type": "object",
+            "required": ["failed_vertex_id", "scope_ids", "level", "reason", "candidates"],
+            "properties": {
+                "failed_vertex_id": {"type": "string", "format": "uuid"},
+                "scope_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true},
+                "level": {"enum": ["L1", "L2", "L3"]},
+                "reason": {"type": "string", "minLength": 1},
+                "intended_boundary_vertex_id": {"type": ["string", "null"], "format": "uuid"},
+                "candidates": {"type": "array", "items": {"$ref": "#/$defs/boundaryCandidate"}}
+            },
+            "additionalProperties": false
+        },
+        "boundaryCandidate": {
+            "type": "object",
+            "required": ["planner_vertex_id"],
+            "properties": {
+                "planner_vertex_id": {"type": "string", "format": "uuid"},
+                "planner_seq": {"type": "integer", "minimum": 1},
+                "cost": {"type": "number", "minimum": 0},
+                "currency": {"type": "string", "minLength": 1},
+                "terms": {
+                    "type": "object",
+                    "properties": {
+                        "context_cost": {"type": "number", "minimum": 0},
+                        "rework_cost": {"type": "number", "minimum": 0},
+                        "compensation_cost": {"type": "number", "minimum": 0},
+                        "risk_premium": {"type": "number", "minimum": 1}
+                    },
+                    "additionalProperties": false
                 },
-                "selected": {"type": ["string", "null"], "format": "uuid"}
+                "rejected": {"enum": ["open_bracket", "below_floor", "savepoint_precedes", "budget_exceeded", "failure_counter_exhausted"]},
+                "requires_cancel": {"type": "array", "items": {"type": "string", "format": "uuid"}, "minItems": 1, "uniqueItems": true}
             },
             "additionalProperties": false
         },
@@ -347,7 +365,9 @@
                 "member_vertices": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
                 "required_try_vertices": {"type": "array", "items": {"type": "string", "format": "uuid"}, "uniqueItems": true},
                 "pivot_vertex": {"type": ["string", "null"], "format": "uuid"},
-                "savepoint_seq": {"type": ["integer", "null"], "minimum": 1}
+                "savepoint_seq": {"type": ["integer", "null"], "minimum": 1},
+                "reason": {"type": "string"},
+                "detail": {"type": "string"}
             },
             "additionalProperties": false
         },

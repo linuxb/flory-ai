@@ -143,6 +143,97 @@
                     }
                 }
             ]
+        },
+        {
+            "name": "an engine request, a completed cancellation, then the boundary that cites it",
+            "valid": true,
+            "expected_scope_state": "cancelled",
+            "events": [
+                {"run_seq": 1, "event_type": "txn/scope", "scope_id": "00000000-0000-4000-8000-000000000600", "payload": {"state": "open"}},
+                {
+                    "run_seq": 2,
+                    "event_type": "replan/cancel-requested",
+                    "payload": {
+                        "failed_vertex_id": "00000000-0000-4000-8000-000000000601",
+                        "scope_ids": ["00000000-0000-4000-8000-000000000600"],
+                        "level": "L1",
+                        "reason": "cancelling before resuming",
+                        "intended_boundary_vertex_id": "00000000-0000-4000-8000-000000000602",
+                        "candidates": [
+                            {"planner_vertex_id": "00000000-0000-4000-8000-000000000602", "planner_seq": 1, "cost": 0.1, "currency": "CNY", "requires_cancel": ["00000000-0000-4000-8000-000000000600"]}
+                        ]
+                    }
+                },
+                {
+                    "run_seq": 3,
+                    "event_type": "txn/cancel",
+                    "scope_id": "00000000-0000-4000-8000-000000000600",
+                    "payload": {"idempotency_key": "scope:00000000-0000-4000-8000-000000000600:cancel", "phase": "requested", "reason": "engine request"}
+                },
+                {
+                    "run_seq": 4,
+                    "event_type": "txn/cancel",
+                    "scope_id": "00000000-0000-4000-8000-000000000600",
+                    "payload": {"idempotency_key": "scope:00000000-0000-4000-8000-000000000600:cancel", "phase": "completed"}
+                },
+                {
+                    "run_seq": 5,
+                    "event_type": "replan/boundary",
+                    "vertex_id": "00000000-0000-4000-8000-000000000602",
+                    "payload": {
+                        "level": "L1",
+                        "reason": "resuming",
+                        "failed_vertex_id": "00000000-0000-4000-8000-000000000601",
+                        "episode": 1,
+                        "candidates": [{"planner_vertex_id": "00000000-0000-4000-8000-000000000602", "planner_seq": 1, "cost": 0.1, "currency": "CNY"}],
+                        "selected": "00000000-0000-4000-8000-000000000602",
+                        "cancelled_scopes": ["00000000-0000-4000-8000-000000000600"],
+                        "cancel_request_seq": 2,
+                        "boundary_seq": 1,
+                        "boundary_vertex_id": "00000000-0000-4000-8000-000000000602"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "an engine request the Coordinator suspends ends in an escalation",
+            "valid": true,
+            "expected_scope_state": "suspended",
+            "events": [
+                {"run_seq": 1, "event_type": "txn/scope", "scope_id": "00000000-0000-4000-8000-000000000700", "payload": {"state": "open"}},
+                {
+                    "run_seq": 2,
+                    "event_type": "replan/cancel-requested",
+                    "payload": {
+                        "failed_vertex_id": "00000000-0000-4000-8000-000000000701",
+                        "scope_ids": ["00000000-0000-4000-8000-000000000700"],
+                        "level": "L3",
+                        "reason": "cancelling before escalating",
+                        "intended_boundary_vertex_id": null,
+                        "candidates": []
+                    }
+                },
+                {
+                    "run_seq": 3,
+                    "event_type": "txn/scope",
+                    "scope_id": "00000000-0000-4000-8000-000000000700",
+                    "payload": {"state": "suspended", "reason": "unresolved attempt", "detail": "engine request"}
+                },
+                {
+                    "run_seq": 4,
+                    "event_type": "replan/boundary",
+                    "payload": {
+                        "level": "L4",
+                        "reason": "suspended",
+                        "failed_vertex_id": "00000000-0000-4000-8000-000000000701",
+                        "episode": 1,
+                        "candidates": [],
+                        "selected": null,
+                        "cancelled_scopes": [],
+                        "cancel_request_seq": 2
+                    }
+                }
+            ]
         }
     ]
 }

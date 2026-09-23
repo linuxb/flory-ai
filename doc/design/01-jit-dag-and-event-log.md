@@ -146,7 +146,8 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 | `vertex/retried` | Idempotent retry number and backoff | the vertex's executor (§3.2.1) |
 | `subgraph/shadowed` | Replan shadowed a failed subtree; payload names affected seqs | engine |
 | `subgraph/unreadable` | A planner answered and the engine could not read the answer as a proposal. Nothing failed and no vertex is outstanding, so without this event the run's stall is invisible to the recovery ladder and to a replay ([03 §2.6](./03-replan-and-recovery.md)) | engine |
-| `replan/boundary` | In-place replan: selected `boundary_seq`, planner vertex, reason, cancelled scopes. No new run is created (§5.1) | engine |
+| `replan/boundary` | In-place replan: selected `boundary_seq`, planner vertex, reason, cancelled scopes and the request they came from. With `selected: null` it is an escalation, recorded only once every cancellation the failure needed has resolved. No new run is created (§5.1) | engine |
+| `replan/cancel-requested` | The recovery ladder asks for the scope cancellations a replan or escalation needs: the failed vertex, the scopes, the intended boundary, and the candidate set as it stood before cancelling. The only way a failure-driven cancellation starts; the Coordinator executes it ([03 §2.3](./03-replan-and-recovery.md#23-replan-flow)) | engine |
 | `fork/created` | **Offline evaluation only** (§5.2): source run, `at_vertex_id`, `eval_up_to_seq`, seed length, substitutions, `fold_mode`, evaluator pin, `projector_version`, and `harness_state_version` | engine |
 | `run/end-seed` | First own event of a fork, closing its inherited seed; every inherited copy — in the seed or merged later — is read-only (§5.2) | engine |
 | `txn/scope`, `txn/try`, `txn/confirm`, `txn/cancel`, `txn/pivot-passed` | Transaction-bracketing events; see [02](./02-transaction-model.md) | Distributed Transaction Coordinator |

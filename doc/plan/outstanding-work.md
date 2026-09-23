@@ -10,7 +10,7 @@ Delivered work is not recorded here. When a work stream finishes, its section is
 | W2 | Duplicate-delivery scenario S12 | [Doc 06 §6](../design/06-validation-harness.md#6-scenario-matrix), [Doc 07](../design/07-distributed-transaction-coordinator.md) | Runtime delivered; this scenario pending |
 | W4 | Business-plane consumers: snapshots, fork quarantine, read models | [Doc 01 §3.1](../design/01-jit-dag-and-event-log.md#31-two-planes-and-three-sequences), [Doc 04 §2.1](../design/04-refine-and-harness-state.md#21-business-context-enters-through-task_input-not-harness-state), [Doc 08](../design/08-database-schema.md) | Storage delivered; consumers pending |
 | W6 | Console: observability projection, stream, detail endpoints, UI | [Doc 11](../design/11-console-and-observability.md) | Delivered, less two endpoints blocked on retention that does not exist |
-| W7 | Recovery ladder L3 and L4: compensation, suspension, and the prices they need | [Doc 03](../design/03-replan-and-recovery.md) | L0-L2 and cancel-before-replan delivered; prices, run-level suspension and L3's terminal replan pending |
+| W7 | Recovery ladder L3 and L4: compensation, suspension, and the prices they need | [Doc 03](../design/03-replan-and-recovery.md) | L0-L2, cancel-before-replan and key generations delivered; prices, run-level suspension and L3's terminal replan pending |
 
 W4 stays in the Engine apart from one table, so it does not contend with the remaining streams. W6 is delivered and reads the run plane directly; pointing domain read models at the business plane stays with W4.
 
@@ -45,6 +45,10 @@ The Coordinator runtime, its PostgreSQL projections, the orphan sweep, and the r
 
 - S12 passes as a runtime integration scenario, and its row in Doc 06 §6 no longer says pending.
 - TCC confirm after `txn/pivot-passed` stays safe under duplicate delivery.
+
+Key generations (W7) do not weaken this. A key moves on only past a cancelled bracket, and a pivot
+has no bracket, so its key is the business key on every freeze; a live bracket always keeps its key,
+so a duplicated try is still refused by `UNIQUE (idempotency_key)` — and now before it is dispatched.
 
 **S16 is no longer vacuous.** It asserts that a failure inside a rule-authored branch never reaches
 a planner, and `engine/src/recovery.ts` now appends `replan/boundary` — so the restraint is
@@ -91,6 +95,18 @@ against real rows at every split point by `engine/test/integration/recovery-canc
 and on the Coordinator side by its integration suite. The stalled-planner hole (formerly increment 4)
 was closed earlier by `subgraph/unreadable` ([03 §2.6](../design/03-replan-and-recovery.md#26-the-other-way-a-run-stops-a-planner-that-produced-no-work)).
 
+**A replan after a cancellation is a new operation, and is keyed as one.** A live run found that the
+replan's reserve was frozen under the cancelled reserve's idempotency key, which `txn_bracket` is
+keyed by: the Coordinator could never record the new try, and the tool reserved again on every
+retry. The freeze now reads the brackets already recorded under each business key, inside its scope
+lock, and `nextIdempotencyKey` moves a key whose every generation was cancelled on to `key#n+1`,
+while a key with a live generation keeps it so the duplicate is refused. Behind it, the Coordinator
+refuses to dispatch a try whose key names another vertex's bracket, completes a try whose own
+bracket already exists instead of running it again, and records a key taken mid-dispatch once as a
+failure that needs reconciliation. Verified end to end against a real model with a faulted
+`payment.authorize`: request, cancel, replan under `…#2`, a second cancellation and replan, then the
+episode bound — with no open hold left behind.
+
 **Increments.**
 
 1. Price the two terms the cost model cannot compute. `compensation_cost` and the tool half of
@@ -111,6 +127,11 @@ was closed earlier by `subgraph/unreadable` ([03 §2.6](../design/03-replan-and-
 5. Liveness after a timeout cancel. The orphan sweep deletes a cancelled scope's pending members,
    and nothing appends `vertex/failed` for them, so a run whose scope was swept can stop with nothing
    outstanding for the ladder to find.
+6. An irreversible tool vertex with no scope poisons the queue. The Coordinator routes it to the
+   pivot path, `admit_pivot` receives an empty scope id and raises, and the row is claimed into the
+   same error on every lease expiry — two such rows in the development database had been retried
+   more than a thousand times. Freeze admission should refuse the shape, and the Coordinator should
+   record it as a failure rather than erroring forever.
 
 **Exit criteria.**
 

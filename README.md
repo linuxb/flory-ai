@@ -116,12 +116,17 @@ go -C coordinator test ./...
 go -C gatewayd test ./...
 ```
 
-`npm run verify` reads `.env` automatically. Go does not, so export the two service connections when
-running the Coordinator integration tests:
+The Coordinator integration tests run against the same `flory_test` database, so run `npm run
+verify` (or `npm test`) once first to provision it. Before the suite starts, a `TestMain` empties the
+work queue, clears pending cancellation requests and sets aside any scope a previous run left open —
+only on a database whose name ends in `_test`:
 
 ```sh
-FLORY_INTEGRATION=1 ENGINE_DATABASE_URL=postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory COORDINATOR_DATABASE_URL=postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory go -C coordinator test ./...
+FLORY_INTEGRATION=1 go -C coordinator test ./...
 ```
+
+`ENGINE_DATABASE_URL` and `COORDINATOR_DATABASE_URL` still point them elsewhere, and
+`OWNER_DATABASE_URL` names the owner connection the reset uses.
 
 **`npm run verify` uses a database of its own.** On first run it provisions `<your database>_test`
 with the same bootstrap and migrations, and it empties the work queue before every run. Nothing it

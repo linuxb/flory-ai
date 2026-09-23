@@ -121,9 +121,11 @@ function shapeOf(events: StoredEvent[]): string {
  * created after the router started. The router's own `vertex/started` is therefore the dividing
  * line, and not its `vertex/succeeded`: a router emits its branch first and reports success after,
  * so success is already too late to separate the two.
- * Once a deterministic branch fails, the transaction outcome belongs to the Coordinator; handing a
- * policy failure to a model would let it invent a way around a rule that was meant to bind, so a
- * planner starting anywhere after that failure is itself the defect ([03 §2.5](../../doc/design/03-replan-and-recovery.md)).
+ * Once a deterministic branch fails, handing it to a model would let the model invent a way around
+ * a rule that was meant to bind, so a replan that *selects* a planner, or a planner starting
+ * anywhere after that failure, is itself the defect ([03 §2.5](../../doc/design/03-replan-and-recovery.md)).
+ * The ladder's own answer is allowed and expected: a request to cancel the branch's scope, then an
+ * escalation — a `replan/boundary` whose `selected` is null.
  */
 export function noDeterministicReplan(events: StoredEvent[]): OracleResult {
     const name = 'O2.no_deterministic_replan';
@@ -141,9 +143,142 @@ export function noDeterministicReplan(events: StoredEvent[]): OracleResult {
 
     const failure = events.find((event) => event.event_type === 'vertex/failed' && event.vertex_id && deterministic.has(event.vertex_id));
     if (!failure) return {name, passed: true};
-    const replan = events.find((event) => event.event_type === 'replan/boundary' && event.run_seq > failure.run_seq);
+    const replan = events.find((event) => event.event_type === 'replan/boundary' && event.run_seq > failure.run_seq && event.payload.selected);
     if (replan) return {name, passed: false, detail: `replan/boundary at run_seq ${replan.run_seq} follows a deterministic branch failure at ${failure.run_seq}`};
     const planners = new Set(created.filter((event) => (event.payload as {role?: string}).role === 'planner').map((event) => event.vertex_id!));
     const called = events.find((event) => event.event_type === 'vertex/started' && event.run_seq > failure.run_seq && event.vertex_id && planners.has(event.vertex_id));
     return called ? {name, passed: false, detail: `planner ${called.vertex_id} started after a deterministic branch failure at run_seq ${failure.run_seq}`} : {name, passed: true};
+}
+
+/*
+ * Cancel-before-replan (03 §2.4 rule 1), checked on the log rather than recomputed.
+ *
+ * The three oracles below read transaction state with their own few lines instead of the engine's
+ * scope fold. They check the engine's decisions, so borrowing its reading of the log would let a
+ * misreading pass both sides at once.
+ */
+
+/** When each scope opened, and when (if ever) it closed, read directly off the log. */
+function scopeHistory(events: readonly StoredEvent[]): Map<string, {openedAt: number; cancellingAt?: number; closedAt?: number; suspendedAt?: number; pivotAt?: number; members: Set<string>}> {
+    const scopes = new Map<string, {openedAt: number; cancellingAt?: number; closedAt?: number; suspendedAt?: number; pivotAt?: number; members: Set<string>}>();
+    const entry = (scopeId: string) => {
+        let found = scopes.get(scopeId);
+        if (!found) {
+            found = {openedAt: Infinity, members: new Set()};
+            scopes.set(scopeId, found);
+        }
+        return found;
+    };
+    for (const event of events) {
+        if (!event.scope_id) continue;
+        const scope = entry(event.scope_id);
+        if (event.event_type === 'vertex/created' && event.vertex_id) scope.members.add(event.vertex_id);
+        if (event.event_type === 'txn/scope' || event.event_type === 'txn/try') scope.openedAt = Math.min(scope.openedAt, event.run_seq);
+        if (event.event_type === 'txn/scope' && (event.payload.state === 'committed' || event.payload.state === 'cancelled')) scope.closedAt ??= event.run_seq;
+        if (event.event_type === 'txn/scope' && event.payload.state === 'suspended') scope.suspendedAt ??= event.run_seq;
+        if (event.event_type === 'txn/cancel' && event.payload.phase === 'requested') scope.cancellingAt ??= event.run_seq;
+        if (event.event_type === 'txn/cancel' && event.payload.phase === 'completed') scope.closedAt ??= event.run_seq;
+        if (event.event_type === 'vertex/started' && event.payload.phase === 'pivot') scope.pivotAt ??= event.run_seq;
+    }
+    return scopes;
+}
+
+/**
+ * O2.cancel_before_replan: no replan discards work from a scope that has not closed.
+ *
+ * For every `replan/boundary` that selects a planner, every scope the Coordinator had opened that
+ * holds a vertex the following `subgraph/shadowed` discards must have closed — cancellation
+ * completed, or committed — strictly before the boundary. A requested cancellation is not enough:
+ * its inverses have not run. The boundary's `cancelled_scopes` must name only scopes that really
+ * did finish cancelling before it.
+ *
+ * An escalation is held to the same standard for the failure's own scope: it may not be recorded
+ * while that scope could still be cancelled — opened, and not yet closed, suspended or past its
+ * pivot. Escalating there is the answer that used to strand a failure: recorded once, on a state
+ * that a cancellation already under way was about to change.
+ */
+export function cancelBeforeReplan(events: StoredEvent[]): OracleResult {
+    const name = 'O2.cancel_before_replan';
+    const scopes = scopeHistory(events);
+    for (const [index, boundary] of events.entries()) {
+        if (boundary.event_type !== 'replan/boundary') continue;
+        for (const cited of (boundary.payload.cancelled_scopes as string[] | undefined) ?? []) {
+            const closed = scopes.get(cited)?.closedAt;
+            const completed = events.some((event) => event.event_type === 'txn/cancel' && event.scope_id === cited && event.payload.phase === 'completed' && event.run_seq < boundary.run_seq);
+            if (!completed || closed === undefined) return {name, passed: false, detail: `boundary at run_seq ${boundary.run_seq} cites ${cited} as cancelled before it had finished cancelling`};
+        }
+        if (!boundary.payload.selected) {
+            const failed = boundary.payload.failed_vertex_id as string;
+            const own = events.find((event) => event.event_type === 'vertex/created' && event.vertex_id === failed)?.scope_id;
+            const scope = own ? scopes.get(own) : undefined;
+            if (scope && scope.openedAt < boundary.run_seq) {
+                const released = [scope.closedAt, scope.suspendedAt, scope.pivotAt].some((seq) => seq !== undefined && seq < boundary.run_seq);
+                if (!released) return {name, passed: false, detail: `escalation at run_seq ${boundary.run_seq} left scope ${own} of ${failed} unreleased`};
+            }
+            continue;
+        }
+        const shadow = events.slice(index + 1).find((event) => event.event_type === 'subgraph/shadowed');
+        const discarded = new Set((shadow?.payload.vertex_ids as string[] | undefined) ?? []);
+        for (const [scopeId, scope] of scopes) {
+            if (scope.openedAt > boundary.run_seq) continue;
+            if (![...scope.members].some((member) => discarded.has(member))) continue;
+            if (scope.closedAt === undefined || scope.closedAt > boundary.run_seq) {
+                return {name, passed: false, detail: `boundary at run_seq ${boundary.run_seq} discards work in scope ${scopeId}, which had not closed`};
+            }
+        }
+    }
+    return {name, passed: true};
+}
+
+/**
+ * O2.cancel_request_discipline: each cancellation is asked for once, of a scope that could still
+ * cancel, and nothing answers the failure until every scope asked about has resolved.
+ *
+ * Resolved means cancellation completed, or suspended by the Coordinator. With `final`, the log is
+ * a finished run and every request must also have resolved by its end.
+ */
+export function cancelRequestDiscipline(events: StoredEvent[], options: {final?: boolean} = {}): OracleResult {
+    const name = 'O2.cancel_request_discipline';
+    const scopes = scopeHistory(events);
+    const requested = new Map<string, number>();
+    const resolvedAt = (scopeId: string): number => Math.min(scopes.get(scopeId)?.closedAt ?? Infinity, scopes.get(scopeId)?.suspendedAt ?? Infinity);
+    for (const request of events) {
+        if (request.event_type !== 'replan/cancel-requested') continue;
+        const failed = request.payload.failed_vertex_id as string;
+        for (const scopeId of (request.payload.scope_ids as string[] | undefined) ?? []) {
+            if (requested.has(scopeId)) return {name, passed: false, detail: `scope ${scopeId} requested twice, at run_seq ${requested.get(scopeId)} and ${request.run_seq}`};
+            requested.set(scopeId, request.run_seq);
+            const scope = scopes.get(scopeId);
+            if (!scope || scope.openedAt > request.run_seq) return {name, passed: false, detail: `scope ${scopeId} was requested at run_seq ${request.run_seq} before the Coordinator opened it`};
+            const settledBefore = [scope.cancellingAt, scope.closedAt, scope.suspendedAt, scope.pivotAt].some((seq) => seq !== undefined && seq < request.run_seq);
+            if (settledBefore) return {name, passed: false, detail: `scope ${scopeId} was requested at run_seq ${request.run_seq} after it could no longer be cancelled`};
+            const resolved = resolvedAt(scopeId);
+            const early = events.find((event) => event.event_type === 'replan/boundary' && event.payload.failed_vertex_id === failed && event.run_seq > request.run_seq && event.run_seq < resolved);
+            if (early) return {name, passed: false, detail: `boundary at run_seq ${early.run_seq} answered ${failed} before scope ${scopeId} resolved`};
+            if (options.final && resolved === Infinity) return {name, passed: false, detail: `scope ${scopeId} requested at run_seq ${request.run_seq} never resolved`};
+        }
+    }
+    return {name, passed: true};
+}
+
+/**
+ * O2.one_answer_per_failure: a failure is answered at most once.
+ *
+ * Between one failure of a vertex (or one unreadable answer from a planner) and the next, at most
+ * one `replan/boundary` names it. Two would mean the ladder decided the same failure twice — once
+ * escalating on a state that was about to change, and once again after it had.
+ */
+export function oneAnswerPerFailure(events: StoredEvent[]): OracleResult {
+    const name = 'O2.one_answer_per_failure';
+    const answers = new Map<string, number>();
+    for (const event of events) {
+        const failedVertex = event.event_type === 'vertex/failed' ? event.vertex_id : event.event_type === 'subgraph/unreadable' ? (event.payload.planner_vertex_id as string) : null;
+        if (failedVertex) answers.set(failedVertex, 0);
+        if (event.event_type !== 'replan/boundary') continue;
+        const answered = event.payload.failed_vertex_id as string;
+        const count = (answers.get(answered) ?? 0) + 1;
+        answers.set(answered, count);
+        if (count > 1) return {name, passed: false, detail: `${answered} answered a second time at run_seq ${event.run_seq}`};
+    }
+    return {name, passed: true};
 }

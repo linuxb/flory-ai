@@ -86,13 +86,14 @@ export interface ScopeSnapshot {
  * Each names a scope whose shape is fine and whose moment has passed: one that is fencing, one
  * waiting for a person, one reserved for an admitted pivot, one that has passed its pivot and may
  * now run only what was admitted before it, and one whose sealed try is past its deadline and is
- * therefore already a cancellation candidate. Freezing work under any of them queues a vertex that
+ * therefore already a cancellation candidate, and one fenced by a failure or a cancel request and
+ * waiting for its cancellation to be decided. Freezing work under any of them queues a vertex that
  * claim eligibility will refuse, or worse, one that races the fence.
  *
  * A committed or cancelled scope is not here: both are terminal, so neither gates what comes after
  * it, and a freeze at that savepoint is the ordinary case.
  */
-export type ScopeAdmissionBlock = 'cancelling' | 'suspended' | 'pivot-inflight' | 'pivot-passed' | 'expired-try';
+export type ScopeAdmissionBlock = 'fenced' | 'cancelling' | 'suspended' | 'pivot-inflight' | 'pivot-passed' | 'expired-try';
 
 /** Where a router sits relative to the transaction structure above it. */
 export type RouterPlacement = 'at_savepoint' | 'inside_scope';
@@ -130,6 +131,7 @@ export function checkScopeAdmission(existingScopes: readonly ScopeSnapshot[]): C
 /** States one admission block in the terms the log records it in. */
 function blockReason(block: ScopeAdmissionBlock): string {
     if (block === 'expired-try') return 'it holds a sealed try past its deadline';
+    if (block === 'fenced') return 'a member failed or a cancellation was requested, and it is fenced until that is decided';
     if (block === 'pivot-inflight') return 'its pivot is inflight and its outcome is unresolved';
     if (block === 'pivot-passed') return 'its pivot has passed, so it runs only work admitted before it';
     return `it is ${block}`;

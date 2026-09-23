@@ -70,15 +70,28 @@ async function openScope(run: string): Promise<string> {
 }
 
 /**
+ * The Engine's request to cancel a scope, which is what authorizes a failure-driven cancellation
+ * and what fences the scope until the Coordinator picks it up.
+ */
+async function requestCancel(run: string, scopeId: string): Promise<void> {
+    await engine.appendEvents(run, [{event_type: 'replan/cancel-requested', payload: {failed_vertex_id: randomUUID(), scope_ids: [scopeId], level: 'L1', reason: 'staged', candidates: []}}]);
+}
+
+/** Stages the Coordinator's side of an authorized cancellation: `requested`. */
+async function beginCancel(run: string, scopeId: string): Promise<void> {
+    await coordinator.appendEvents(run, [{event_type: 'txn/cancel', scope_id: scopeId, payload: {phase: 'requested', idempotency_key: `scope:${scopeId}:cleanup`}}]);
+}
+
+/**
  * Closes a scope this suite opened.
  *
  * The sweeper polls every `cancelling` scope and every expired sealed try in the whole database, so
  * a staged scope left unclosed becomes a recovery candidate inside some unrelated suite's run.
  */
-async function closeScope(run: string, scopeId: string, alreadyFenced = false): Promise<void> {
-    const key = `scope:${scopeId}:cleanup`;
-    if (!alreadyFenced) await coordinator.appendEvents(run, [{event_type: 'txn/cancel', scope_id: scopeId, payload: {phase: 'requested', idempotency_key: key}}]);
-    await coordinator.appendEvents(run, [{event_type: 'txn/cancel', scope_id: scopeId, payload: {phase: 'completed', idempotency_key: key}}]);
+async function closeScope(run: string, scopeId: string, stage: 'open' | 'requested' | 'cancelling' = 'open'): Promise<void> {
+    if (stage === 'open') await requestCancel(run, scopeId);
+    if (stage !== 'cancelling') await beginCancel(run, scopeId);
+    await coordinator.appendEvents(run, [{event_type: 'txn/cancel', scope_id: scopeId, payload: {phase: 'completed', idempotency_key: `scope:${scopeId}:cleanup`}}]);
 }
 
 /** The work queue is global, so a suite that fills it drains it again. */
@@ -110,8 +123,8 @@ describe('branch admission under the scope lock', () => {
     it('refuses a freeze into a scope that is already fencing', async () => {
         const run = await startRun();
         const scopeId = await openScope(run);
-        const key = `scope:${scopeId}:cleanup`;
-        await coordinator.appendEvents(run, [{event_type: 'txn/cancel', scope_id: scopeId, payload: {phase: 'requested', idempotency_key: key}}]);
+        await requestCancel(run, scopeId);
+        await beginCancel(run, scopeId);
 
         const result = await submitter.submit(run, submission());
 
@@ -122,7 +135,39 @@ describe('branch admission under the scope lock', () => {
         // The refusal and the absence of queued work are one fact: the freeze never committed.
         expect(await createdVertexCount(run)).toBe(0);
 
-        await closeScope(run, scopeId, true);
+        await closeScope(run, scopeId, 'cancelling');
+    });
+
+    it('refuses a freeze into a scope fenced by a request the Coordinator has not picked up yet', async () => {
+        // Between the Engine's request and the Coordinator's pickup the scope is still `open`, and
+        // only the fence says it is on its way out. A branch frozen into it now would queue work
+        // that is never claimable and that the cancellation would then have to delete.
+        const run = await startRun();
+        const scopeId = await openScope(run);
+        await requestCancel(run, scopeId);
+
+        const result = await submitter.submit(run, submission());
+
+        expect(result.status).toBe('rejected');
+        if (result.status !== 'rejected') throw new Error('unreachable');
+        expect(result.violations.some((violation) => violation.rule === 'R12' && violation.message.includes('fenced'))).toBe(true);
+        expect(await createdVertexCount(run)).toBe(0);
+
+        await closeScope(run, scopeId, 'requested');
+    });
+
+    it('admits a freeze once a fenced scope has finished cancelling', async () => {
+        // Found by a live run: the fence is kept as history after the cancellation completes, and
+        // reading it as a block refused the replan the cancellation had just made legal.
+        const run = await startRun();
+        const scopeId = await openScope(run);
+        await requestCancel(run, scopeId);
+        await closeScope(run, scopeId, 'requested');
+
+        const result = await submitter.submit(run, submission());
+
+        expect(result.status).toBe('accepted');
+        await drainQueue();
     });
 
     it('refuses a freeze into a scope whose sealed try is already past its deadline', async () => {

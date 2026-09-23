@@ -5,6 +5,7 @@ import {
     CONSOLE_PROJECTOR_VERSION,
     type ConsoleBracket,
     type ConsoleCallCost,
+    type ConsoleCancelRequest,
     type ConsoleCounterfactual,
     type ConsoleDagModel,
     type ConsoleDelta,
@@ -44,6 +45,7 @@ export function emptyConsoleDag(runId: string, version = CONSOLE_PROJECTOR_VERSI
         scopes: [],
         replans: [],
         proposals: [],
+        cancel_requests: [],
         counterfactuals: [],
         spend: {calls: 0, input_tokens: 0, output_tokens: 0, amount: null, currency: null},
         announced: {},
@@ -108,6 +110,7 @@ class FoldState {
             scopes: [],
             replans: [...previous.replans],
             proposals: [...previous.proposals],
+            cancel_requests: [...previous.cancel_requests],
             counterfactuals: [...previous.counterfactuals],
             announced: {...previous.announced},
         };
@@ -159,6 +162,9 @@ class FoldState {
                 return;
             case 'replan/boundary':
                 this.boundary(event);
+                return;
+            case 'replan/cancel-requested':
+                this.model.cancel_requests.push(cancelRequestOf(event));
                 return;
             case 'subgraph/unreadable':
                 this.unreadable(event);
@@ -545,6 +551,18 @@ function vertexRole(role: unknown): ConsoleVertex['role'] {
 function proposalOf(event: StoredEvent): ConsoleProposal {
     const payload = event.payload as {source?: string};
     return {proposed_seq: event.run_seq, outcome: 'open', source: payload.source === 'router' ? 'router' : 'planner', terminal_seq: null, stage: null, violations: []};
+}
+
+function cancelRequestOf(event: StoredEvent): ConsoleCancelRequest {
+    const payload = event.payload as {failed_vertex_id?: string; scope_ids?: string[]; level?: string; intended_boundary_vertex_id?: string | null; reason?: string};
+    return {
+        at_run_seq: event.run_seq,
+        failed_vertex_id: payload.failed_vertex_id ?? '',
+        scope_ids: payload.scope_ids ?? [],
+        level: payload.level ?? '',
+        intended_boundary_vertex_id: payload.intended_boundary_vertex_id ?? null,
+        reason: payload.reason ?? '',
+    };
 }
 
 function counterfactualOf(event: StoredEvent): ConsoleCounterfactual {

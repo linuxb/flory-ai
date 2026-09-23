@@ -158,10 +158,16 @@ describe('reading the log for recovery', () => {
         expect(backtrackFloor([...events, event('txn/pivot-passed', {scope_id: SCOPE, payload: {}})])).toBeGreaterThan(0);
     });
 
-    it('counts a bracket open until it is confirmed or cancelled', () => {
-        const tried = [...baseRun(), event('txn/try', {scope_id: SCOPE, vertex_id: TOOL, payload: {}})];
+    it('counts a bracket open until it is confirmed or its cancellation completes', () => {
+        const tried = [...baseRun(), event('txn/try', {scope_id: SCOPE, vertex_id: TOOL, payload: {idempotency_key: 'hold'}})];
         expect([...openBracketScopes(tried)]).toEqual([SCOPE]);
-        expect([...openBracketScopes([...tried, event('txn/cancel', {scope_id: SCOPE, payload: {}})])]).toEqual([]);
+        // A requested cancellation has not run its inverses yet, and may never: a failed inverse
+        // suspends the scope instead. Closing the bracket here is what let a replan plan across a
+        // try that was still holding its reservation.
+        const requested = [...tried, event('txn/cancel', {scope_id: SCOPE, payload: {idempotency_key: 'k', phase: 'requested'}})];
+        expect([...openBracketScopes(requested)]).toEqual([SCOPE]);
+        expect([...openBracketScopes([...requested, event('txn/cancel', {scope_id: SCOPE, payload: {idempotency_key: 'k', phase: 'completed'}})])]).toEqual([]);
+        expect([...openBracketScopes([...tried, event('txn/confirm', {scope_id: SCOPE, vertex_id: TOOL, payload: {idempotency_key: 'hold'}})])]).toEqual([]);
     });
 });
 
@@ -276,16 +282,18 @@ describe('choosing a replan boundary', () => {
         expect(decision.level).toBe('L4');
     });
 
-    it('refuses a boundary whose subtree still holds an open bracket', () => {
-        // Compensation precedes backtracking (03 §2.4 rule 1). P2's subtree has a sealed try, so
-        // resuming there would plan across an active one; P1 is above it and no better, because
-        // the open scope is below P1 too.
-        const events = [...baseRun(), event('txn/try', {scope_id: SCOPE, vertex_id: TOOL, payload: {}})];
+    it('asks for a cancellation rather than resuming across an open bracket', () => {
+        // Compensation precedes backtracking (03 §2.4 rule 1). P2's subtree holds a sealed try in
+        // an open scope, so resuming there now would plan across it. That is not a reason to give
+        // up on P2: no pivot has passed, so cancelling the scope makes it legal (03 §2.2 step 1).
+        const events = [...baseRun(), event('txn/try', {scope_id: SCOPE, vertex_id: TOOL, payload: {idempotency_key: 'hold'}})];
         const scoped = events.map((entry) => (entry.event_type === 'vertex/created' && entry.vertex_id === TOOL ? {...entry, scope_id: SCOPE} : entry));
         const decision = selectBoundary(scoped, TOOL, POLICY);
-        expect(decision.candidates.every((entry) => entry.rejected === 'open_bracket')).toBe(true);
-        // Cancellable, because no pivot has passed — which is L3's precondition, not L4's.
-        expect(decision.level).toBe('L3');
+        expect(decision).toMatchObject({action: 'request', level: 'L1', intended: P2, selected: null, requestScopes: [SCOPE]});
+        // Both planners are priced, and both say what they need cancelled first.
+        expect(decision.candidates.map((entry) => entry.requires_cancel)).toEqual([[SCOPE], [SCOPE]]);
+        // Nothing is shadowed yet: a request replans nothing.
+        expect(decision.shadowed).toEqual([]);
     });
 
     it('escalates past a planner that has already been the boundary too often', () => {

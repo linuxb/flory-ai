@@ -40,10 +40,11 @@ export function model(vertices: ConsoleVertex[], options: Partial<ConsoleDagMode
         scopes: [],
         replans: [],
         proposals: [],
+        cancel_requests: [],
         counterfactuals: [],
         spend: {calls: 0, input_tokens: 0, output_tokens: 0, amount: null, currency: null},
         announced: {},
-        console_projector_version: 'console-projector@v1',
+        console_projector_version: 'console-projector@v2',
         ...options,
     };
 }

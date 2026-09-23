@@ -41,9 +41,10 @@ const WORKFLOW_TYPE = 'b2b2c-retail';
  *
  * The sandbox already owns a deterministic fault schedule keyed by `(seed, tool, attempt)`, so
  * nothing new is injected here: the demo just schedules one and lets the ordinary machinery
- * produce a real `vertex/failed`. Read-only tools only, deliberately — a failing side effect would
- * need cancellation before a boundary is legal, and cancellation is the Coordinator's, not this
- * ladder's.
+ * produce a real `vertex/failed`. A read-only tool exercises replanning alone; a try inside a
+ * transaction scope (`payment.authorize`, say) exercises cancel-before-replan as well: the failure
+ * fences the scope, the ladder asks for the cancellation, the Coordinator runs it, and only then
+ * does the ladder replan.
  */
 const FAULT_TOOL = process.env.FLORY_DEMO_FAULT?.trim();
 const CATEGORY = 'portable-espresso';
@@ -56,8 +57,13 @@ const VERSIONS = {projector_version: 'projector@v1', harness_state_version: 'har
  * log knows the estimate came from the demo and not from a provider's price list.
  */
 const DEMO_PRICING: LlmPricing = {currency: 'CNY', cache_hit_input_per_million: 1, cache_miss_input_per_million: 4, output_per_million: 16, reference: 'demo-price-list'};
-/** Bounds the run so a demo cannot spend an unbounded number of model calls. */
-const MAX_TURNS = 8;
+/**
+ * Bounds the run so a demo cannot spend an unbounded number of model calls.
+ *
+ * A turn is a pass, not a model call: asking for a cancellation and waiting for it each take one,
+ * so a failure inside a transaction scope needs room for both before its replan.
+ */
+const MAX_TURNS = 12;
 
 const TASK_INPUT = {
     role: 'retailer',
@@ -288,9 +294,8 @@ async function advance(engine: EventStore, runId: string, reads: ReadExecutor, r
         const stalled = stalledPlanners(events).includes(failed);
         heading(`Recovery: ${names.get(failed) ?? failed.slice(0, 8)} ${stalled ? 'answered unreadably' : 'failed'}`);
         const outcome = await recovery.recoverOne({runId, taskInput: TASK_INPUT, workflowType: WORKFLOW_TYPE, goalFor: (vertexId) => goalFor(names.get(vertexId) ?? '')}, view);
-        if (outcome.status !== 'idle') {
-            const {decision} = outcome;
-            line(`ladder      ${decision.level}  ${decision.reason}`);
+        for (const decision of outcome.status === 'idle' ? [] : outcome.status === 'awaiting_cancellation' ? outcome.decisions : [outcome.decision]) {
+            line(`ladder      ${decision.level}  ${decision.action}  ${decision.reason}`);
             for (const candidate of decision.candidates) {
                 const label = names.get(candidate.planner_vertex_id) ?? candidate.planner_vertex_id.slice(0, 8);
                 line(`  ${label.padEnd(12)} ${candidate.rejected ? `rejected: ${candidate.rejected}` : `${candidate.cost} ${candidate.currency}`}`);
@@ -302,12 +307,18 @@ async function advance(engine: EventStore, runId: string, reads: ReadExecutor, r
             line(`replanned   at ${names.get(outcome.decision.selected!) ?? outcome.decision.selected!.slice(0, 8)} (${outcome.turn.status})`);
             note('Same run, same run_id. The shadowed subtree stays in the log as evidence, and the planner was told what failed rather than shown the work.');
         } else if (outcome.status === 'escalated') {
-            line('escalated   no legal boundary; this run needs compensation or a human');
-            note('L3 and L4 act on the world rather than on the plan, so the ladder records the decision and stops here.');
+            line('escalated   no legal boundary; this run needs a human');
+            note('Any cancellation the failure needed has already resolved; the escalation is the final answer.');
+        } else if (outcome.status === 'cancel_requested') {
+            line(`requested   cancellation of ${outcome.decision.requestScopes.map((scope) => scope.slice(0, 8)).join(', ')} at run_seq ${outcome.requestSeq}`);
+            note('The engine asks, the Coordinator executes. The boundary is recorded only once the cancellation has completed (03 §2.4 rule 1).');
+        } else if (outcome.status === 'awaiting_cancellation') {
+            note('Waiting for a cancellation already under way; nothing is appended until it resolves.');
         }
         events = await engine.readStream(runId);
         names = authorNames(events);
-        progressed = true;
+        // Waiting is not progress: the Coordinator has to move before this pass can do anything.
+        progressed = outcome.status !== 'awaiting_cancellation' && outcome.status !== 'idle';
     }
 
     for (const pending of readyNonTool(events, ['router'])) {
@@ -373,11 +384,33 @@ async function settle(engine: EventStore, pool: Pool, runId: string, timeoutMs =
         // opened its scope at the moment the graph freezes.
         const events = await engine.readStream(runId);
         const terminal = new Set(events.filter((event) => ['vertex/succeeded', 'vertex/failed'].includes(event.event_type)).map((event) => event.vertex_id));
-        const outstanding = events.filter(
-            (event) => event.event_type === 'vertex/created' && ['tool', 'confirmation-barrier'].includes((event.payload as {role?: string}).role ?? '') && !terminal.has(event.vertex_id),
+        const scopes = await pool.query<{scope_id: string; state: string; fenced: boolean; requested: boolean}>(
+            "SELECT scope_id, state, fenced_at IS NOT NULL AS fenced, cancel_request_outcome IN ('pending', 'deferred') AS requested FROM txn_scope WHERE run_id = $1",
+            [runId],
         );
-        const scopes = await pool.query<{scope_id: string; state: string}>('SELECT scope_id, state FROM txn_scope WHERE run_id = $1', [runId]);
-        if (!outstanding.length || Date.now() > deadline) {
+        // Members of a fenced, cancelling, cancelled or suspended scope never reach a terminal
+        // event: the fence stops them being claimed, a cancellation deletes them from the queue, and
+        // a suspension waits for a person. Waiting for them would spend the whole timeout. A scope
+        // past its pivot is different — its forward work still runs — so it is not stopped.
+        const stopped = new Set(
+            scopes.rows.filter((scope) => (scope.fenced && scope.state === 'open') || ['cancelling', 'cancelled', 'suspended'].includes(scope.state)).map((scope) => scope.scope_id),
+        );
+        const outstanding = events.filter(
+            (event) =>
+                event.event_type === 'vertex/created' &&
+                ['tool', 'confirmation-barrier'].includes((event.payload as {role?: string}).role ?? '') &&
+                !terminal.has(event.vertex_id) &&
+                !(event.scope_id && stopped.has(event.scope_id)),
+        );
+        // A cancellation resolving is what a waiting ladder needs to hear about.
+        const resolved = events
+            .slice(before)
+            .some((event) => (event.event_type === 'txn/cancel' && event.payload.phase === 'completed') || (event.event_type === 'txn/scope' && event.payload.state === 'suspended'));
+        // A requested scope is waiting for the Coordinator to pick the request up, and a cancelling
+        // one for its inverses: either way the Coordinator still owes this run something. A fenced
+        // scope nobody has asked to cancel yet is the ladder's move, not the Coordinator's.
+        const cancelling = scopes.rows.some((scope) => (scope.requested && scope.state === 'open') || scope.state === 'cancelling');
+        if ((!outstanding.length && !cancelling) || resolved || Date.now() > deadline) {
             const after = await engine.readStream(runId);
             if (after.length === before) return false;
             heading('Coordinator drove the transaction');

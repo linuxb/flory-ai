@@ -170,6 +170,30 @@ export interface RunAdmissionContext {
  */
 export type FreezeDecision = {admitted: true; events: EventDraft[]} | {admitted: false};
 
+/** One of a run's scope rows as it stands under the lock, for a decision that must not race it. */
+export interface LockedScope {
+    scopeId: string;
+    state: string;
+    fenced: boolean;
+    hasSealedTry: boolean;
+    hasExpiredTry: boolean;
+}
+
+/** What a decision taken under the scope lock can see: the whole log, and the rows it is holding. */
+export interface ScopeLockedView {
+    events: StoredEvent[];
+    scopes: LockedScope[];
+}
+
+interface LockedScopeRow {
+    scope_id: string;
+    state: string;
+    pivot_count: number;
+    has_sealed_try: boolean;
+    has_expired_try: boolean;
+    fenced: boolean;
+}
+
 export class EventStore {
     private readonly pool: Pool;
     constructor(private readonly options: EventStoreOptions) {
@@ -225,6 +249,45 @@ export class EventStore {
             if (frozen?.event_type !== 'subgraph/frozen' || vertices.some((event) => event.event_type !== 'vertex/created'))
                 throw new Error('frozen subgraph requires one frozen event followed by vertex/created events');
             const sequences = await this.appendWith(client, runId, decision.events);
+            await client.query('COMMIT');
+            return sequences;
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+    /**
+     * Takes one recovery decision and its append inside a single transaction that holds every one
+     * of the run's scope rows.
+     *
+     * The recovery ladder used to read the log and append afterwards, and the Coordinator was
+     * moving the scopes underneath it: a read before a cancellation began escalated a failure that
+     * a moment later had a legal boundary, and a read in the middle of one replanned across a try
+     * whose inverse had not run. Every scope-state change needs these row locks, so the log read
+     * inside them is stable for the whole decision, and the events appended are appended against
+     * exactly the state they were decided on.
+     *
+     * `decide` runs once, inside the open transaction, and must stay pure. Returning `null` appends
+     * nothing and rolls back.
+     */
+    async appendUnderScopeLock(runId: string, decide: (view: ScopeLockedView) => EventDraft[] | null): Promise<number[] | null> {
+        this.requireEngine();
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            const locked = await client.query<LockedScopeRow>('SELECT scope_id, state, pivot_count, has_sealed_try, has_expired_try, fenced FROM lock_run_scopes($1)', [runId]);
+            const events = await this.readStreamWith(client, runId);
+            const drafts = decide({
+                events,
+                scopes: locked.rows.map((row) => ({scopeId: row.scope_id, state: row.state, fenced: row.fenced, hasSealedTry: row.has_sealed_try, hasExpiredTry: row.has_expired_try})),
+            });
+            if (!drafts?.length) {
+                await client.query('ROLLBACK');
+                return null;
+            }
+            const sequences = await this.appendWith(client, runId, drafts);
             await client.query('COMMIT');
             return sequences;
         } catch (error) {
@@ -384,10 +447,7 @@ export class EventStore {
      * be mistaken for a savepoint. `seed_floor` is the authoritative record that a run is a fork.
      */
     private async readAdmissionContextWith(client: PoolClient, runId: string): Promise<RunAdmissionContext> {
-        const scopes = await client.query<{scope_id: string; state: string; pivot_count: number; has_sealed_try: boolean; has_expired_try: boolean}>(
-            'SELECT scope_id, state, pivot_count, has_sealed_try, has_expired_try FROM lock_run_scopes($1)',
-            [runId],
-        );
+        const scopes = await client.query<LockedScopeRow>('SELECT scope_id, state, pivot_count, has_sealed_try, has_expired_try, fenced FROM lock_run_scopes($1)', [runId]);
         const run = await client.query<{fork: boolean}>('SELECT seed_floor IS NOT NULL AS fork FROM run WHERE run_id = $1', [runId]);
         return {scopes: scopes.rows.map(rowToScopeSnapshot), isCounterfactual: run.rows[0]?.fork ?? false};
     }
@@ -406,8 +466,8 @@ export class EventStore {
 }
 
 /** Maps one locked scope row onto the snapshot the pure checker reads. */
-function rowToScopeSnapshot(row: {scope_id: string; state: string; pivot_count: number; has_sealed_try: boolean; has_expired_try: boolean}): ScopeSnapshot {
-    const block = admissionBlock(row.state, row.has_expired_try);
+function rowToScopeSnapshot(row: LockedScopeRow): ScopeSnapshot {
+    const block = admissionBlock(row.state, row.has_expired_try, row.fenced);
     return {
         scopeId: row.scope_id,
         state: snapshotState(row.state, row.has_sealed_try),
@@ -430,7 +490,11 @@ function snapshotState(stored: string, hasSealedTry: boolean): ScopeSnapshot['st
  * that is all the structural rules need to know. Admission needs the distinction it drops: a
  * fencing scope and an open one look identical to R12 and behave nothing alike.
  */
-function admissionBlock(stored: string, hasExpiredSealedTry: boolean): ScopeAdmissionBlock | undefined {
+function admissionBlock(stored: string, hasExpiredSealedTry: boolean, fenced: boolean): ScopeAdmissionBlock | undefined {
     if (stored === 'cancelling' || stored === 'suspended' || stored === 'pivot-inflight' || stored === 'pivot-passed') return stored;
+    // The fence is one-way and outlives the scope it stopped, as history. It blocks only while the
+    // scope is still `open`: a fenced scope that went on to cancel is terminal, and treating the
+    // leftover mark as a block refused the very replan the cancellation was clearing the way for.
+    if (fenced && stored === 'open') return 'fenced';
     return hasExpiredSealedTry ? 'expired-try' : undefined;
 }

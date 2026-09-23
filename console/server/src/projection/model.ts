@@ -10,7 +10,7 @@ import type {EffectClass} from '../../../../engine/src/admission/check-rules.js'
  */
 
 /** This projection's own version, independent of the planner pipeline's `projector_version`. */
-export const CONSOLE_PROJECTOR_VERSION = 'console-projector@v1';
+export const CONSOLE_PROJECTOR_VERSION = 'console-projector@v2';
 
 /** What an operator needs to know about one vertex, as opposed to what a model needs. */
 export interface ConsoleVertex {
@@ -160,6 +160,22 @@ export interface ConsoleProposal {
     violations: unknown[];
 }
 
+/**
+ * A cancellation the recovery ladder asked for, and the boundary it was clearing the way to.
+ *
+ * Kept because the request is the one step of a recovery that changes nothing visible by itself:
+ * the scope goes on looking open until the Coordinator picks it up, and an operator watching a run
+ * that has paused needs to see that it is waiting, on what, and why.
+ */
+export interface ConsoleCancelRequest {
+    at_run_seq: number;
+    failed_vertex_id: string;
+    scope_ids: string[];
+    level: string;
+    intended_boundary_vertex_id: string | null;
+    reason: string;
+}
+
 /** A counterfactual taken off this run, so an operator can follow it. */
 export interface ConsoleCounterfactual {
     child_run_id: string;
@@ -197,6 +213,7 @@ export interface ConsoleDagModel {
     scopes: ConsoleScope[];
     replans: ConsoleReplan[];
     proposals: ConsoleProposal[];
+    cancel_requests: ConsoleCancelRequest[];
     counterfactuals: ConsoleCounterfactual[];
     spend: ConsoleSpend;
     /**

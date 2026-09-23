@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 import {checkSubDag, loadToolRegistry} from '../../src/index.js';
-import {compileVertexDrafts, lowerToProposal, normalizeWorkflow, type WorkflowSubmission} from '../../src/admission/workflow.js';
+import {compileVertexDrafts, generationOf, lowerToProposal, nextIdempotencyKey, normalizeWorkflow, type BracketRecord, type WorkflowSubmission} from '../../src/admission/workflow.js';
 import type {ResolvedToolView} from '../../src/gateway/gateway-client.js';
 import type {ToolViewDocument} from '../../src/gateway/tool-view.js';
 
@@ -212,5 +212,62 @@ describe('frozen idempotency key', () => {
         // An empty key would be accepted by the schema and then collide at the first other bracket,
         // so refusing here is the only outcome that stays visible.
         expect(() => txnOf([{id: 'hold', kind: 'tool', tool: 'record.reserve', scope: 's', input: {sku: 'SKU-1'}}], [{id: 's', members: ['hold']}])).toThrow('resolves to nothing');
+    });
+});
+
+describe('a key after a cancellation', () => {
+    const base = 'record.reserve:ORDER-1';
+    const bracket = (idempotencyKey: string, state: BracketRecord['state']): BracketRecord => ({idempotencyKey, state});
+
+    it('reads a generation off a key, and nothing off a key that is not one', () => {
+        expect(generationOf(base, base)).toBe(1);
+        expect(generationOf(base, `${base}#3`)).toBe(3);
+        expect(generationOf(base, `${base}#x`)).toBeNull();
+        expect(generationOf(base, `${base}#0`)).toBeNull();
+        expect(generationOf(base, `${base}0`)).toBeNull();
+        expect(generationOf(base, 'record.reserve:ORDER-10')).toBeNull();
+    });
+
+    it('keeps the business key when nothing is bracketed under it', () => {
+        expect(nextIdempotencyKey(base, [])).toBe(base);
+        // A key that merely starts the same way belongs to a different order.
+        expect(nextIdempotencyKey(base, [bracket('record.reserve:ORDER-10', 'cancelled')])).toBe(base);
+    });
+
+    it('moves on past a cancelled generation, and past every one of them', () => {
+        // The live run's case: a replan reserving for an order whose reservation was cancelled.
+        expect(nextIdempotencyKey(base, [bracket(base, 'cancelled')])).toBe(`${base}#2`);
+        expect(nextIdempotencyKey(base, [bracket(`${base}#2`, 'cancelled'), bracket(base, 'cancelled')])).toBe(`${base}#3`);
+        // Order of the history does not matter, and a stray non-generation key is ignored.
+        expect(nextIdempotencyKey(base, [bracket(`${base}#x`, 'cancelled'), bracket(base, 'cancelled'), bracket(`${base}#4`, 'cancelled')])).toBe(`${base}#5`);
+    });
+
+    it('keeps a live key, so a genuine duplicate is refused rather than given a fresh identity', () => {
+        expect(nextIdempotencyKey(base, [bracket(base, 'sealed')])).toBe(base);
+        expect(nextIdempotencyKey(base, [bracket(base, 'cancelled'), bracket(`${base}#2`, 'confirmed')])).toBe(`${base}#2`);
+        // Even a live generation below a cancelled newer one — which should not exist — wins: a
+        // fresh key there would make a second live reservation for one operation.
+        expect(nextIdempotencyKey(base, [bracket(base, 'sealed'), bracket(`${base}#2`, 'cancelled')])).toBe(base);
+    });
+
+    it('freezes a call under the key its bracket history calls for', () => {
+        const history = new Map([[base, [bracket(base, 'cancelled')]]]);
+        const compiled = compileVertexDrafts(
+            submission([{id: 'hold', kind: 'tool', tool: 'record.reserve', scope: 's', input: {order_id: 'ORDER-1'}}], [{id: 's', members: ['hold']}]),
+            view(),
+            new Map(),
+            undefined,
+            history,
+        );
+        expect((compiled.drafts[0]!.payload as {txn: {idempotency_key: string}}).txn.idempotency_key).toBe(`${base}#2`);
+        // An author-chosen key has a history too, and moves on the same way.
+        const chosen = compileVertexDrafts(
+            submission([{id: 'hold', kind: 'tool', tool: 'record.reserve', scope: 's', idempotencyKey: 'chosen', input: {order_id: 'ORDER-1'}}], [{id: 's', members: ['hold']}]),
+            view(),
+            new Map(),
+            undefined,
+            new Map([['chosen', [bracket('chosen', 'cancelled')]]]),
+        );
+        expect((chosen.drafts[0]!.payload as {txn: {idempotency_key: string}}).txn.idempotency_key).toBe('chosen#2');
     });
 });

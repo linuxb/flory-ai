@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {Pool, type PoolClient} from 'pg';
 import type {ScopeAdmissionBlock, ScopeSnapshot} from '../admission/check-rules.js';
+import type {BracketRecord} from '../admission/workflow.js';
 import {assertEventDraft, type BusinessFactDraft, type DomainAppendResult, type EventDraft, type ForkRequest, type ForkSubstitution, type StoredBusinessEvent, type StoredEvent} from './events.js';
 
 /** A service role permitted to append events. */
@@ -162,6 +163,12 @@ export interface RunAdmissionContext {
     scopes: ScopeSnapshot[];
     /** True on a fork run: an offline simulation, where no emitted branch may carry an effect. */
     isCounterfactual: boolean;
+    /**
+     * Brackets already recorded under each business key the freeze will use, and under that key's
+     * generations. Keys are global, not per run: a cancelled reservation for an order in another run
+     * collides exactly as one in this run does.
+     */
+    brackets: ReadonlyMap<string, readonly BracketRecord[]>;
 }
 
 /**
@@ -235,12 +242,12 @@ export class EventStore {
      * `decide` runs exactly once, inside the open transaction, and must stay pure: any I/O of its
      * own would be performed while holding those locks.
      */
-    async freezeUnderScopeLock(runId: string, decide: (context: RunAdmissionContext) => FreezeDecision): Promise<number[] | null> {
+    async freezeUnderScopeLock(runId: string, decide: (context: RunAdmissionContext) => FreezeDecision, idempotencyKeys: readonly string[] = []): Promise<number[] | null> {
         this.requireEngine();
         const client = await this.pool.connect();
         try {
             await client.query('BEGIN');
-            const decision = decide(await this.readAdmissionContextWith(client, runId));
+            const decision = decide(await this.readAdmissionContextWith(client, runId, idempotencyKeys));
             if (!decision.admitted) {
                 await client.query('ROLLBACK');
                 return null;
@@ -446,10 +453,32 @@ export class EventStore {
      * `suspended`, `pivot-inflight` and `pivot-passed` are all still unclosed, so none of them may
      * be mistaken for a savepoint. `seed_floor` is the authoritative record that a run is a fork.
      */
-    private async readAdmissionContextWith(client: PoolClient, runId: string): Promise<RunAdmissionContext> {
+    private async readAdmissionContextWith(client: PoolClient, runId: string, idempotencyKeys: readonly string[] = []): Promise<RunAdmissionContext> {
         const scopes = await client.query<LockedScopeRow>('SELECT scope_id, state, pivot_count, has_sealed_try, has_expired_try, fenced FROM lock_run_scopes($1)', [runId]);
         const run = await client.query<{fork: boolean}>('SELECT seed_floor IS NOT NULL AS fork FROM run WHERE run_id = $1', [runId]);
-        return {scopes: scopes.rows.map(rowToScopeSnapshot), isCounterfactual: run.rows[0]?.fork ?? false};
+        return {scopes: scopes.rows.map(rowToScopeSnapshot), isCounterfactual: run.rows[0]?.fork ?? false, brackets: await this.readBracketsWith(client, idempotencyKeys)};
+    }
+    /**
+     * Every bracket recorded under each business key or one of its generations.
+     *
+     * Read inside the freeze's transaction, after the scope locks: a cancellation that completes
+     * concurrently takes those locks too, so the history read here is the one the freeze commits
+     * against. The prefix match is only a narrowing; `generationOf` decides what really belongs.
+     */
+    private async readBracketsWith(client: PoolClient, idempotencyKeys: readonly string[]): Promise<Map<string, BracketRecord[]>> {
+        const found = new Map<string, BracketRecord[]>();
+        if (!idempotencyKeys.length) return found;
+        const rows = await client.query<{base: string; idempotency_key: string; state: BracketRecord['state']}>(
+            `SELECT k.base, b.idempotency_key, b.state FROM unnest($1::text[]) AS k(base)
+             JOIN txn_bracket b ON b.idempotency_key = k.base OR starts_with(b.idempotency_key, k.base || '#')`,
+            [[...new Set(idempotencyKeys)]],
+        );
+        for (const row of rows.rows) {
+            const list = found.get(row.base) ?? [];
+            list.push({idempotencyKey: row.idempotency_key, state: row.state});
+            found.set(row.base, list);
+        }
+        return found;
     }
     private async appendWith(client: PoolClient, runId: string, events: EventDraft[]): Promise<number[]> {
         events.forEach(assertEventDraft);

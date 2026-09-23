@@ -229,6 +229,7 @@ export function compileVertexDrafts(
     resolved: ResolvedToolView,
     bindings: ReadonlyMap<string, RouterBinding> = new Map(),
     newId: () => string = randomUUID,
+    brackets: ReadonlyMap<string, readonly BracketRecord[]> = new Map(),
 ): CompiledSubgraph {
     const vertexIds = new Map(workflow.vertices.map((vertex) => [vertex.id, newId()]));
     const scopeIds = new Map((workflow.scopes ?? []).map((scope) => [scope.id, newId()]));
@@ -246,7 +247,7 @@ export function compileVertexDrafts(
             event_type: 'vertex/created',
             vertex_id: vertexIds.get(vertex.id)!,
             parent_refs: parentRefs,
-            payload: vertexPayload(vertex, contracts, resolved, slotIds.get(vertex.id), bindings.get(vertex.id)),
+            payload: vertexPayload(vertex, contracts, resolved, slotIds.get(vertex.id), bindings.get(vertex.id), brackets),
         };
         // The pin is a column rather than a payload field, and deliberately so: a fork substitutes
         // pins by column, so a bound rule is substitutable by exactly the mechanism that already
@@ -293,6 +294,7 @@ function vertexPayload(
     resolved: ResolvedToolView,
     slotId?: string,
     binding?: RouterBinding,
+    brackets: ReadonlyMap<string, readonly BracketRecord[]> = new Map(),
 ): Record<string, unknown> {
     if (vertex.kind === 'planner') return {role: 'planner', ...(vertex.goal ? {goal: vertex.goal} : {})};
     if (vertex.kind === 'confirmation-barrier') return {role: 'confirmation-barrier'};
@@ -308,7 +310,8 @@ function vertexPayload(
     const contract = contracts.get(vertex.tool);
     if (!contract) throw new Error(`${vertex.id} names ${vertex.tool}, absent from the resolved tool view`);
     const retry = contract.retry_constraints;
-    const idempotencyKey = vertex.idempotencyKey ?? derivedIdempotencyKey(vertex, contract);
+    const base = baseIdempotencyKey(vertex, contract);
+    const idempotencyKey = base === undefined ? undefined : nextIdempotencyKey(base, brackets.get(base) ?? []);
     return {
         role: 'tool',
         tool: contract.tool_id,
@@ -404,6 +407,11 @@ function valueAtArgumentPath(input: Record<string, unknown>, path: string): unkn
  * empty key, and `txn_bracket` is keyed by it, so an empty one makes the first bracket anywhere in
  * the database collide with every later one.
  */
+/** The business identity of a call: a submitted key, or the one its contract derives from the input. */
+export function baseIdempotencyKey(vertex: SubmittedToolVertex, contract: ResolvedToolView['document']['tools'][number]): string | undefined {
+    return vertex.idempotencyKey ?? derivedIdempotencyKey(vertex, contract);
+}
+
 function derivedIdempotencyKey(vertex: SubmittedToolVertex, contract: ResolvedToolView['document']['tools'][number]): string | undefined {
     const path = contract.txn.idempotency_key_path;
     if (!path) return undefined;
@@ -423,6 +431,58 @@ function derivedIdempotencyKey(vertex: SubmittedToolVertex, contract: ResolvedTo
         throw new Error(`${vertex.id} calls ${contract.tool_id}, whose idempotency key path ${path} resolves to nothing in its input`);
     }
     return `${contract.tool_id}:${current}`;
+}
+
+/** One transaction bracket already recorded under a business key or one of its generations. */
+export interface BracketRecord {
+    idempotencyKey: string;
+    state: 'sealed' | 'confirmed' | 'cancelled';
+}
+
+/** The separator between a business key and its generation: `record.reserve:ORDER-1#2`. */
+export const GENERATION_SEPARATOR = '#';
+
+/**
+ * The generation of `key` under `base`: 1 for the base key itself, `n` for `base#n`, and null when
+ * `key` is not one of `base`'s generations at all (`base#x`, or a different key that merely starts
+ * the same way).
+ */
+export function generationOf(base: string, key: string): number | null {
+    if (key === base) return 1;
+    if (!key.startsWith(`${base}${GENERATION_SEPARATOR}`)) return null;
+    const suffix = key.slice(base.length + GENERATION_SEPARATOR.length);
+    return /^[1-9][0-9]*$/.test(suffix) ? Number(suffix) : null;
+}
+
+/**
+ * Chooses the idempotency key a new call is frozen with, given the brackets already recorded under
+ * its business key.
+ *
+ * The business key alone is right almost always, and it is what makes a duplicated delivery one
+ * operation: two tries for one order are one reservation. It stops being right once a cancellation
+ * has run. A cancelled bracket is finished — its reservation was released — and a replan that
+ * reserves for the same order again is a new operation, not a repeat of the old one. Freezing it
+ * under the old key collides with the cancelled bracket (`txn_bracket` is keyed by it), and the
+ * Coordinator could never record the new try at all. So a key all of whose generations were
+ * cancelled moves on to the next generation, which the tool sees as a new reservation.
+ *
+ * A key with any generation still live — sealed, or confirmed — is not moved on: that call
+ * genuinely is a duplicate of one in flight or done, and keeping the live key is what lets the
+ * database and the Coordinator refuse it.
+ */
+export function nextIdempotencyKey(base: string, existing: readonly BracketRecord[]): string {
+    const generations = existing
+        .map((record) => ({record, generation: generationOf(base, record.idempotencyKey)}))
+        .filter((entry): entry is {record: BracketRecord; generation: number} => entry.generation !== null);
+    if (!generations.length) return base;
+    // Any live generation wins over the latest one. Generations only move on past a cancelled one,
+    // so a live generation below a newer one should not exist — but if it did, a fresh key would
+    // make a second live reservation for one business operation, which is the one thing keys exist
+    // to prevent. Keeping the live key lets the database and the Coordinator refuse the call.
+    const live = generations.find((entry) => entry.record.state !== 'cancelled');
+    if (live) return live.record.idempotencyKey;
+    const latest = Math.max(...generations.map((entry) => entry.generation));
+    return `${base}${GENERATION_SEPARATOR}${latest + 1}`;
 }
 
 /**

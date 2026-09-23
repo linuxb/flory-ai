@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +22,8 @@ type recordingAdapter struct {
 	outcomes map[string]model.OperationOutcome
 	// results replaces a successful call's result, for a tool whose answer the scenario reads.
 	results map[string]map[string]any
+	// onCall runs inside a call, before it answers, to stage what another process does meanwhile.
+	onCall func(request model.OperationRequest)
 	// scopedTo records calls for one run only. The sweeper is global, so a scenario that runs a
 	// sweep would otherwise see recovery work belonging to an earlier scenario's leftovers.
 	scopedTo string
@@ -29,6 +33,9 @@ type recordingAdapter struct {
 func (adapter *recordingAdapter) Execute(_ context.Context, request model.OperationRequest) (model.OperationResponse, error) {
 	if adapter.scopedTo == "" || adapter.scopedTo == request.RunID {
 		adapter.calls = append(adapter.calls, request.Tool)
+	}
+	if adapter.onCall != nil {
+		adapter.onCall(request)
 	}
 	if outcome, found := adapter.outcomes[request.Tool]; found {
 		return model.OperationResponse{Outcome: outcome, Error: "injected " + string(outcome)}, nil
@@ -848,6 +855,167 @@ func TestFailureDrivenCancelRequiresEngineRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertScopeState(t, ctx, engine, runID, scopeID, "cancelled")
+}
+
+// A try whose idempotency key already names another bracket is refused before it is dispatched.
+// The case a live run found: a replan after a cancellation froze its reserve under the cancelled
+// reserve's key, the tool reserved again, the bracket append was refused by the key, and the row
+// was claimed into the same refusal every 30 seconds -- reserving again each time.
+func TestTryWithBracketedKeyFailsWithoutDispatch(t *testing.T) {
+	if os.Getenv("FLORY_INTEGRATION") != "1" {
+		t.Skip("set FLORY_INTEGRATION=1 to run PostgreSQL Coordinator integration tests")
+	}
+	ctx := context.Background()
+	engine, database := openIntegration(t, ctx)
+	firstRun, firstScope, firstTry, _, _ := scenarioIDs(t)
+	if _, err := engine.Exec(ctx, `SELECT create_run($1)`, firstRun); err != nil {
+		t.Fatal(err)
+	}
+	appendEngineEvents(t, ctx, engine, firstRun, tryFixture(firstScope, firstTry, siblingID(firstTry, "911"), 60)[:2])
+	service := New(database, &recordingAdapter{}, Config{WorkerID: "bracketed-key-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	if err := service.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	takenKey := firstScope + ":reserve-a"
+
+	secondRun, secondScope, secondTry, _, _ := scenarioIDs(t)
+	if _, err := engine.Exec(ctx, `SELECT create_run($1)`, secondRun); err != nil {
+		t.Fatal(err)
+	}
+	appendEngineEvents(t, ctx, engine, secondRun, []map[string]any{
+		{"event_type": "run/start", "payload": map[string]any{"schema_version": "v1"}},
+		keyedTry(secondScope, secondTry, takenKey),
+	})
+	adapter := &recordingAdapter{scopedTo: secondRun}
+	checker := New(database, adapter, Config{WorkerID: "bracketed-key-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	if err := checker.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(adapter.calls) != 0 {
+		t.Fatalf("a try under a bracketed key was dispatched: %v", adapter.calls)
+	}
+	assertFailedWith(t, ctx, engine, secondRun, secondTry, "already names the bracket")
+	if queued := countQueued(t, ctx, engine, secondRun, secondTry); queued != 0 {
+		t.Fatalf("the refused try's row was left to be claimed again: %d rows", queued)
+	}
+	if !scopeFenced(t, ctx, engine, secondRun, secondScope) {
+		t.Fatal("the refusal did not fence its scope, so the ladder never hears of it")
+	}
+}
+
+// A try that sealed its bracket and then lost its row's completion is completed, not run again.
+func TestSealedTryIsNotRunAgainAfterLostCompletion(t *testing.T) {
+	if os.Getenv("FLORY_INTEGRATION") != "1" {
+		t.Skip("set FLORY_INTEGRATION=1 to run PostgreSQL Coordinator integration tests")
+	}
+	ctx := context.Background()
+	engine, database := openIntegration(t, ctx)
+	runID, scopeID, first, _, _ := scenarioIDs(t)
+	if _, err := engine.Exec(ctx, `SELECT create_run($1)`, runID); err != nil {
+		t.Fatal(err)
+	}
+	appendEngineEvents(t, ctx, engine, runID, tryFixture(scopeID, first, siblingID(first, "912"), 60)[:2])
+	adapter := &recordingAdapter{scopedTo: runID}
+	service := New(database, adapter, Config{WorkerID: "lost-completion-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	if err := service.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Put the row back, as if the process died between the append and complete_work.
+	owner := openPool(t, ctx, ownerURL(t))
+	defer owner.Close()
+	if _, err := owner.Exec(ctx, `INSERT INTO work_queue (vertex_id, run_id, ready_at, parent_refs, payload, scope_id)
+        SELECT vertex_id, run_id, now(), parent_refs, payload, scope_id FROM run_event_log WHERE run_id = $1 AND vertex_id = $2 AND event_type = 'vertex/created'`, runID, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ProcessOne(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(adapter.calls, []string{"inventory.reserve.a"}) {
+		t.Fatalf("a sealed try was run again: %v", adapter.calls)
+	}
+	if queued := countQueued(t, ctx, engine, runID, first); queued != 0 {
+		t.Fatalf("the restored row was not completed: %d rows", queued)
+	}
+	if failures := countEvents(t, ctx, engine, runID, "vertex/failed"); failures != 0 {
+		t.Fatalf("a completed try was recorded as failed: %d", failures)
+	}
+}
+
+// When another try takes the key while this one is running, the call has happened and cannot be
+// bracketed. It is recorded once as a failure that needs reconciliation, not retried forever.
+func TestBracketKeyTakenDuringDispatchFailsOnce(t *testing.T) {
+	if os.Getenv("FLORY_INTEGRATION") != "1" {
+		t.Skip("set FLORY_INTEGRATION=1 to run PostgreSQL Coordinator integration tests")
+	}
+	ctx := context.Background()
+	engine, database := openIntegration(t, ctx)
+	runID, scopeID, contested, rivalVertex, rivalScope := scenarioIDs(t)
+	if _, err := engine.Exec(ctx, `SELECT create_run($1)`, runID); err != nil {
+		t.Fatal(err)
+	}
+	key := scopeID + ":contested"
+	appendEngineEvents(t, ctx, engine, runID, []map[string]any{
+		{"event_type": "run/start", "payload": map[string]any{"schema_version": "v1"}},
+		keyedTry(scopeID, contested, key),
+		keyedTry(rivalScope, rivalVertex, scopeID+":rival"),
+	})
+	if err := database.EnsureScope(ctx, runID, rivalScope); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &recordingAdapter{scopedTo: runID, onCall: func(request model.OperationRequest) {
+		if request.VertexID != contested {
+			return
+		}
+		// The rival seals a bracket under the contested key while the contested call is in flight.
+		rival := model.EventDraft{EventType: "txn/try", VertexID: &rivalVertex, ScopeID: &rivalScope,
+			Payload: map[string]any{"idempotency_key": key, "deadline_at": time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)}}
+		if err := database.AppendScoped(ctx, runID, rivalScope, rival); err != nil {
+			t.Error(err)
+		}
+	}}
+	service := New(database, adapter, Config{WorkerID: "contested-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	if err := service.ProcessOne(ctx); err != nil {
+		t.Fatalf("the conflict errored the pass instead of being recorded: %v", err)
+	}
+	assertFailedWith(t, ctx, engine, runID, contested, "needs reconciliation")
+	if queued := countQueued(t, ctx, engine, runID, contested); queued != 0 {
+		t.Fatalf("the conflicted row was left to be claimed again: %d rows", queued)
+	}
+	// Leave nothing claimable behind.
+	owner := openPool(t, ctx, ownerURL(t))
+	defer owner.Close()
+	if _, err := owner.Exec(ctx, `DELETE FROM work_queue WHERE run_id = $1`, runID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// keyedTry is a TCC reserve frozen under an explicit idempotency key.
+func keyedTry(integrationScope, vertexID, key string) map[string]any {
+	retry := map[string]any{"max_attempts": 1, "initial_backoff_ms": 0, "multiplier": 1, "max_backoff_ms": 0}
+	return map[string]any{"event_type": "vertex/created", "vertex_id": vertexID, "scope_id": integrationScope, "payload": map[string]any{
+		"role": "tool", "tool": "inventory.reserve.a", "input": map[string]any{"sku": "SKU-1"}, "retry_policy": retry,
+		"txn": map[string]any{"effect_class": "reversible", "mode": "tcc", "idempotency_key": key, "try_timeout_s": 60, "confirm_tool": "inventory.confirm.a", "cancel_tool": "inventory.release.a"},
+	}}
+}
+
+func assertFailedWith(t *testing.T, ctx context.Context, engine *pgxpool.Pool, runID, vertexID, fragment string) {
+	t.Helper()
+	var reason string
+	if err := engine.QueryRow(ctx, `SELECT payload->>'error' FROM run_event_log WHERE run_id = $1 AND vertex_id = $2 AND event_type = 'vertex/failed'`, runID, vertexID).Scan(&reason); err != nil {
+		t.Fatalf("no vertex/failed for %s: %v", vertexID, err)
+	}
+	if !strings.Contains(reason, fragment) {
+		t.Fatalf("failure reason %q does not say %q", reason, fragment)
+	}
+}
+
+func ownerURL(t *testing.T) string {
+	t.Helper()
+	target, err := url.Parse(coordinatorURL())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return environmentForTest("OWNER_DATABASE_URL", fmt.Sprintf("postgresql://flory:flory-dev-password@%s%s", target.Host, target.Path))
 }
 
 func openIntegration(t *testing.T, ctx context.Context) (*pgxpool.Pool, *store.PostgresStore) {

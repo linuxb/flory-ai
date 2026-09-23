@@ -98,6 +98,20 @@ func (service *Service) ProcessOne(ctx context.Context) error {
 }
 
 func (service *Service) processRegular(ctx context.Context, item *model.WorkItem) error {
+	if brackets(item) {
+		owner, err := service.store.BracketOwner(ctx, item.Payload.Txn.IdempotencyKey)
+		if err != nil {
+			return err
+		}
+		switch {
+		case owner == item.VertexID:
+			// This vertex already sealed its try: the try and its success were appended together,
+			// and only the row's completion was lost. Running it again would be a second call.
+			return service.store.CompleteWork(ctx, service.worker, item.VertexID)
+		case owner != "":
+			return service.refuseBracketedKey(ctx, item, fmt.Sprintf("idempotency key %s already names the bracket of vertex %s", item.Payload.Txn.IdempotencyKey, owner), 0)
+		}
+	}
 	if err := service.store.Append(ctx, item.RunID, vertexEvent("vertex/started", item, map[string]any{"attempt": 1})); err != nil {
 		return err
 	}
@@ -145,6 +159,41 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 		events = append(events, model.EventDraft{EventType: "txn/try", VertexID: &item.VertexID, ScopeID: &item.ScopeID, Payload: tryPayload})
 	}
 	events = append(events, vertexEvent("vertex/succeeded", item, map[string]any{"attempts": attempts, "result": response.Result}))
+	if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, events...); err != nil {
+		if store.IsBracketKeyConflict(err) {
+			// Another try took the key between the check above and this append. The call has run
+			// and its effect cannot be bracketed, so it is recorded as the failure it is -- loudly,
+			// because a reservation may now exist that nothing will release -- rather than retried
+			// on every lease expiry into the same conflict.
+			service.logger.Error("a try ran but its bracket could not be recorded", "run_id", item.RunID, "vertex_id", item.VertexID, "idempotency_key", item.Payload.Txn.IdempotencyKey)
+			return service.refuseBracketedKey(ctx, item, fmt.Sprintf("idempotency key %s was bracketed by another try while this one ran; its effect is unrecorded and needs reconciliation", item.Payload.Txn.IdempotencyKey), attempts)
+		}
+		return err
+	}
+	return service.store.CompleteWork(ctx, service.worker, item.VertexID)
+}
+
+// brackets reports whether a successful call of this item seals a transaction bracket, which is
+// keyed by its idempotency key.
+func brackets(item *model.WorkItem) bool {
+	mode := item.Payload.Txn.Mode
+	return item.ScopeID != "" && item.Payload.Txn.IdempotencyKey != "" && (mode == generated.ModeTCC || mode == generated.ModeSaga)
+}
+
+// refuseBracketedKey records a try whose idempotency key already names another bracket as a
+// permanent failure, and completes its row.
+//
+// Dispatching it would be a second operation under one key, and its bracket could never be
+// recorded: the append is refused by the key, the lease expires, and the row is claimed into the
+// same refusal forever while the tool is called again each time. As a failure it reaches the
+// recovery ladder like any other, and in an open scope the same append fences it.
+func (service *Service) refuseBracketedKey(ctx context.Context, item *model.WorkItem, reason string, attempts int) error {
+	events := []model.EventDraft{
+		vertexEvent("vertex/failed", item, map[string]any{"attempts": attempts, "error": reason, "outcome": model.OutcomePermanentFailure}),
+	}
+	if attempts == 0 {
+		events = append([]model.EventDraft{vertexEvent("vertex/started", item, map[string]any{"attempt": 1})}, events...)
+	}
 	if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, events...); err != nil {
 		return err
 	}

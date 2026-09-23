@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/linuxb/flory-ai/coordinator/internal/eventlog/generated"
 	"github.com/linuxb/flory-ai/coordinator/internal/model"
@@ -176,6 +177,23 @@ func (store *PostgresStore) AppendScoped(ctx context.Context, runID, scopeID str
 	}
 	_, err = store.pool.Exec(ctx, `SELECT run_seq FROM append_scope_events($1, $2, $3::jsonb)`, runID, scopeID, encoded)
 	return err
+}
+
+// BracketOwner returns the vertex whose try holds this idempotency key, or "" when no bracket does.
+func (store *PostgresStore) BracketOwner(ctx context.Context, key string) (string, error) {
+	var owner string
+	err := store.pool.QueryRow(ctx, `SELECT try_vertex_id::text FROM txn_bracket WHERE idempotency_key = $1`, key).Scan(&owner)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return owner, err
+}
+
+// IsBracketKeyConflict reports whether an append failed because a try's idempotency key already
+// names another bracket.
+func IsBracketKeyConflict(err error) bool {
+	var pgError *pgconn.PgError
+	return errors.As(err, &pgError) && pgError.Code == "23505" && pgError.ConstraintName == "txn_bracket_pkey"
 }
 
 // PendingCancelRequests returns scopes the Engine asked to cancel whose request is due for a

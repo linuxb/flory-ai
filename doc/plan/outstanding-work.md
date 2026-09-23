@@ -103,7 +103,12 @@ was closed earlier by `subgraph/unreadable` ([03 §2.6](../design/03-replan-and-
    `suspended` state and the ladder's cancellation requests; nothing marks the run itself.
 3. L3's terminal replan at the savepoint and its postmortem ([03 §3](../design/03-replan-and-recovery.md#3-rollback-l3)).
    The ladder now cancels the failure's scope before recording L3, and records nothing further.
-4. Liveness after a timeout cancel. The orphan sweep deletes a cancelled scope's pending members,
+4. A key reused after a definitive failure. A cancelled key moves on to its next generation; a
+   try that failed permanently before sealing leaves no bracket, so a replan for the same business
+   key reuses that key. That is right for a tool that treats a failed call as no operation, and
+   wrong for one that caches its answer per key and would replay the failure, or refuse different
+   arguments under a key it has seen. Which one a tool is belongs in its contract.
+5. Liveness after a timeout cancel. The orphan sweep deletes a cancelled scope's pending members,
    and nothing appends `vertex/failed` for them, so a run whose scope was swept can stop with nothing
    outstanding for the ladder to find.
 

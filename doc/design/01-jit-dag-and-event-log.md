@@ -127,7 +127,7 @@ Constraints do not forget, and the coordinator has many concurrent writers. Anyt
 |---|---|
 | Append-only (§3.3 inv. 1) | Application roles have no `UPDATE`/`DELETE` grant on either plane; controlled security-definer append functions are their only write path |
 | Event ownership (§3.2.1) | `BEFORE INSERT` trigger checks the connection's `session_user` against the event-type ownership table, so the TS engine cannot append `txn/*` and the Coordinator cannot append `subgraph/*` |
-| Idempotency ([02 §2](./02-transaction-model.md)) | `UNIQUE (idempotency_key)` on `txn_bracket` — a duplicate try becomes a constraint violation instead of a duplicated side effect |
+| Idempotency ([02 §2](./02-transaction-model.md)) | `UNIQUE (idempotency_key)` on `txn_bracket` — a duplicate try becomes a constraint violation instead of a duplicated side effect. A key whose every bracket was cancelled is a finished operation: a later call for the same business key is frozen under the next generation (`…#2`), so a replan after a cancellation is a new operation rather than a collision ([`nextIdempotencyKey`](../../engine/src/admission/workflow.ts)) |
 | One pivot per scope (R3) | partial unique index on the pivot column; a second line of defence behind the freeze-time check |
 | No cancel after pivot (I3) | `BEFORE INSERT` trigger rejects a `txn/cancel` when the scope projection records `pivot-passed` |
 

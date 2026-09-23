@@ -120,7 +120,7 @@ func (store *PostgresStore) ResolvePivotAbsent(ctx context.Context, runID, scope
 	return err
 }
 
-// CancelDecision is which of the sweeper's three paths the database took under the scope lock.
+// CancelDecision is which path the database took under the scope lock.
 type CancelDecision string
 
 const (
@@ -128,20 +128,79 @@ const (
 	CancelRequested CancelDecision = "requested"
 	// CancelDuplicate means the scope was already fenced under this same idempotency key.
 	CancelDuplicate CancelDecision = "duplicate"
-	// CancelDeferred means another worker holds a live execution lease, so progress may still be happening.
+	// CancelDeferred means a live execution lease exists, so progress may still be happening. An
+	// Engine request stays pending and is picked up again.
 	CancelDeferred CancelDecision = "deferred"
 	// CancelSuspended means an attempt is unresolved: the scope escalated to L4 with its evidence
 	// and its reservations intact, and no txn/cancel was appended.
 	CancelSuspended CancelDecision = "suspended"
+	// CancelIneligible means a timeout candidate no longer has an expired try under the lock.
+	CancelIneligible CancelDecision = "ineligible"
+)
+
+// CancelOrigin is who is asking for a cancellation, which decides what authorizes it.
+type CancelOrigin string
+
+const (
+	// CancelOriginEngine is a failure-driven cancellation the Engine requested with
+	// replan/cancel-requested. The Coordinator never starts one of these on its own.
+	CancelOriginEngine CancelOrigin = "engine"
+	// CancelOriginTimeout is the orphan sweep's, for a sealed try past its deadline.
+	CancelOriginTimeout CancelOrigin = "timeout"
 )
 
 // RequestScopeCancel asks the database to decide, under the scope lock, whether this scope may
-// cancel at all. The decision is never taken by the caller: an expired deadline only makes a scope
-// a candidate, and the observation that settles it has to be made where nothing can change under it.
-func (store *PostgresStore) RequestScopeCancel(ctx context.Context, worker, runID, scopeID, key, reason string) (CancelDecision, error) {
+// cancel at all. The decision is never taken by the caller: a pending request or an expired
+// deadline only makes a scope a candidate, and the observation that settles it has to be made
+// where nothing can change under it.
+func (store *PostgresStore) RequestScopeCancel(ctx context.Context, worker, runID, scopeID, key, reason string, origin CancelOrigin) (CancelDecision, error) {
 	var decision string
-	err := store.pool.QueryRow(ctx, `SELECT request_scope_cancel($1, $2, $3, $4, $5)`, worker, runID, scopeID, key, reason).Scan(&decision)
+	err := store.pool.QueryRow(ctx, `SELECT request_scope_cancel($1, $2, $3, $4, $5, $6)`, worker, runID, scopeID, key, reason, string(origin)).Scan(&decision)
 	return CancelDecision(decision), err
+}
+
+// AppendScoped appends events that touch one transaction scope, holding that scope's row first.
+//
+// The append triggers update the scope row -- a failure fences it, a try references it, a state
+// change rewrites it -- after append_events has locked the run. Everything that decides about a
+// scope locks the scope and then the run, so appending the other way round deadlocks against the
+// Engine's recovery and against a cancellation being requested. Taking the scope row first keeps
+// the one order: txn_scope, then run, then work_queue.
+func (store *PostgresStore) AppendScoped(ctx context.Context, runID, scopeID string, events ...model.EventDraft) error {
+	if scopeID == "" {
+		return store.Append(ctx, runID, events...)
+	}
+	encoded, err := json.Marshal(events)
+	if err != nil {
+		return err
+	}
+	_, err = store.pool.Exec(ctx, `SELECT run_seq FROM append_scope_events($1, $2, $3::jsonb)`, runID, scopeID, encoded)
+	return err
+}
+
+// PendingCancelRequests returns scopes the Engine asked to cancel whose request is due for a
+// decision: never picked up, or deferred by a lease and due again, on a scope still open. It is a
+// candidate list, read without a lock; request_scope_cancel re-decides each one under the scope
+// lock. The projection resolves a request when its scope cancels or suspends by any path, and the
+// open-state filter is the second guard: a request on a closed scope can only fail, and a handful
+// of those at the head of the list would starve every request behind them.
+func (store *PostgresStore) PendingCancelRequests(ctx context.Context) ([]ScopeCancellation, error) {
+	rows, err := store.pool.Query(ctx, `SELECT run_id, scope_id FROM txn_scope
+        WHERE cancel_request_outcome IN ('pending', 'deferred') AND cancel_request_next_at <= now() AND state = 'open'
+        ORDER BY cancel_requested_seq, scope_id LIMIT 8`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []ScopeCancellation{}
+	for rows.Next() {
+		var request ScopeCancellation
+		if err := rows.Scan(&request.RunID, &request.ScopeID); err != nil {
+			return nil, err
+		}
+		result = append(result, request)
+	}
+	return result, rows.Err()
 }
 
 // AttemptStart names one side-effecting request and what authorizes it.
@@ -226,7 +285,7 @@ func (store *PostgresStore) CompleteCancelMember(ctx context.Context, worker, ru
 // CompleteScopeCancel appends the terminal scope cancellation after every inverse succeeds.
 func (store *PostgresStore) CompleteScopeCancel(ctx context.Context, runID, scopeID, key string) error {
 	payload := map[string]any{"idempotency_key": key, "phase": "completed"}
-	return store.Append(ctx, runID, model.EventDraft{EventType: "txn/cancel", ScopeID: stringPointer(scopeID), Payload: payload})
+	return store.AppendScoped(ctx, runID, scopeID, model.EventDraft{EventType: "txn/cancel", ScopeID: stringPointer(scopeID), Payload: payload})
 }
 
 // SealedBracket identifies post-pivot confirm work.

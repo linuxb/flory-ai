@@ -64,8 +64,16 @@ func (service *Service) Run(ctx context.Context) error {
 	}
 }
 
-// ProcessOne claims and processes at most one ready vertex.
+// ProcessOne serves at most one pending cancellation request, or else claims and processes at
+// most one ready vertex.
+//
+// A request comes first. It releases reservations a failed scope is still holding, while a claim
+// would only take on new work -- and a scope with a pending request is fenced, so none of its own
+// work is claimable until the request is decided anyway.
 func (service *Service) ProcessOne(ctx context.Context) error {
+	if served, err := service.processCancelRequest(ctx); err != nil || served {
+		return err
+	}
 	item, err := service.store.ClaimWork(ctx, service.worker, service.lease)
 	if err != nil || item == nil {
 		return err
@@ -104,16 +112,14 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 	}
 	response, attempts := result.response, result.attempts
 	if response.Outcome != model.OutcomeSucceeded {
+		// The failure is recorded and nothing more. In an open scope the same append fences it --
+		// the database stops handing out its work and refuses its pivot -- and whether to cancel it
+		// is the Engine's decision, taken with the replan it serves. This process used to cancel on
+		// the spot, and the recovery ladder raced it. After the pivot there is nothing to fence and
+		// nothing to cancel, and asking used to raise here and leave this row leased.
 		failure := vertexEvent("vertex/failed", item, map[string]any{"attempts": attempts, "error": response.Error, "outcome": response.Outcome})
-		if err := service.store.Append(ctx, item.RunID, failure); err != nil {
+		if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, failure); err != nil {
 			return err
-		}
-		if item.ScopeID != "" {
-			// An unknown outcome leaves the attempt unresolved, so this is also the path on which
-			// the scope suspends instead of cancelling. The decision is the database's.
-			if err := service.fenceScope(ctx, item.RunID, item.ScopeID, "pre-pivot vertex failure"); err != nil {
-				return err
-			}
 		}
 		return service.store.CompleteWork(ctx, service.worker, item.VertexID)
 	}
@@ -139,7 +145,7 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 		events = append(events, model.EventDraft{EventType: "txn/try", VertexID: &item.VertexID, ScopeID: &item.ScopeID, Payload: tryPayload})
 	}
 	events = append(events, vertexEvent("vertex/succeeded", item, map[string]any{"attempts": attempts, "result": response.Result}))
-	if err := service.store.Append(ctx, item.RunID, events...); err != nil {
+	if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, events...); err != nil {
 		return err
 	}
 	return service.store.CompleteWork(ctx, service.worker, item.VertexID)
@@ -199,7 +205,7 @@ func (service *Service) processPivot(ctx context.Context, item *model.WorkItem) 
 			vertexEvent("vertex/failed", item, map[string]any{"attempts": attempts, "error": response.Error, "outcome": response.Outcome}),
 			{EventType: "txn/scope", ScopeID: &item.ScopeID, Payload: map[string]any{"state": "suspended"}},
 		}
-		if err := service.store.Append(ctx, item.RunID, events...); err != nil {
+		if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, events...); err != nil {
 			return err
 		}
 		return service.store.CompleteWork(ctx, service.worker, item.VertexID)
@@ -208,7 +214,7 @@ func (service *Service) processPivot(ctx context.Context, item *model.WorkItem) 
 		{EventType: "txn/pivot-passed", VertexID: &item.VertexID, ScopeID: &item.ScopeID, Payload: map[string]any{}},
 		vertexEvent("vertex/succeeded", item, map[string]any{"attempts": attempts, "result": response.Result}),
 	}
-	if err := service.store.Append(ctx, item.RunID, events...); err != nil {
+	if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, events...); err != nil {
 		return err
 	}
 	confirmed, err := service.confirmScope(ctx, item)
@@ -218,7 +224,7 @@ func (service *Service) processPivot(ctx context.Context, item *model.WorkItem) 
 	if !confirmed {
 		return service.store.CompleteWork(ctx, service.worker, item.VertexID)
 	}
-	if err := service.store.Append(ctx, item.RunID, model.EventDraft{EventType: "txn/scope", ScopeID: &item.ScopeID, Payload: map[string]any{"state": "committed"}}); err != nil {
+	if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, model.EventDraft{EventType: "txn/scope", ScopeID: &item.ScopeID, Payload: map[string]any{"state": "committed"}}); err != nil {
 		return err
 	}
 	return service.store.CompleteWork(ctx, service.worker, item.VertexID)
@@ -236,37 +242,67 @@ func (service *Service) failAbsentPivot(ctx context.Context, item *model.WorkIte
 	if err := service.store.ResolvePivotAbsent(ctx, item.RunID, item.ScopeID, item.VertexID); err != nil {
 		return err
 	}
-	if err := service.store.Append(ctx, item.RunID, vertexEvent("vertex/failed", item, map[string]any{"attempts": result.attempts, "error": detail, "outcome": "confirmed-absent"})); err != nil {
-		return err
-	}
-	if err := service.fenceScope(ctx, item.RunID, item.ScopeID, "pivot confirmed absent"); err != nil {
+	// resolve_pivot_absent has already reopened the scope fenced, in its own transaction; whether
+	// to cancel it is the Engine's decision, exactly as for any other failure before the pivot.
+	if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, vertexEvent("vertex/failed", item, map[string]any{"attempts": result.attempts, "error": detail, "outcome": "confirmed-absent"})); err != nil {
 		return err
 	}
 	return service.store.CompleteWork(ctx, service.worker, item.VertexID)
 }
 
-// fenceScope asks the database, under the scope lock, whether this scope may cancel at all, and
-// then does exactly what it was told.
+// requestCancel asks the database, under the scope lock, whether this scope may cancel at all,
+// and then does exactly what it was told.
 //
-// The decision cannot be taken here. An expired deadline, an empty queue, and a dead lease are all
-// observations that may be stale by the time they are acted on, and one of the three answers --
-// suspend on an unresolved attempt -- exists precisely because releasing reservations behind an
-// effect that may still land is the failure this whole path is built to refuse.
-func (service *Service) fenceScope(ctx context.Context, runID, scopeID, reason string) error {
+// The decision cannot be taken here. A pending request, an expired deadline, an empty queue, and a
+// dead lease are all observations that may be stale by the time they are acted on, and one of the
+// answers -- suspend on an unresolved attempt -- exists precisely because releasing reservations
+// behind an effect that may still land is the failure this whole path is built to refuse. Both
+// origins use the scope's one cancel key, so an Engine request and the orphan sweep converge on a
+// single cancellation whichever gets there first.
+func (service *Service) requestCancel(ctx context.Context, runID, scopeID, reason string, origin store.CancelOrigin) (store.CancelDecision, error) {
 	key := cancelKey(scopeID)
-	decision, err := service.store.RequestScopeCancel(ctx, service.worker, runID, scopeID, key, reason)
+	decision, err := service.store.RequestScopeCancel(ctx, service.worker, runID, scopeID, key, reason, origin)
 	if err != nil {
-		return err
+		return decision, err
 	}
 	switch decision {
 	case store.CancelRequested, store.CancelDuplicate:
-		return service.cancelScope(ctx, runID, scopeID, key)
+		return decision, service.cancelScope(ctx, runID, scopeID, key)
 	case store.CancelSuspended:
 		service.logger.Warn("scope suspended holding an unresolved attempt", "run_id", runID, "scope_id", scopeID, "reason", reason)
 	case store.CancelDeferred:
-		service.logger.Info("scope cancellation deferred by a live lease", "run_id", runID, "scope_id", scopeID, "reason", reason)
+		service.logger.Info("scope cancellation deferred by a live lease", "run_id", runID, "scope_id", scopeID, "reason", reason, "origin", origin)
+	case store.CancelIneligible:
+		service.logger.Info("timeout candidate no longer holds an expired try", "run_id", runID, "scope_id", scopeID)
 	}
-	return nil
+	return decision, nil
+}
+
+// processCancelRequest serves the oldest Engine cancellation request that is due, reporting
+// whether it served one.
+//
+// Served means decided: cancelled, or suspended. A deferred request did nothing -- it stays pending
+// in the database and comes round again a second later -- so it must not use up the pass, or a
+// scope whose lease outlives the poll would stop this worker claiming anything for any run. A
+// request that errors is logged and passed over for the same reason. When nothing was served the
+// pass falls through to claiming work.
+func (service *Service) processCancelRequest(ctx context.Context) (bool, error) {
+	requests, err := service.store.PendingCancelRequests(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, request := range requests {
+		decision, err := service.requestCancel(ctx, request.RunID, request.ScopeID, "engine request", store.CancelOriginEngine)
+		if err != nil {
+			service.logger.Error("engine cancellation request failed", "run_id", request.RunID, "scope_id", request.ScopeID, "error", err)
+			continue
+		}
+		if decision == store.CancelDeferred {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 func (service *Service) confirmScope(ctx context.Context, item *model.WorkItem) (bool, error) {
@@ -288,9 +324,9 @@ func (service *Service) confirmScope(ctx context.Context, item *model.WorkItem) 
 		}
 		response := result.response
 		if response.Outcome != model.OutcomeSucceeded {
-			return false, service.store.Append(ctx, item.RunID, model.EventDraft{EventType: "txn/scope", ScopeID: &item.ScopeID, Payload: map[string]any{"state": "suspended"}})
+			return false, service.store.AppendScoped(ctx, item.RunID, item.ScopeID, model.EventDraft{EventType: "txn/scope", ScopeID: &item.ScopeID, Payload: map[string]any{"state": "suspended"}})
 		}
-		if err := service.store.Append(ctx, item.RunID, model.EventDraft{EventType: "txn/confirm", VertexID: &bracket.VertexID, ScopeID: &item.ScopeID,
+		if err := service.store.AppendScoped(ctx, item.RunID, item.ScopeID, model.EventDraft{EventType: "txn/confirm", VertexID: &bracket.VertexID, ScopeID: &item.ScopeID,
 			Payload: map[string]any{"idempotency_key": bracket.IdempotencyKey}}); err != nil {
 			return false, err
 		}
@@ -317,7 +353,7 @@ func (service *Service) cancelScope(ctx context.Context, runID, scopeID, key str
 			return err
 		}
 		if result.response.Outcome != model.OutcomeSucceeded {
-			return service.store.Append(ctx, runID, model.EventDraft{EventType: "txn/scope", ScopeID: &scopeID, Payload: map[string]any{"state": "suspended"}})
+			return service.store.AppendScoped(ctx, runID, scopeID, model.EventDraft{EventType: "txn/scope", ScopeID: &scopeID, Payload: map[string]any{"state": "suspended"}})
 		}
 		if err := service.store.CompleteCancelMember(ctx, service.worker, runID, scopeID, member.VertexID); err != nil {
 			return err
@@ -414,12 +450,14 @@ func (service *Service) executeWithRetry(ctx context.Context, request call) (exe
 	return result, nil
 }
 
-// Sweep offers every expired sealed bracket to the scope fence and resumes fenced cancellations
+// Sweep offers every expired sealed bracket for cancellation and resumes fenced cancellations
 // whose member leases are no longer live.
 //
-// What the sweep produces is candidates, never verdicts. Each candidate is re-examined under the
-// scope lock by fenceScope, which defers on a live lease, suspends on an unresolved attempt, and
-// cancels only a scope that holds neither.
+// This is the one cancellation the Coordinator still starts by itself: an orphaned try whose
+// deadline passed, which no failure and no replan will ever answer. What the sweep produces is
+// candidates, never verdicts. Each candidate is re-examined under the scope lock by
+// requestCancel, which re-verifies the expired try, defers on a live lease, suspends on an
+// unresolved attempt, and cancels only a scope that holds none of those.
 //
 // One scope's failure no longer abandons the rest of the sweep: these are independent recoveries,
 // and a stuck cancellation that keeps erroring would otherwise starve every scope behind it.
@@ -431,7 +469,7 @@ func (service *Service) Sweep(ctx context.Context) error {
 	failures := []error{}
 	for runID, scopes := range expired {
 		for _, scopeID := range scopes {
-			if err := service.fenceScope(ctx, runID, scopeID, "sealed try timeout"); err != nil {
+			if _, err := service.requestCancel(ctx, runID, scopeID, "sealed try timeout", store.CancelOriginTimeout); err != nil {
 				failures = append(failures, fmt.Errorf("fence scope %s: %w", scopeID, err))
 			}
 		}

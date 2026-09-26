@@ -5,7 +5,7 @@
     <source media="(prefers-color-scheme: dark)" srcset="doc/animations/architecture-dark.gif">
     <source media="(prefers-color-scheme: light)" srcset="doc/animations/architecture-light.gif">
     <img src="doc/animations/architecture-light.gif" width="100%"
-         alt="Animated Flory architecture: a planner proposes a sub-DAG against one frozen tool view; checkSubDag admits it against rules R1-R11 and the frozen subgraph is appended to the append-only event log; the Agent Orchestrator claims the read-only vertices and the Distributed Transaction Coordinator claims every effectful one; through gatewayd a TCC try seals a bracket on the inventory and payment services, a pivot barrier holds until every try is sealed, the irreversible logistics booking runs, txn/pivot-passed closes a one-way gate, and the sealed members confirm.">
+         alt="Animated Flory architecture: a planner proposes a sub-DAG against one frozen tool view; checkSubDag admits it against rules R1-R14 and the frozen subgraph is appended to the run's append-only event log; the Agent Orchestrator claims the read-only vertices and the Distributed Transaction Coordinator claims every effectful one; through gatewayd a TCC try seals a bracket on the inventory and payment services, a pivot barrier holds until every try is sealed, the irreversible logistics booking runs, txn/pivot-passed closes a one-way gate, and the sealed members confirm.">
   </picture>
 </p>
 
@@ -22,15 +22,18 @@ The system is designed for the difficult boundary between probabilistic LLM plan
 
 ## Status
 
-This repository contains the architecture and design baseline plus an executable core: immutable event storage, canonical projections, offline forks, deterministic Doc 02 check-rules R1-R11, and T-A harness tests in TypeScript on PostgreSQL; the Distributed Transaction Coordinator and the `gatewayd` Tool Registry Gateway in Go 1.25. Test-only inventory, payment, logistics, and channel tool services register with the gateway through the SDK and exercise complex e-commerce DAG admission, barrier placement, and gateway-routed execution. Production business adapters remain out of scope.
+This repository contains the architecture and design baseline plus an executable core. The TypeScript engine on PostgreSQL implements two-plane immutable event storage, canonical projections, offline forks, the deterministic check-rules R1-R14, deterministic routers, a planner loop behind a provider-neutral model adapter, the L0-L2 levels of the recovery ladder including cancel-before-replan, and the T-A harness tests. The Distributed Transaction Coordinator and the `gatewayd` Tool Registry Gateway, with OIDC authentication and role-scoped tool views, are in Go 1.25, and a read-only Console draws a run as it unfolds. Five test-only tool services — inventory, payment, logistics, channel, and sourcing — register with the gateway through the SDK and exercise complex e-commerce DAG admission, router branching, barrier placement, and gateway-routed execution.
+
+Work that is specified but not yet built — business-plane consumers, the rest of the recovery ladder, the duplicate-delivery scenario, and the next formal-verification stage — is tracked in the [outstanding-work backlog](doc/plan/outstanding-work.md). Production business adapters remain out of scope.
 
 ## Architecture at a glance
 
-- **TypeScript engine:** owns the planner loop, canonical context-projection pipeline, check rules, prompt assembly, refine loop, model adapters, and replay testing.
+- **TypeScript engine:** owns the planner loop, deterministic routers, canonical context-projection pipeline, check rules, prompt assembly, refine loop, model adapters, the executor for read-only vertices, and replay testing.
 - **Distributed Transaction Coordinator:** owns transaction scopes, runtime barriers, timeout handling, tool execution, and business-adapter orchestration. Its current implementation uses Go 1.25.
 - **`gatewayd`:** authenticates OIDC identities, owns business-role mappings, publishes immutable role-scoped tool views, and routes exactly one requested tool call without taking ownership of planning, retries, or transaction events. It speaks authenticated MCP to executors, gRPC to tool services, and mTLS HTTP to RBAC administrators.
 - **Tool-service SDK:** what a tool service embeds to declare its contracts, register them, heartbeat, and serve execution. Available for Go and TypeScript from one generated contract.
-- **PostgreSQL:** stores the append-only event log and metadata-only harness state, and allocates the write-order sequence.
+- **PostgreSQL:** stores both append-only event planes — `run_event_log` for what a run orchestrated and `business_event_stream` for what a business entity experienced — together with metadata-only harness state, the transaction projections and work queue, and the gateway's role bindings. It allocates `run_seq` within a run and `stream_seq` within an entity.
+- **Console:** a read-only TypeScript server and React client that draw one run's graph from a separately versioned projection of the same log. It reads as `console_role`, which may `SELECT` from `run_event_log` and nothing else, so the Console cannot write.
 - **The event log is the boundary:** the services do not call each other's internals. They coordinate only by appending the event types they own. Execution events belong to the vertex's executor: read-only vertices are the Orchestrator's, everything else is the Coordinator's, and the database enforces the split.
 
 Planner thought calls use a provider-neutral adapter configured through `FLORY_LLM_*`. Set a complete OpenAI Chat Completions-compatible or Anthropic Messages-compatible endpoint, its exact model ID, and either `FLORY_LLM_API_KEY` or the safer local `FLORY_LLM_API_KEY_FILE`. See [.env.example](.env.example) for the full configuration, including optional provider request fields and auditable pricing snapshots. Successful calls record measured duration, normalized provider token usage, and optional estimated cost in `budget/charged`; secrets and raw prompts or completions are not event payloads.
@@ -148,7 +151,7 @@ npm run db:refresh && go -C coordinator test ./...   # with the two URLs exporte
 
 ### Running the gateway-mediated topology
 
-Every tool call goes through `gatewayd`. `npm run e2e:up` brings the topology up in dependency order — the gateway, then the four mock tool services, which register themselves through the SDK — and finishes once the gateway reports a published tool view:
+Every tool call goes through `gatewayd`. `npm run e2e:up` brings the topology up in dependency order — the gateway, then the five mock tool services, which register themselves through the SDK — and finishes once the gateway reports a published tool view:
 
 ```sh
 npm run e2e:up
@@ -236,8 +239,9 @@ Start with the [design overview](doc/design/00-overview.md). The design series t
 | [Database schema and storage model](doc/design/08-database-schema.md)                               | Event log immutability, sequence allocation, and synchronous projections.   |
 | [`gatewayd` Tool Registry Gateway](doc/design/09-tool-registry-gateway.md)                          | Immutable tool views, dynamic registration, the SDK, and one-attempt routing. |
 | [Deterministic routers](doc/design/10-deterministic-routers.md)                                     | Router vertices, rule templates, freeze-time admission, and zero-model branching. |
+| [Console and observability](doc/design/11-console-and-observability.md)                             | The observability projection, SSE streaming, the operator views, and the read-only boundary. |
 
-The README hero image is the animated architecture overview; its generator lives in [doc/animations/src](doc/animations/src). Architecture diagrams are available in [doc/diagram/](doc/diagram/). The [deployment architecture](doc/diagram/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/diagram/architecture.html) remains a higher-level companion. Editable Draw.io diagrams cover [transaction boundaries](doc/diagram/txn-boundary.drawio), [replanning](doc/diagram/replan-flow.drawio), [projections](doc/diagram/projection.drawio), and [Coordinator/Engine interaction](doc/diagram/coordinator-engine-interaction.drawio).
+The README hero image is the animated architecture overview; its generator lives in [doc/animations/src](doc/animations/src). Architecture diagrams are available in [doc/diagram/](doc/diagram/). The [deployment architecture](doc/diagram/deployment-architecture.html) is the current deployment view; the [conceptual architecture overview](doc/diagram/architecture.html) remains a higher-level companion. [Router admission](doc/diagram/router-admission.html) is the self-contained companion to the router design and the reference implementation of the diagram style. Editable Draw.io diagrams cover [transaction boundaries](doc/diagram/txn-boundary.drawio), [replanning](doc/diagram/replan-flow.drawio), [projections](doc/diagram/projection.drawio), and [Coordinator/Engine interaction](doc/diagram/coordinator-engine-interaction.drawio). The Console's intended look is mocked up in [doc/ui-mockups/](doc/ui-mockups/).
 
 ## Repository layout
 
@@ -248,6 +252,7 @@ The README hero image is the animated architecture overview; its generator lives
 ├── .codex/                # Project-level Codex MCP configuration
 ├── .github/               # Repository automation and CI workflows
 ├── .mcp.json              # Project-level Claude Code MCP server registration
+├── .vscode/               # Shared VS Code workspace settings: line-length rulers at 100 and 150
 ├── .env.example           # Overrideable local connection and service settings
 ├── AGENTS.md              # Contributor index, development rules, and review routes
 ├── codegraph.json         # CodeGraph indexing exclusions for generated and cached content
@@ -264,11 +269,13 @@ The README hero image is the animated architecture overview; its generator lives
 │   ├── animations/        # Animated architecture diagram and its generator
 │   ├── design/            # Architecture and mechanism specifications
 │   ├── diagram/           # HTML and Draw.io diagrams
-│   └── plan/              # Backlog of specified-but-undelivered work
+│   ├── plan/              # Backlog of specified-but-undelivered work
+│   └── ui-mockups/        # Visual mockups of the Console
 ├── spec/                  # TLA+ transaction-protocol model and TLC configurations
 ├── engine/                # TypeScript core
 │   └── src/               # log/, admission/, planner/, router/, gateway/, harness/, and the loops
 ├── idl/                   # Versioned shared contracts: the event-log JSON Schema and the gateway protobufs
+├── scripts/               # Code generation, style checks, the e2e topology launcher, and the demos
 ├── sdk/                   # TypeScript tool-service SDK
 ├── package.json           # Node 22 scripts and dependencies
 ├── test/                  # Test-only mocks, domain fixtures, and validation helpers
@@ -281,8 +288,7 @@ The README hero image is the animated architecture overview; its generator lives
 Read [AGENTS.md](AGENTS.md) before proposing implementation work. In particular:
 
 - Keep repository documentation in English and use the established document locations.
-- Propose and accept an ADR before implementing a large architecture change; then merge the accepted content into the authoritative design documents and remove every reference to the accepted ADR.
+- Propose and accept an ADR before implementing a large architecture change; then merge the accepted content — rejected alternatives included — into the authoritative design documents and remove every reference to the accepted ADR.
 - Treat the event log as immutable ground truth.
 - Preserve the TypeScript-only canonical projection pipeline.
 - Add a replay test whenever planner, projection, or fold behavior changes.
-- Preserve rejected alternatives in the design document when an ADR is accepted.

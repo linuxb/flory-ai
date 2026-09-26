@@ -76,6 +76,30 @@ The two planes, their sequences, and the dual-allocation append path are built. 
 
 **Exclusions.** Stream-identity assignment policy — which domain concepts deserve an aggregate root, and how `stream_id` is derived from `task_input` — belongs with the domain teams that own the reducers. Snapshot retention and compaction, and CDC consumers of `global_seq`, are deferred.
 
+## W6 — Console
+
+[Doc 11](../design/11-console-and-observability.md) specifies an operator view of one run's graph. It is now built: `console/server` holds the projection, the polling tail, the SSE stream and a `GET`-only HTTP surface read as `console_role`, and `console/client` holds the React canvas and inspector.
+
+**Delivered.**
+
+1. The console projection, beside `surface`. Pure, versioned, reproducible from the log, retaining shadowed vertices and enriching each with label, scope, pivot position, bracket, timing, cost and `depth`. `consoleDag` is defined as a fold of `advanceConsoleDag`, so the snapshot and the deltas cannot diverge.
+2. The stream, over SSE with a `<run_seq>.<ordinal>` cursor and a polling tail, plus `resolveResume` covering all five cursor cases.
+3. `GET .../payload`, which the log can serve.
+4. The client: canvas, cards, scope enclosures with the commit boundary drawn, the inspector's four tabs, light and dark with an explicit override, and a captured-run fixture with a mock server that replays it.
+
+**Blocked, and not on this work stream.** `GET .../prompt` and `GET .../logs` answer `501` with the digests the log does hold. Nothing in the Engine persists a prompt, a completion, or tool execution output, and the Engine has no blob client to persist them with. The endpoints exist so the contract stays whole and the gap stays visible; they light up when a retention write path does ([Doc 11 §7](../design/11-console-and-observability.md#7-open-questions)).
+
+**Now exercisable.** The recovery ladder appends `replan/boundary`, `subgraph/shadowed` and `replan/cancel-requested` in live runs, so the shadowed-branch rendering has a producer; the projection records cancellation requests as `cancel_requests` (projector `v2`).
+
+**Exit criteria, all met.**
+
+- The projection is a pure function of the log: the same prefix produces the same model, and a shadowed subtree survives a replan rather than disappearing.
+- A client killed mid-run and reconnected reaches a state identical to one that never disconnected, whether the server resumed or re-snapshotted — asserted over every split point on both sides.
+- A router that fell through is visible on the canvas and absent from the downstream planner's prompt in the same run (scenario S24 and the `O4.console_router_visibility` oracle).
+- Nothing in the client folds an event or derives a scope.
+
+**Exclusions.** The open questions in [Doc 11 §7](../design/11-console-and-observability.md#7-open-questions) remain out of scope: multi-run fleet views, snapshot retention for completed runs, the retention write path, and which roles may read tool payloads through the detail endpoints. The last one gates any deployment beyond a trusted network; until it is answered the server refuses to bind a non-loopback address without an explicit override.
+
 ## W7 — The rest of the recovery ladder
 
 L0, L1 and L2 are delivered in `engine/src/recovery.ts`: boundary selection with a published
@@ -144,27 +168,3 @@ episode bound — with no open hold left behind.
 **Exclusions.** How long forward closure may be attempted before a run is declared L4 stays open
 ([03 §6](../design/03-replan-and-recovery.md#6-open-questions)); the harness asserts that L4 is
 eventually reached, not when.
-
-## W6 — Console
-
-[Doc 11](../design/11-console-and-observability.md) specifies an operator view of one run's graph. It is now built: `console/server` holds the projection, the polling tail, the SSE stream and a `GET`-only HTTP surface read as `console_role`, and `console/client` holds the React canvas and inspector.
-
-**Delivered.**
-
-1. The console projection, beside `surface`. Pure, versioned, reproducible from the log, retaining shadowed vertices and enriching each with label, scope, pivot position, bracket, timing, cost and `depth`. `consoleDag` is defined as a fold of `advanceConsoleDag`, so the snapshot and the deltas cannot diverge.
-2. The stream, over SSE with a `<run_seq>.<ordinal>` cursor and a polling tail, plus `resolveResume` covering all five cursor cases.
-3. `GET .../payload`, which the log can serve.
-4. The client: canvas, cards, scope enclosures with the commit boundary drawn, the inspector's four tabs, light and dark with an explicit override, and a captured-run fixture with a mock server that replays it.
-
-**Blocked, and not on this work stream.** `GET .../prompt` and `GET .../logs` answer `501` with the digests the log does hold. Nothing in the Engine persists a prompt, a completion, or tool execution output, and the Engine has no blob client to persist them with. The endpoints exist so the contract stays whole and the gap stays visible; they light up when a retention write path does ([Doc 11 §7](../design/11-console-and-observability.md#7-open-questions)).
-
-**Now exercisable.** The recovery ladder appends `replan/boundary`, `subgraph/shadowed` and `replan/cancel-requested` in live runs, so the shadowed-branch rendering has a producer; the projection records cancellation requests as `cancel_requests` (projector `v2`).
-
-**Exit criteria, all met.**
-
-- The projection is a pure function of the log: the same prefix produces the same model, and a shadowed subtree survives a replan rather than disappearing.
-- A client killed mid-run and reconnected reaches a state identical to one that never disconnected, whether the server resumed or re-snapshotted — asserted over every split point on both sides.
-- A router that fell through is visible on the canvas and absent from the downstream planner's prompt in the same run (scenario S24 and the `O4.console_router_visibility` oracle).
-- Nothing in the client folds an event or derives a scope.
-
-**Exclusions.** The open questions in [Doc 11 §7](../design/11-console-and-observability.md#7-open-questions) remain out of scope: multi-run fleet views, snapshot retention for completed runs, the retention write path, and which roles may read tool payloads through the detail endpoints. The last one gates any deployment beyond a trusted network; until it is answered the server refuses to bind a non-loopback address without an explicit override.

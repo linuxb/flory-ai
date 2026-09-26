@@ -81,6 +81,7 @@
   <div class="layer">
     <div class="node n-violet">Planner nodes<small>JIT sub-DAG generation · replan anchor</small></div>
     <div class="node n-violet">Tool-caller executor<small>deterministic, no model calls</small></div>
+    <div class="node n-violet">Router nodes<small>pinned rule template · branch without a model</small></div>
     <div class="node n-red">Replan &amp; recovery<small>greedy backtrack · L0–L4 ladder</small></div>
     <div class="node n-green">Refine loop<small>gate &rarr; propose &rarr; validate &rarr; evaluate</small></div>
   </div>
@@ -90,16 +91,17 @@
 <div class="zone z-teal">
   <h2>Control plane <span class="hint">— engine metadata, ACID by transactional DB</span></h2>
   <div class="layer">
-    <div class="node n-teal">Event log<small>append-only · global seq · single source of truth</small></div>
+    <div class="node n-teal">Event log<small>append-only · run_seq per run, stream_seq per entity · single source of truth</small></div>
     <div class="node n-teal">Surface projection<small>pure fold &rarr; current DAG</small></div>
     <div class="node n-teal">Linearizer<small>deterministic planner context</small></div>
-    <div class="node n-yellow">Check-rules engine<small>R1–R11 · freeze or reject</small></div>
+    <div class="node n-yellow">Check-rules engine<small>R1–R14 · freeze or reject</small></div>
   </div>
   <div style="height:12px"></div>
   <div class="layer">
     <div class="node n-green">Harness-state<small>meta-only · versioned · mem-hints</small></div>
     <div class="node n-green">Prompt assembly<small>pure function · replayable</small></div>
     <div class="node n-teal">Budget ledger<small>token accounting per run</small></div>
+    <div class="node n-teal">Console<small>read-only projection · writes nothing</small></div>
   </div>
 </div>
 <div class="flow"><span class="a">&#8595;</span> tool calls under TCC try/confirm/cancel &amp; pivot-saga</div>

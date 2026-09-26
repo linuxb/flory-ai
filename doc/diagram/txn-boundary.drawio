@@ -7,7 +7,7 @@
         <mxCell id="planner" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D0BFFF;fontSize=14;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;strokeColor=#6741D9;fontColor=#6741D9;" value="Planner&lt;br&gt;declares txn scope + node attrs" vertex="1">
           <mxGeometry height="70" width="260" x="60" y="40" as="geometry" />
         </mxCell>
-        <mxCell id="rules" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;fontSize=14;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;strokeColor=#F08C00;fontColor=#F08C00;" value="Check-rules gate (R1–R11)&lt;br&gt;deterministic, pre-freeze" vertex="1">
+        <mxCell id="rules" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEC99;fontSize=14;fontStyle=1;strokeWidth=2;fontFamily=LXGW WenKai TC;strokeColor=#F08C00;fontColor=#F08C00;" value="Check-rules gate (R1–R14)&lt;br&gt;deterministic, pre-freeze" vertex="1">
           <mxGeometry height="70" width="280" x="800" y="40" as="geometry" />
         </mxCell>
         <mxCell id="e-prop" edge="1" parent="1" source="planner" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeWidth=2;endArrow=block;fontFamily=LXGW WenKai TC;strokeColor=#6741D9;fontColor=#6741D9;" target="rules" value="sub-DAG proposal">

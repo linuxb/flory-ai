@@ -33,11 +33,13 @@ FRAMES=120 DELAY=6 COLORS=160 node doc/animations/src/render.mjs
 
 One loop is one transaction scope, told in eight phases: `PLAN`, `ADMIT`, `CLAIM`, `TRY`, `BARRIER`,
 `PIVOT`, `CONFIRM`, `COMMITTED`. Reading top to bottom, the bands are the planner and the check-rules
-gate ([02 §3.4](../../design/02-transaction-model.md)), the append-only event log
-([01](../../design/01-jit-dag-and-event-log.md)), the two executors and the split the database
-enforces between them ([07 §5](../../design/07-distributed-transaction-coordinator.md)), `gatewayd`
-([09](../../design/09-tool-registry-gateway.md)), the four SDK-built tool services, and the
-pivot-saga ribbon with its one-way gate ([02 §1](../../design/02-transaction-model.md)).
+gate ([02 §3.4](../../design/02-transaction-model.md#34-deterministic-check-rules)), the run's
+append-only event log ([01](../../design/01-jit-dag-and-event-log.md)), the two executors and the split
+the database enforces between them ([07 §5](../../design/07-distributed-transaction-coordinator.md#5-interaction-with-the-engine)),
+`gatewayd` ([09](../../design/09-tool-registry-gateway.md)), the four SDK-built tool services a scope
+touches, and the pivot-saga ribbon with its one-way gate
+([02 §1](../../design/02-transaction-model.md)). The fifth tool service, sourcing, is read-only and has
+no part in a transaction, so the scene leaves it out.
 
 ## Editing the scene
 
@@ -55,8 +57,8 @@ Three invariants keep the loop seamless:
 - the log slides exactly `APPEND.length` pitches over one loop while the head advances exactly that
   many events, and `EVENTS` has the same length, so every tile has the same label and the same
   position at frame 0 and at the end;
-- no absolute `stream_seq` is painted on a tile, so nothing visibly resets at the seam — the head
-  and the backtrack floor are markers, not numbers;
+- no absolute `run_seq` is painted on a tile, so nothing visibly resets at the seam — the head
+  is the tile that glows and the backtrack floor is a marker, and neither is a number;
 - everything the ribbon lights up is faded back out by `TL.reset`, which is how the closed one-way
   gate returns to open without ever being animated open.
 

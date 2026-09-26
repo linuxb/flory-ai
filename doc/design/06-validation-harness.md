@@ -82,7 +82,7 @@ Value-type resources (price, listing state) follow the same rule and matter more
 
 ### 3.3 The tool-view contract is under test
 
-The mock commerce world is four tool services — inventory, payment, logistics, and channel — each built on the tool-service SDK and each declaring the tools it implements. They register with `gatewayd` exactly as a production service does, over the same gRPC surface, with the same heartbeat lease and health reporting. The sandbox itself owns only the ledgers, the fault schedule, and the oracle snapshot; it is not a tool service and contains no gateway protocol.
+The mock commerce world is five tool services — inventory, payment, logistics, channel, and sourcing — each built on the tool-service SDK and each declaring the tools it implements. Sourcing's supplier and market tools are all `effect_class: none`, which makes them the natural upstream of a deterministic router: a rule can branch on their declared summary fields at a savepoint with no transaction open ([10 §2](./10-deterministic-routers.md#2-the-router-vertex)). They register with `gatewayd` exactly as a production service does, over the same gRPC surface, with the same heartbeat lease and health reporting. The sandbox itself owns only the ledgers, the fault schedule, and the oracle snapshot; it is not a tool service and contains no gateway protocol.
 
 That is what makes registration part of the validated surface rather than scaffolding around it. There is no hand-written catalog anywhere: check-rule fixtures read a *recording* of the tool view the gateway published from those declarations, and the end-to-end run asserts the live digest still equals the recording. A mislabelled `effect_class` in a service's own declaration therefore reaches the check-rule tests and fails them, which is the one defect no downstream check-rule can infer.
 
@@ -237,7 +237,7 @@ Four independent classes. A run must satisfy all applicable oracles; a single vi
 | **causal inheritance**: a fork inherits no causal descendant (via `parent_refs`) of its divergence vertex, and every merged event is causally independent of it | 01 §5.2 |
 | a fork evaluation invokes no tool above its declared `fold_mode`, and never a write | 01 §5.4; 05 §3.2 |
 | a no-substitution fork reproduces the source surface exactly | 01 §5.3; 01 §6 |
-| no `event_log` row is ever updated or deleted; projection rows may change, and shadowing remains an event | 01 §3.3 inv. 1 |
+| no row of either event plane — `run_event_log` or `business_event_stream` — is ever updated or deleted; projection rows may change, and shadowing remains an event | 01 §3.3 inv. 1; 08 §2 |
 | an unknown `event_type` without `ignorable` makes the reader reject the whole log | 01 §3.2.1 |
 | **router trajectory**: every router vertex appends `vertex/started` before its `vertex/succeeded` or `vertex/failed`, and its success payload carries `matched_condition` (an index, or `null` on fall-through) | 01 §3.2; 10 §7 |
 | **router admission**: no router branch reaches execution without a freeze-time `checkSubDag` over every branch of its pinned template; a rejection cites R12, R13, R14, or an inherited R1-R11 code | 02 §3.4; 10 §5.1 |

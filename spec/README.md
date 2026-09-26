@@ -53,8 +53,9 @@ negative control. `AdmissionAllEffectsScoped` requires every frozen effect to
 belong to a declared scope; `AdmissionMinimumScope` requires a pivot scope to
 contain every preceding reversible member in the model's shared footprint class.
 Scope membership may only grow while that scope is open. This is an abstract
-model of the admission boundary, not a proof of the real R1-R11 functions;
-those pure functions remain harness tests.
+model of the transaction side of the admission boundary, not a proof of the
+real check-rule functions: R1-R14 in `engine/src/admission/check-rules.ts`
+remain harness tests, and the router rules R12-R14 are not modelled here.
 
 Nested-scope expansion and Alloy structural search remain in the later stage
 defined in [Doc 06 §12](../doc/design/06-validation-harness.md#12-formal-verification-design). S2 hold conservation, pivot uniqueness, sweep/confirm

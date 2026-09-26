@@ -216,10 +216,10 @@ const SERVICES = [
 ];
 SERVICES.forEach(s=>{ s.cx = s.x + SV_W/2; });
 
-/* ---------------- the event log, in stream_seq space ----------------
+/* ---------------- the run's event log, in run_seq space ----------------
    Eight events are appended over one loop and the label cycle has period
    eight, so frame 0 and the frame after the last slide are identical. No
-   absolute stream_seq is ever painted on a tile, for the same reason. */
+   absolute run_seq is ever painted on a tile, for the same reason. */
 const EVENTS = [
   {name:'subgraph/proposed', hue:'cyan'},
   {name:'subgraph/frozen',   hue:'cyan'},
@@ -287,7 +287,7 @@ const TL = {
 
 function narration(t){
   if (t<.115) return ['01  PLAN',      'the planner proposes the next sub-DAG against one frozen tool view', C.cyan];
-  if (t<.245) return ['02  ADMIT',     'checkSubDag runs R1–R11 — the rules admit a plan, the model never does', C.amber];
+  if (t<.245) return ['02  ADMIT',     'checkSubDag runs R1–R14 — the rules admit a plan, the model never does', C.amber];
   if (t<.340) return ['03  CLAIM',     'each executor claims only the vertices the database lets it own', C.sky];
   if (t<.470) return ['04  TRY',       'a TCC try reserves the resource and seals a half-open bracket', C.emerald];
   if (t<.560) return ['05  BARRIER',   'the pivot barrier admits only once every required try is sealed', C.amber];
@@ -344,7 +344,7 @@ function drawHeader(){
 
 function drawFooter(){
   const items=[
-    ['the log is the only boundary',C.cyan],['R1–R11 admit, the model does not',C.amber],
+    ['the log is the only boundary',C.cyan],['R1–R14 admit, the model does not',C.amber],
     ['at most one pivot per scope',C.rose],['forward-only past the gate',C.violet],
     ['exactly one attempt per call',C.sky],['replan in place · fork offline',C.emerald],
   ];
@@ -508,12 +508,13 @@ function frame(t){
   const rAct = seg(t,TL.rules[0],TL.rules[1]) * (1 - seg(t,TL.reset[0],TL.reset[1]));
   const rGlow = pulse(rAct);
   panel(CHK_X,B1_Y,CHK_W,B1_H,{r:12,fill:C.panel2,glow:C.amber,ga:rGlow*.9});
-  text('checkSubDag(proposal, toolView)', CHK_X+18, B1_Y+16, {size:12, weight:'600', font:FM});
+  text('checkSubDag(proposal, toolView, scopes)', CHK_X+18, B1_Y+16, {size:11, weight:'600', font:FM});
   text('no network I/O', CHK_X+CHK_W-18, B1_Y+16, {size:10, color:C.dim, align:'right'});
-  const pw=(CHK_W-36-10*4)/11;
-  for(let i=0;i<11;i++){
-    const on = cl01(rAct*11.6 - i);
-    const px = CHK_X+18+i*(pw+4);
+  const NRULES = 14, PGAP = 3;
+  const pw=(CHK_W-36-(NRULES-1)*PGAP)/NRULES;
+  for(let i=0;i<NRULES;i++){
+    const on = cl01(rAct*(NRULES+.6) - i);
+    const px = CHK_X+18+i*(pw+PGAP);
     rr(px,B1_Y+26,pw,15,4);
     ctx.fillStyle = on>.05 ? hexA(C.emerald,.14+.24*on) : veil(.03); ctx.fill();
     ctx.strokeStyle = on>.05 ? hexA(C.emerald,.35+.5*on) : hexA(C.dim,.30); ctx.lineWidth=1;
@@ -541,9 +542,9 @@ function frame(t){
   /* ---- band 2: the event log ---- */
   const logAct = Math.max(pulse(seg(t,TL.freeze[0],TL.freeze[1])), pulse(seg(t,.660,.720)));
   panel(M,LOG_Y,CW,LOG_H,{r:14,fill:C.panelLog,glow:C.cyan,ga:logAct*.6});
-  text('EVENT LOG', M+16, LOG_Y+16, {size:10, color:C.cyan, weight:'700', ls:1.4});
-  text('append-only in PostgreSQL · the sole source of truth for the DAG and for the transaction brackets',
-       M+100, LOG_Y+16, {size:10.5, color:C.dim});
+  text('RUN EVENT LOG', M+16, LOG_Y+16, {size:10, color:C.cyan, weight:'700', ls:1.4});
+  text('run_event_log · one run\'s orchestration events in run_seq order · the sole truth for the DAG and its brackets',
+       M+136, LOG_Y+16, {size:10.5, color:C.dim});
   text('surface = pure fold over unshadowed rows', W-M-16, LOG_Y+16,
        {size:10, color:C.muted, align:'right', font:FM});
 
@@ -640,7 +641,7 @@ function frame(t){
     ring(s.cx-40, SV_Y, act>0 ? seg(t, i===2?TL.pivotOut[1]-.06:i===3?TL.publish[0]:TL.fanTry[1]-.06,
          (i===2?TL.pivotOut[1]-.06:i===3?TL.publish[0]:TL.fanTry[1]-.06)+.10) : 0, col, {r0:4,r1:24});
   });
-  label('four tool services · each declares its contracts and registers them through the SDK · deterministic faults keyed by (seed, tool, attempt_no)',
+  label('the four tool services a scope touches — the fifth, sourcing, is read-only and feeds routers · each registers through the SDK · faults keyed by (seed, tool, attempt_no)',
         640, SV_Y+SV_H+14, {size:10, color:C.dim, align:'center'});
 
   /* ---- band 6 ---- */

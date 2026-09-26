@@ -16,10 +16,33 @@
             --box-border-domain: #51cf66;
             --box-bg-proxy: #fff4e6;
             --box-border-proxy: #ffa94d;
+            --box-bg-console: #f3f0ff;
+            --box-border-console: #845ef7;
             --line-color: #868e96;
             --dimmed-opacity: 0.15;
             --highlight-color: #f59f00;
             --shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        /* First paint follows the system theme before any script runs; the toggle overrides it. */
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]) {
+                --bg-color: #212529;
+                --text-color: #f8f9fa;
+                --box-bg-control: #1864ab;
+                --box-border-control: #4dabf7;
+                --box-bg-data: #a61e4d;
+                --box-border-data: #ff8787;
+                --box-bg-domain: #277a37;
+                --box-border-domain: #69db7c;
+                --box-bg-proxy: #c2410c;
+                --box-border-proxy: #ffa94d;
+                --box-bg-console: #5f3dc4;
+                --box-border-console: #b197fc;
+                --line-color: #adb5bd;
+                --highlight-color: #ffd43b;
+                --shadow: 0 4px 6px rgba(0,0,0,0.5);
+            }
         }
 
         [data-theme="dark"] {
@@ -33,6 +56,8 @@
             --box-border-domain: #69db7c;
             --box-bg-proxy: #c2410c;
             --box-border-proxy: #ffa94d;
+            --box-bg-console: #5f3dc4;
+            --box-border-console: #b197fc;
             --line-color: #adb5bd;
             --highlight-color: #ffd43b;
             --shadow: 0 4px 6px rgba(0,0,0,0.5);
@@ -156,6 +181,13 @@
             height: 90px;
         }
 
+        .console-node {
+            background-color: var(--box-bg-console);
+            border-color: var(--box-border-console);
+            width: 220px;
+            height: 100px;
+        }
+
         .domain-node {
             background-color: var(--box-bg-domain);
             border-color: var(--box-border-domain);
@@ -261,10 +293,14 @@
             <div class="group-label">Business Domain</div>
         </div>
 
+        <div class="group" style="left: 950px; top: 600px; width: 320px; height: 180px;">
+            <div class="group-label">Operator Surface</div>
+        </div>
+
         <!-- Nodes -->
         <div id="orchestrator" class="node control-node" style="left: 50px; top: 150px;">
             <div class="title">Agent Orchestrator</div>
-            <div class="desc">Stateless Planner<br/>& Projector</div>
+            <div class="desc">Stateless Planner, Router<br/>& Projector</div>
         </div>
 
         <div id="coordinator" class="node control-node" style="left: 50px; top: 400px;">
@@ -274,17 +310,22 @@
 
         <div id="gateway" class="node proxy-node" style="left: 500px; top: 250px;">
             <div class="title">gatewayd Tool Registry Gateway</div>
-            <div class="desc">Immutable Tool Views & One-Attempt Routing<br>MCP north &middot; gRPC south</div>
+            <div class="desc">Role-Scoped Tool Views<br>One Attempt &middot; OIDC + mTLS</div>
         </div>
 
         <div id="db" class="node data-node" style="left: 250px; top: 650px;">
-            <div class="title">Event Log (PostgreSQL)</div>
-            <div class="desc">Ground Truth & Queue</div>
+            <div class="title">PostgreSQL</div>
+            <div class="desc">Two Event Planes<br/>Queue &middot; Role Bindings</div>
         </div>
 
         <div id="blob" class="node data-node" style="left: 600px; top: 650px;">
             <div class="title">Blob Storage / KV</div>
             <div class="desc">Tool View Snapshots</div>
+        </div>
+
+        <div id="console" class="node console-node" style="left: 1000px; top: 650px;">
+            <div class="title">Console</div>
+            <div class="desc">Read-Only Projection &middot; SSE<br/>binds loopback by default</div>
         </div>
 
         <div id="service-a" class="node domain-node" style="left: 1000px; top: 150px;">
@@ -319,6 +360,8 @@
             <path id="path-8" data-source="service-a" data-target="gateway" d="M 1000 220 H 900 V 300 H 780" class="edge" stroke-dasharray="4" marker-end="url(#arrow)"/>
             <path id="path-9" data-source="gateway" data-target="service-b" d="M 780 320 H 880 V 430 H 1000" class="edge" marker-end="url(#arrow)"/>
             <path id="path-10" data-source="service-b" data-target="gateway" d="M 1000 470 H 900 V 340 H 780" class="edge" stroke-dasharray="4" marker-end="url(#arrow)"/>
+            <path id="path-11" data-source="gateway" data-target="db" d="M 540 370 V 610 H 420 V 650" class="edge" marker-end="url(#arrow)"/>
+            <path id="path-12" data-source="console" data-target="db" d="M 1000 720 H 920 V 810 H 350 V 740" class="edge" stroke-dasharray="4" marker-end="url(#arrow)"/>
         </svg>
 
         <!-- Edge Labels -->
@@ -332,6 +375,8 @@
         <div id="label-8" class="edge-label" style="left: 900px; top: 260px;">Register &middot; Heartbeat &middot; Health (SDK)</div>
         <div id="label-9" class="edge-label" style="left: 880px; top: 375px;">Route One Attempt (gRPC)</div>
         <div id="label-10" class="edge-label" style="left: 900px; top: 405px;">Register &middot; Heartbeat &middot; Health (SDK)</div>
+        <div id="label-11" class="edge-label" style="left: 540px; top: 500px;">Read Role Bindings</div>
+        <div id="label-12" class="edge-label" style="left: 635px; top: 810px;">SELECT run_event_log only (console_role)</div>
     </div>
 
     <script>

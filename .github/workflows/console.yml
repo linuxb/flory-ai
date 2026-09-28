@@ -51,6 +51,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           use_oidc: true
+          disable_search: true
           files: console/client/coverage/lcov.info
           flags: console-client
           fail_ci_if_error: false

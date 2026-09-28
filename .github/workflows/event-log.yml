@@ -97,10 +97,13 @@ jobs:
         run: go vet ./... && go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
       # Each suite's coverage is uploaded as soon as it exists, so a later step failing does not
       # lose it. Coverage is report-only: an upload that fails is logged and never fails the job.
+      # disable_search sends only the named file: the uploader otherwise sweeps the workspace and
+      # files every earlier suite's report under this flag too.
       - name: Upload Coordinator coverage
         uses: codecov/codecov-action@v5
         with:
           use_oidc: true
+          disable_search: true
           files: coordinator/coverage.out
           flags: coordinator
           fail_ci_if_error: false
@@ -109,6 +112,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           use_oidc: true
+          disable_search: true
           files: coverage/lcov.info
           flags: engine
           fail_ci_if_error: false
@@ -131,6 +135,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           use_oidc: true
+          disable_search: true
           files: gatewayd/coverage.out
           flags: gatewayd
           fail_ci_if_error: false

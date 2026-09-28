@@ -1,6 +1,7 @@
 package toolview
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -76,5 +77,28 @@ func TestDigestAndRefAreDerivedFromTheEncoding(t *testing.T) {
 	}
 	if want := "tool-views/sha256-" + strings.TrimPrefix(digest, "sha256:") + ".json"; Ref(digest) != want {
 		t.Fatalf("ref = %s, want %s", Ref(digest), want)
+	}
+}
+
+func TestCanonicalRefusesWhatHasNoCanonicalForm(t *testing.T) {
+	if _, err := Canonical(map[string]any{"callback": func() {}}); err == nil {
+		t.Fatal("a value JSON cannot represent was encoded")
+	}
+	// Both are unreachable through Canonical, which only ever walks what encoding/json decoded and
+	// which has already replaced invalid UTF-8. They guard the encoder itself, so they are asserted
+	// on it directly.
+	if err := writeString(&bytes.Buffer{}, "\xff"); err == nil {
+		t.Fatal("invalid UTF-8 was written")
+	}
+	if err := writeCanonical(&bytes.Buffer{}, 17); err == nil {
+		t.Fatal("a Go int, which decoding never produces, was written")
+	}
+	for name, value := range map[string]any{
+		"a non-integer inside an array": []any{json.Number("1"), json.Number("2.5")},
+		"an invalid key":                map[string]any{"\xff": true},
+	} {
+		if err := writeCanonical(&bytes.Buffer{}, value); err == nil {
+			t.Fatalf("%s was written", name)
+		}
 	}
 }

@@ -103,3 +103,29 @@ func fixtureScopeState(events []Event) string {
 	}
 	return state
 }
+
+func TestValidateRejectsCancellationAfterThePivot(t *testing.T) {
+	events := []Event{
+		{RunSeq: 1, EventType: "txn/pivot-passed", ScopeID: "s", Payload: map[string]any{}},
+		{RunSeq: 2, EventType: "txn/cancel", ScopeID: "s", Payload: map[string]any{"phase": "requested"}},
+	}
+	if err := Validate(events); err == nil {
+		t.Fatal("a cancellation after the pivot was accepted")
+	}
+}
+
+func TestValidateRejectsConfirmationAfterACompletedCancellation(t *testing.T) {
+	events := []Event{
+		{RunSeq: 1, EventType: "txn/cancel", ScopeID: "s", Payload: map[string]any{"phase": "completed"}},
+		{RunSeq: 2, EventType: "txn/confirm", ScopeID: "s", Payload: map[string]any{}},
+	}
+	if err := Validate(events); err == nil {
+		t.Fatal("a confirmation after a completed cancellation was accepted")
+	}
+	// Only a completed cancellation is terminal: a confirmation may still follow a requested one
+	// that the bracket never finished.
+	events[0].Payload["phase"] = "requested"
+	if err := Validate(events); err != nil {
+		t.Fatalf("a confirmation after a merely requested cancellation was rejected: %v", err)
+	}
+}

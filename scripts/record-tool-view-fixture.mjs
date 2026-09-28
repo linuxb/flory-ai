@@ -18,11 +18,14 @@ const canonicalValues = [
     {name: 'empty containers', value: {tools: [], meta: {}}},
     {name: 'negative and zero integers', value: {offset: -17, zero: 0}},
     {name: 'nested arrays of objects', value: {items: [{b: 2, a: 1}, {c: 3}]}},
+    {name: 'every other short escape and the bare control characters', value: {detail: '\b\f\r\u0001\u001f'}},
+    {name: 'null and both booleans', value: {b: true, a: null, c: false}},
 ];
 
 const rejectedValues = [
     {name: 'a fractional number', value: 1.5, reason: 'a float has no canonical text form'},
     {name: 'a fractional number in an object', value: {multiplier: 2.5}, reason: 'a float has no canonical text form'},
+    {name: 'a fractional number in an array', value: [1, 2.5], reason: 'a float has no canonical text form'},
 ];
 
 const reserveTool = {

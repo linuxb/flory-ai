@@ -85,6 +85,24 @@
             },
             "canonical": "{\"items\":[{\"a\":1,\"b\":2},{\"c\":3}]}",
             "digest": "sha256:93796ed7fff018e784e776fbeb544be0236700923464dc35602aa3c76fb31ae5"
+        },
+        {
+            "name": "every other short escape and the bare control characters",
+            "value": {
+                "detail": "\b\f\r\u0001\u001f"
+            },
+            "canonical": "{\"detail\":\"\\b\\f\\r\\u0001\\u001f\"}",
+            "digest": "sha256:e001d348dd83dbc6704501c8af2d62f164b0ea1ac6271476ba2effe6768eb3b6"
+        },
+        {
+            "name": "null and both booleans",
+            "value": {
+                "b": true,
+                "a": null,
+                "c": false
+            },
+            "canonical": "{\"a\":null,\"b\":true,\"c\":false}",
+            "digest": "sha256:17073ac6186d8c60c0c0da712ce30cdb52ed5a9155f616983da39a9785dce715"
         }
     ],
     "rejected_cases": [
@@ -98,6 +116,11 @@
             "value": {
                 "multiplier": 2.5
             },
+            "reason": "a float has no canonical text form"
+        },
+        {
+            "name": "a fractional number in an array",
+            "value": [1, 2.5],
             "reason": "a float has no canonical text form"
         }
     ],

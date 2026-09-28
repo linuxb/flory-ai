@@ -32,7 +32,9 @@
     "demo:coordinator": "go -C coordinator run ./cmd/coordinator",
     "demo:retail": "tsx scripts/demo/b2b2c-retail.ts",
     "test": "vitest run",
-    "verify": "npm run generate:check && npm run build && npm run test"
+    "test:coverage": "vitest run --coverage",
+    "verify": "npm run generate:check && npm run build && npm run test",
+    "verify:coverage": "npm run generate:check && npm run build && npm run test:coverage"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.14.0",
@@ -46,6 +48,7 @@
     "@bufbuild/protoc-gen-es": "^2.14.0",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
+    "@vitest/coverage-v8": "^2.1.9",
     "prettier": "3.5.3",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

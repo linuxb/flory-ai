@@ -7,9 +7,9 @@ const STYLE_FILES = ['idl/event-log.schema.json'];
 const TYPE_SCRIPT_EXTENSIONS = new Set(['.cts', '.mts', '.ts', '.tsx', '.mjs']);
 // Generated protobuf stubs are exempt: protoc-gen-es owns their layout.
 const EXCLUDED_DIRECTORIES = new Set(['sdk/typescript/gen', 'sdk/typescript/gen-health']);
-// Installed and built output, wherever it sits. The console client keeps its own install, so a
-// source directory can now contain one of these at any depth.
-const EXCLUDED_NAMES = new Set(['node_modules', 'dist']);
+// Installed, built, and coverage-report output, wherever it sits. The console client keeps its own
+// install, so a source directory can now contain one of these at any depth.
+const EXCLUDED_NAMES = new Set(['node_modules', 'dist', 'coverage']);
 
 async function listSourceFiles(directory) {
     const entries = await readdir(directory, {withFileTypes: true});

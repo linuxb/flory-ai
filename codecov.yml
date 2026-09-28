@@ -1,0 +1,54 @@
+# How Codecov groups, merges, and reports the coverage the CI workflows upload.
+#
+# Coverage arrives from two workflows, and each runs only when its own paths change, so a commit
+# usually uploads some flags and not others. Carryforward keeps a flag that did not run at the value
+# it last had, so the total does not drop to whatever the one workflow that happened to run covers.
+
+coverage:
+  # Report-only: coverage is shown on every commit and pull request and never fails a check.
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: 'condensed_header, diff, flags, condensed_files'
+  require_changes: false
+
+flag_management:
+  default_rules:
+    carryforward: true
+  individual_flags:
+    - name: engine
+      paths:
+        - engine/src/
+        - sdk/typescript/
+        - console/server/src/
+    - name: coordinator
+      paths:
+        - coordinator/
+    - name: gatewayd
+      paths:
+        - gatewayd/
+    - name: console-client
+      paths:
+        - console/client/src/
+
+# Go profiles name files by import path. Both modules live under the repository's own module
+# prefix, so dropping it leaves the path from the repository root.
+fixes:
+  - 'github.com/linuxb/flory-ai/::'
+
+# Generated code belongs to its generator, and a process entry runs only as a real process, which
+# no unit or integration suite starts. Counting either would report code nobody can test here.
+ignore:
+  - engine/src/generated
+  - sdk/typescript/gen
+  - sdk/typescript/gen-health
+  - coordinator/internal/eventlog/generated
+  - gatewayd/internal/pb
+  - coordinator/cmd
+  - gatewayd/cmd

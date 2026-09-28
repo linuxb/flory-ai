@@ -1,5 +1,10 @@
 # Flory
 
+[![Event log verification](https://github.com/linuxb/flory-ai/actions/workflows/event-log.yml/badge.svg?branch=main)](https://github.com/linuxb/flory-ai/actions/workflows/event-log.yml)
+[![Console client](https://github.com/linuxb/flory-ai/actions/workflows/console.yml/badge.svg?branch=main)](https://github.com/linuxb/flory-ai/actions/workflows/console.yml)
+[![Formal verification](https://github.com/linuxb/flory-ai/actions/workflows/formal-verification.yml/badge.svg?branch=main)](https://github.com/linuxb/flory-ai/actions/workflows/formal-verification.yml)
+[![Coverage](https://codecov.io/gh/linuxb/flory-ai/graph/badge.svg)](https://codecov.io/gh/linuxb/flory-ai)
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="doc/animations/architecture-dark.gif">
@@ -149,6 +154,36 @@ expect an empty one. Refresh before each:
 npm run db:refresh && go -C coordinator test ./...   # with the two URLs exported as above
 ```
 
+#### Coverage
+
+Every suite can report the code it ran. Each command prints a summary and writes a report:
+
+```sh
+npm run test:coverage                     # engine, TypeScript SDK, Console server → coverage/index.html
+npm -C console/client run test:coverage   # Console client → console/client/coverage/index.html
+go -C coordinator test -coverpkg=./... -coverprofile=coverage.out ./...
+go -C coordinator tool cover -html=coverage.out   # the same two commands work for gatewayd
+```
+
+CI measures the same suites against a real PostgreSQL, with `FLORY_INTEGRATION=1`, and uploads each
+one to [Codecov](https://codecov.io/gh/linuxb/flory-ai) under its own flag. A local Go run without
+the integration environment skips the database scenarios, so it reports less than CI does.
+
+| Component | Coverage | Measured by |
+| --- | --- | --- |
+| Engine, TypeScript SDK, and Console server | [![engine](https://codecov.io/gh/linuxb/flory-ai/graph/badge.svg?flag=engine)](https://codecov.io/gh/linuxb/flory-ai?flags%5B0%5D=engine) | `npm run verify:coverage` in `event-log.yml` |
+| Distributed Transaction Coordinator | [![coordinator](https://codecov.io/gh/linuxb/flory-ai/graph/badge.svg?flag=coordinator)](https://codecov.io/gh/linuxb/flory-ai?flags%5B0%5D=coordinator) | `go test -coverpkg=./...` in `event-log.yml` |
+| Tool Registry Gateway | [![gatewayd](https://codecov.io/gh/linuxb/flory-ai/graph/badge.svg?flag=gatewayd)](https://codecov.io/gh/linuxb/flory-ai?flags%5B0%5D=gatewayd) | `go test -coverpkg=./...` in `event-log.yml` |
+| Console client | [![console-client](https://codecov.io/gh/linuxb/flory-ai/graph/badge.svg?flag=console-client)](https://codecov.io/gh/linuxb/flory-ai?flags%5B0%5D=console-client) | `npm run verify:coverage` in `console.yml` |
+
+Coverage is **report-only**: it is shown on every commit and pull request and never fails a check.
+Each workflow runs only when its own paths change, so a flag that did not run keeps its last value
+rather than dropping out of the total. [`codecov.yml`](codecov.yml) holds those rules and what is
+not counted: generated code, process entries (`cmd/` and `console/server/src/main.ts`), `db/` and
+`scripts/` (which the suites reach through child processes), and the RBAC and gateway end-to-end
+suites, which drive separately started processes. The engine's HTML report is also kept on each
+`event-log.yml` run as the `engine-coverage-report` artifact for 14 days.
+
 ### Running the gateway-mediated topology
 
 Every tool call goes through `gatewayd`. `npm run e2e:up` brings the topology up in dependency order — the gateway, then the five mock tool services, which register themselves through the SDK — and finishes once the gateway reports a published tool view:
@@ -255,6 +290,7 @@ The README hero image is the animated architecture overview; its generator lives
 ├── .vscode/               # Shared VS Code workspace settings: line-length rulers at 100 and 150
 ├── .env.example           # Overrideable local connection and service settings
 ├── AGENTS.md              # Contributor index, development rules, and review routes
+├── codecov.yml            # Coverage flags, carryforward, and report-only status for Codecov
 ├── codegraph.json         # CodeGraph indexing exclusions for generated and cached content
 ├── console/               # Read-only operator console
 │   ├── dev/               # Fixture capture and a zero-dependency mock server

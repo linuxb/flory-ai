@@ -15,6 +15,8 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
+      - 'vitest.config.ts'
+      - 'codecov.yml'
       - '.github/workflows/event-log.yml'
   push:
     paths:
@@ -30,11 +32,15 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
+      - 'vitest.config.ts'
+      - 'codecov.yml'
       - '.github/workflows/event-log.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+  # Lets the Codecov uploads authenticate as this workflow run, so no upload token is stored.
+  id-token: write
 
 jobs:
   verify:
@@ -87,8 +93,32 @@ jobs:
           FLORY_INTEGRATION: '1'
           ENGINE_DATABASE_URL: postgresql://engine_role:engine-dev-password@127.0.0.1:5432/flory
           COORDINATOR_DATABASE_URL: postgresql://coordinator_role:coordinator-dev-password@127.0.0.1:5432/flory
-        run: go vet ./... && go test -race ./...
-      - run: npm run verify
+        # -coverpkg counts a package as covered wherever its code runs, not only under its own tests.
+        run: go vet ./... && go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+      # Each suite's coverage is uploaded as soon as it exists, so a later step failing does not
+      # lose it. Coverage is report-only: an upload that fails is logged and never fails the job.
+      - name: Upload Coordinator coverage
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: coordinator/coverage.out
+          flags: coordinator
+          fail_ci_if_error: false
+      - run: npm run verify:coverage
+      - name: Upload engine coverage
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: coverage/lcov.info
+          flags: engine
+          fail_ci_if_error: false
+      - name: Keep the engine coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-coverage-report
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 14
       - name: Verify the Tool Registry Gateway
         working-directory: gatewayd
         env:
@@ -96,7 +126,14 @@ jobs:
           GATEWAYD_DATABASE_URL: postgresql://gateway_role:gateway-dev-password@127.0.0.1:5432/flory
           STORAGE_EMULATOR_HOST: http://localhost:4443
           GATEWAYD_BLOB_BUCKET: flory-tool-views
-        run: go vet ./... && go test -race ./...
+        run: go vet ./... && go test -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out ./...
+      - name: Upload Tool Registry Gateway coverage
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: gatewayd/coverage.out
+          flags: gatewayd
+          fail_ci_if_error: false
       - name: Verify OIDC identity, Gateway RBAC, and frozen-run recovery
         env:
           RBAC_E2E_USE_EXISTING_POSTGRES: 'true'

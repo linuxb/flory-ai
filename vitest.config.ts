@@ -18,5 +18,18 @@ export default defineConfig({
         // Still one database for every file, and `work_queue` is global within it, so one suite's
         // queued work is claimable by another's assertions. Files run one at a time.
         fileParallelism: false,
+        // Off unless `--coverage` is passed (`npm run test:coverage`), so `npm test` costs nothing
+        // extra. The measured code is what runs inside this process: `db/` and `scripts/` are left
+        // out because the suites reach them through a child process — `test/setup/database.ts`
+        // spawns `db/bootstrap.ts` — which V8 cannot see, and counting them would report as untested
+        // code the suites in fact run. The same holds for the Console's process entry. Generated
+        // code is not ours to test: its shape belongs to the generator.
+        coverage: {
+            provider: 'v8',
+            reporter: ['text-summary', 'html', 'lcovonly', 'json-summary'],
+            reportsDirectory: 'coverage',
+            include: ['engine/src/**/*.ts', 'sdk/typescript/**/*.ts', 'console/server/src/**/*.ts'],
+            exclude: ['**/*.test.ts', 'engine/src/generated/**', 'sdk/typescript/gen/**', 'sdk/typescript/gen-health/**', 'console/server/src/main.ts'],
+        },
     },
 });

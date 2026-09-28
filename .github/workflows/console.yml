@@ -14,15 +14,19 @@ on:
   pull_request:
     paths:
       - 'console/**'
+      - 'codecov.yml'
       - '.github/workflows/console.yml'
   push:
     paths:
       - 'console/**'
+      - 'codecov.yml'
       - '.github/workflows/console.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+  # Lets the Codecov upload authenticate as this workflow run, so no upload token is stored.
+  id-token: write
 
 jobs:
   client:
@@ -38,7 +42,15 @@ jobs:
           cache: npm
           cache-dependency-path: console/client/package-lock.json
       - run: npm ci
-      # Typecheck, unit tests and a production build. The typecheck is the step that fails when
-      # the engine renames a field the client reads, which is the whole reason the client imports
-      # those declarations instead of mirroring them.
-      - run: npm run verify
+      # Typecheck, unit tests with coverage and a production build. The typecheck is the step that
+      # fails when the engine renames a field the client reads, which is the whole reason the client
+      # imports those declarations instead of mirroring them.
+      - run: npm run verify:coverage
+      # Report-only, as in `event-log.yml`: a failed upload is logged and never fails the job.
+      - name: Upload console client coverage
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: console/client/coverage/lcov.info
+          flags: console-client
+          fail_ci_if_error: false

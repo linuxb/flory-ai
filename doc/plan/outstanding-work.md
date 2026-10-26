@@ -151,11 +151,6 @@ episode bound — with no open hold left behind.
 5. Liveness after a timeout cancel. The orphan sweep deletes a cancelled scope's pending members,
    and nothing appends `vertex/failed` for them, so a run whose scope was swept can stop with nothing
    outstanding for the ladder to find.
-6. An irreversible tool vertex with no scope poisons the queue. The Coordinator routes it to the
-   pivot path, `admit_pivot` receives an empty scope id and raises, and the row is claimed into the
-   same error on every lease expiry — two such rows in the development database had been retried
-   more than a thousand times. Freeze admission should refuse the shape, and the Coordinator should
-   record it as a failure rather than erroring forever.
 
 **Exit criteria.**
 

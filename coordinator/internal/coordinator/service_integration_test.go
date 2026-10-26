@@ -989,6 +989,40 @@ func TestBracketKeyTakenDuringDispatchFailsOnce(t *testing.T) {
 	}
 }
 
+// An irreversible call with no scope is recorded once as a failure, not claimed into the same error
+// forever. Freeze admission refuses the shape (R10), but a vertex appended straight to the log never
+// meets it: two such rows, left in the development database by a storage test, were claimed by a
+// live Coordinator more than three thousand times between them, admit_pivot raising on each claim.
+func TestUnscopedPivotFailsWithoutDispatch(t *testing.T) {
+	if os.Getenv("FLORY_INTEGRATION") != "1" {
+		t.Skip("set FLORY_INTEGRATION=1 to run PostgreSQL Coordinator integration tests")
+	}
+	ctx := context.Background()
+	engine, database := openIntegration(t, ctx)
+	runID, _, pivot, _, _ := scenarioIDs(t)
+	if _, err := engine.Exec(ctx, `SELECT create_run($1)`, runID); err != nil {
+		t.Fatal(err)
+	}
+	retry := map[string]any{"max_attempts": 2, "initial_backoff_ms": 0, "multiplier": 2, "max_backoff_ms": 0}
+	appendEngineEvents(t, ctx, engine, runID, []map[string]any{
+		{"event_type": "run/start", "payload": map[string]any{"schema_version": "v1"}},
+		{"event_type": "vertex/created", "vertex_id": pivot, "payload": map[string]any{"role": "tool", "tool": "payment.capture", "input": map[string]any{"order_id": "ORDER-1"},
+			"retry_policy": retry, "txn": map[string]any{"effect_class": "irreversible", "mode": "plain"}}},
+	})
+	adapter := &recordingAdapter{scopedTo: runID}
+	service := New(database, adapter, Config{WorkerID: "unscoped-pivot-worker", LeaseDuration: time.Minute, PollInterval: time.Millisecond, SweepInterval: time.Minute}, slog.Default())
+	if err := service.ProcessOne(ctx); err != nil {
+		t.Fatalf("an unscoped pivot errored the pass instead of being recorded: %v", err)
+	}
+	if len(adapter.calls) != 0 {
+		t.Fatalf("an unscoped pivot was dispatched: %v", adapter.calls)
+	}
+	assertFailedWith(t, ctx, engine, runID, pivot, "no transaction scope")
+	if queued := countQueued(t, ctx, engine, runID, pivot); queued != 0 {
+		t.Fatalf("the unscoped pivot's row was left to be claimed again: %d rows", queued)
+	}
+}
+
 // keyedTry is a TCC reserve frozen under an explicit idempotency key.
 func keyedTry(integrationScope, vertexID, key string) map[string]any {
 	retry := map[string]any{"max_attempts": 1, "initial_backoff_ms": 0, "multiplier": 1, "max_backoff_ms": 0}

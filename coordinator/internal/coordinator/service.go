@@ -92,6 +92,12 @@ func (service *Service) ProcessOne(ctx context.Context) error {
 		return err
 	}
 	if item.Payload.Txn.EffectClass == generated.EffectIrreversible {
+		if item.ScopeID == "" {
+			// A pivot is admitted into its scope, and this one has none to be admitted into.
+			// Freeze admission refuses the shape (R10); a vertex that reached the queue without
+			// meeting it would otherwise raise from admit_pivot on every claim, forever.
+			return service.refuse(ctx, item, "an irreversible call has no transaction scope to be admitted into as its pivot", 0)
+		}
 		return service.processPivot(ctx, item)
 	}
 	return service.processRegular(ctx, item)
@@ -109,7 +115,7 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 			// and only the row's completion was lost. Running it again would be a second call.
 			return service.store.CompleteWork(ctx, service.worker, item.VertexID)
 		case owner != "":
-			return service.refuseBracketedKey(ctx, item, fmt.Sprintf("idempotency key %s already names the bracket of vertex %s", item.Payload.Txn.IdempotencyKey, owner), 0)
+			return service.refuse(ctx, item, fmt.Sprintf("idempotency key %s already names the bracket of vertex %s", item.Payload.Txn.IdempotencyKey, owner), 0)
 		}
 	}
 	if err := service.store.Append(ctx, item.RunID, vertexEvent("vertex/started", item, map[string]any{"attempt": 1})); err != nil {
@@ -166,7 +172,7 @@ func (service *Service) processRegular(ctx context.Context, item *model.WorkItem
 			// because a reservation may now exist that nothing will release -- rather than retried
 			// on every lease expiry into the same conflict.
 			service.logger.Error("a try ran but its bracket could not be recorded", "run_id", item.RunID, "vertex_id", item.VertexID, "idempotency_key", item.Payload.Txn.IdempotencyKey)
-			return service.refuseBracketedKey(ctx, item, fmt.Sprintf("idempotency key %s was bracketed by another try while this one ran; its effect is unrecorded and needs reconciliation", item.Payload.Txn.IdempotencyKey), attempts)
+			return service.refuse(ctx, item, fmt.Sprintf("idempotency key %s was bracketed by another try while this one ran; its effect is unrecorded and needs reconciliation", item.Payload.Txn.IdempotencyKey), attempts)
 		}
 		return err
 	}
@@ -180,14 +186,17 @@ func brackets(item *model.WorkItem) bool {
 	return item.ScopeID != "" && item.Payload.Txn.IdempotencyKey != "" && (mode == generated.ModeTCC || mode == generated.ModeSaga)
 }
 
-// refuseBracketedKey records a try whose idempotency key already names another bracket as a
-// permanent failure, and completes its row.
+// refuse records a call that cannot be carried through as a permanent failure, and completes its
+// row.
 //
-// Dispatching it would be a second operation under one key, and its bracket could never be
-// recorded: the append is refused by the key, the lease expires, and the row is claimed into the
-// same refusal forever while the tool is called again each time. As a failure it reaches the
-// recovery ladder like any other, and in an open scope the same append fences it.
-func (service *Service) refuseBracketedKey(ctx context.Context, item *model.WorkItem, reason string, attempts int) error {
+// Every caller holds a row that the lease would otherwise hand back forever. A try whose
+// idempotency key already names another bracket would be a second operation under one key, and its
+// bracket could never be recorded: the append is refused by the key, the lease expires, and the
+// row is claimed into the same refusal while the tool is called again each time. A pivot with no
+// scope has nothing to be admitted into, and admit_pivot raises on every claim. As a failure
+// either reaches the recovery ladder like any other, and in an open scope the same append fences
+// it.
+func (service *Service) refuse(ctx context.Context, item *model.WorkItem, reason string, attempts int) error {
 	events := []model.EventDraft{
 		vertexEvent("vertex/failed", item, map[string]any{"attempts": attempts, "error": reason, "outcome": model.OutcomePermanentFailure}),
 	}

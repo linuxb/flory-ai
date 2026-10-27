@@ -35,7 +35,7 @@ async function exists(path) {
 }
 
 /**
- * Builds the protobuf plugins the gatewayd module pins in tools.go.
+ * Builds the protobuf plugins the gatewayd module pins as `tool` dependencies in its go.mod.
  *
  * They are compiled into gatewayd/bin rather than the user's GOPATH so a checkout regenerates identical stubs without
  * a global install step.
